@@ -10,7 +10,7 @@ public static class CsvExporter
     {
         var lines = new List<string>
         {
-            "是否打印,图号,图名,图幅,比例,实际尺寸,块名,空间,文件,输出PDF,识别说明"
+            "是否打印,图号,图名,图幅,比例,实际尺寸,输出纸张,块名,空间,文件,输出PDF,识别说明"
         };
 
         foreach (var job in jobs)
@@ -22,6 +22,7 @@ public static class CsvExporter
                 Csv(job.PaperName),
                 Csv(job.ScaleText),
                 Csv(job.SizeText),
+                Csv(job.PaperSizeText),
                 Csv(job.BlockName),
                 Csv(job.SpaceName),
                 Csv(job.SourceFile),

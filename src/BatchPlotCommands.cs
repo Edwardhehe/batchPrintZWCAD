@@ -1,6 +1,4 @@
 using System;
-using System.Linq;
-using System.Windows.Forms;
 using ZwSoft.ZwCAD.ApplicationServices;
 using ZwSoft.ZwCAD.DatabaseServices;
 using ZwSoft.ZwCAD.EditorInput;
@@ -14,13 +12,14 @@ public sealed class BatchPlotCommands : IExtensionApplication
 {
     public void Initialize()
     {
+        CadMenuInstaller.Install();
     }
 
     public void Terminate()
     {
     }
 
-    [CommandMethod("BPADD")]
+    [CommandMethod("_ZBP_INTERNAL_ADD_TITLE_BLOCK")]
     public void AddTitleBlock()
     {
         var doc = CadApp.DocumentManager.MdiActiveDocument;
@@ -72,7 +71,7 @@ public sealed class BatchPlotCommands : IExtensionApplication
         editor.WriteMessage($"\n图框库: {TitleBlockLibraryStore.DefaultPath}");
     }
 
-    [CommandMethod("BPLOT")]
+    [CommandMethod("_ZBP_INTERNAL_SHOW_PANEL")]
     public void ShowBatchPlotWindow()
     {
         var doc = CadApp.DocumentManager.MdiActiveDocument;
@@ -83,6 +82,26 @@ public sealed class BatchPlotCommands : IExtensionApplication
 
         using var form = new BatchPlotForm(doc);
         CadApp.ShowModalDialog(form);
+    }
+
+    [CommandMethod("_ZBP_INTERNAL_OPEN_CONFIG")]
+    public void OpenConfigDirectory()
+    {
+        System.IO.Directory.CreateDirectory(TitleBlockLibraryStore.DefaultDirectory);
+        System.Diagnostics.Process.Start(TitleBlockLibraryStore.DefaultDirectory);
+    }
+
+    [CommandMethod("_ZBP_INTERNAL_MANAGE_LIBRARY")]
+    public void ManageLibrary()
+    {
+        using var form = new TitleBlockLibraryManagerForm();
+        CadApp.ShowModalDialog(form);
+    }
+
+    [CommandMethod("_ZBP_INTERNAL_RELOAD_MENU")]
+    public void ReloadMenu()
+    {
+        CadMenuInstaller.Install(force: true);
     }
 
     private static bool TryGetRegion(Editor editor, string firstPrompt, string secondPrompt, Matrix3d inverseBlockTransform, out LocalRectangle region)

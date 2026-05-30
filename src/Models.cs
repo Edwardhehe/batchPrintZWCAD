@@ -56,7 +56,10 @@ public sealed class PlotJob
     public string PaperName { get; set; } = "";
     public string ScaleText { get; set; } = "";
     public string SizeText { get; set; } = "";
+    public string PaperSizeText { get; set; } = "";
     public string DetectionNote { get; set; } = "";
+    public double PaperWidthMm { get; set; }
+    public double PaperHeightMm { get; set; }
     public double MinX { get; set; }
     public double MinY { get; set; }
     public double MaxX { get; set; }
@@ -70,5 +73,7 @@ public sealed class PaperDetection
     public string ScaleText { get; set; } = "未知";
     public double ScaleValue { get; set; }
     public bool IsLong { get; set; }
+    public double PaperWidthMm { get; set; }
+    public double PaperHeightMm { get; set; }
     public string Note { get; set; } = "";
 }

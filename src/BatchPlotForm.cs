@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Windows.Forms;
@@ -37,98 +38,154 @@ public sealed class BatchPlotForm : Form
     private void InitializeComponents()
     {
         Text = "批量打印";
-        Width = 1160;
-        Height = 760;
-        StartPosition = FormStartPosition.CenterParent;
+        UiLayout.ConfigureForm(this, 1320, 820, 1080, 680);
 
-        var top = new FlowLayoutPanel
+        var top = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
-            Height = 124,
+            Height = UiLayout.Scale(124),
+            ColumnCount = 1,
+            RowCount = 2,
+            Padding = new Padding(UiLayout.Scale(10), UiLayout.Scale(8), UiLayout.Scale(10), UiLayout.Scale(6)),
+            BackColor = SystemColors.Control
+        };
+        top.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.ButtonHeight() + UiLayout.Scale(12)));
+        top.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.ButtonHeight() + UiLayout.Scale(18)));
+
+        var actionRow = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
             FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight,
-            WrapContents = true,
-            Padding = new Padding(8)
+            WrapContents = false,
+            AutoScroll = true,
+            Margin = Padding.Empty
         };
 
-        var scanButton = new Button { Text = "扫描当前图", Width = 100 };
+        var settingsRow = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 8,
+            RowCount = 1,
+            Margin = Padding.Empty,
+            Padding = new Padding(0, UiLayout.Scale(6), 0, 0)
+        };
+        settingsRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(48)));
+        settingsRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        settingsRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.ButtonWidth("浏览...", 84) + UiLayout.Scale(8)));
+        settingsRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(70)));
+        settingsRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(260)));
+        settingsRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(48)));
+        settingsRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(210)));
+        settingsRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.ButtonWidth("开始打印", 104) + UiLayout.Scale(10)));
+
+        Button MakeButton(string text, int width)
+        {
+            return UiLayout.CreateButton(text, width);
+        }
+
+        Label MakeLabel(string text)
+        {
+            return new Label
+            {
+                Text = text,
+                Dock = DockStyle.Fill,
+                TextAlign = ContentAlignment.MiddleLeft,
+                Margin = Padding.Empty
+            };
+        }
+
+        var scanButton = MakeButton("扫描当前图", 108);
         scanButton.Click += (_, _) => ScanCurrentDrawing();
 
-        var addFilesButton = new Button { Text = "添加DWG", Width = 88 };
+        var addFilesButton = MakeButton("添加DWG", 92);
         addFilesButton.Click += (_, _) => AddDwgFiles();
 
-        var selectAllButton = new Button { Text = "全选", Width = 64 };
+        var selectAllButton = MakeButton("全选", 68);
         selectAllButton.Click += (_, _) => SetAllSelected(true);
 
-        var selectNoneButton = new Button { Text = "全不选", Width = 76 };
+        var selectNoneButton = MakeButton("全不选", 78);
         selectNoneButton.Click += (_, _) => SetAllSelected(false);
 
-        var invertButton = new Button { Text = "反选", Width = 64 };
+        var invertButton = MakeButton("反选", 68);
         invertButton.Click += (_, _) => InvertSelected();
 
-        var removeButton = new Button { Text = "删除选中", Width = 88 };
+        var removeButton = MakeButton("删除选中", 92);
         removeButton.Click += (_, _) => RemoveGridSelection();
 
-        var refreshNameButton = new Button { Text = "刷新文件名", Width = 100 };
+        var refreshNameButton = MakeButton("刷新文件名", 104);
         refreshNameButton.Click += (_, _) => SortAndRefreshOutputPaths();
 
-        var exportCsvButton = new Button { Text = "导出清单", Width = 88 };
+        var exportCsvButton = MakeButton("导出清单", 92);
         exportCsvButton.Click += (_, _) => ExportCsv();
 
-        var openLogButton = new Button { Text = "打开日志", Width = 88 };
+        var openLogButton = MakeButton("打开日志", 92);
         openLogButton.Click += (_, _) => OpenLastLog();
 
-        var chooseOutputButton = new Button { Text = "输出目录", Width = 88 };
+        var manageLibraryButton = MakeButton("图框库管理", 104);
+        manageLibraryButton.Click += (_, _) => ManageLibrary();
+
+        var chooseOutputButton = MakeButton("浏览...", 84);
         chooseOutputButton.Click += (_, _) => ChooseOutputDirectory();
 
-        var importButton = new Button { Text = "导入图框库", Width = 100 };
+        var importButton = MakeButton("导入图框库", 104);
         importButton.Click += (_, _) => ImportLibrary();
 
-        var exportButton = new Button { Text = "导出图框库", Width = 100 };
+        var exportButton = MakeButton("导出图框库", 104);
         exportButton.Click += (_, _) => ExportLibrary();
 
         _printButton.Text = "开始打印";
-        _printButton.Width = 100;
+        _printButton.Width = UiLayout.ButtonWidth(_printButton.Text, 104);
+        _printButton.Height = UiLayout.ButtonHeight();
+        _printButton.Dock = DockStyle.Fill;
+        _printButton.Margin = new Padding(UiLayout.Scale(8), UiLayout.Scale(2), 0, UiLayout.Scale(6));
         _printButton.Click += (_, _) => PrintSelectedJobs();
 
-        _outputDirectory.Width = 360;
+        _outputDirectory.Dock = DockStyle.Fill;
+        _outputDirectory.Margin = new Padding(0, UiLayout.Scale(4), UiLayout.Scale(8), UiLayout.Scale(8));
         _outputDirectory.Text = GetDefaultOutputDirectory();
 
-        _deviceCombo.Width = 230;
-        _styleCombo.Width = 190;
+        _deviceCombo.Dock = DockStyle.Fill;
+        _deviceCombo.Margin = new Padding(0, UiLayout.Scale(3), UiLayout.Scale(10), UiLayout.Scale(8));
+        _deviceCombo.DropDownStyle = ComboBoxStyle.DropDownList;
 
-        top.Controls.Add(scanButton);
-        top.Controls.Add(addFilesButton);
-        top.Controls.Add(selectAllButton);
-        top.Controls.Add(selectNoneButton);
-        top.Controls.Add(invertButton);
-        top.Controls.Add(removeButton);
-        top.Controls.Add(refreshNameButton);
-        top.Controls.Add(exportCsvButton);
-        top.Controls.Add(openLogButton);
-        top.Controls.Add(new Label { Text = "输出:", AutoSize = true, Padding = new Padding(8, 8, 0, 0) });
-        top.Controls.Add(_outputDirectory);
-        top.Controls.Add(chooseOutputButton);
-        top.Controls.Add(new Label { Text = "打印机:", AutoSize = true, Padding = new Padding(8, 8, 0, 0) });
-        top.Controls.Add(_deviceCombo);
-        top.Controls.Add(new Label { Text = "CTB:", AutoSize = true, Padding = new Padding(8, 8, 0, 0) });
-        top.Controls.Add(_styleCombo);
-        top.Controls.Add(_printButton);
-        top.Controls.Add(importButton);
-        top.Controls.Add(exportButton);
+        _styleCombo.Dock = DockStyle.Fill;
+        _styleCombo.Margin = new Padding(0, UiLayout.Scale(3), 0, UiLayout.Scale(8));
+        _styleCombo.DropDownStyle = ComboBoxStyle.DropDownList;
 
-        _grid.Dock = DockStyle.Fill;
-        _grid.AutoGenerateColumns = false;
-        _grid.AllowUserToAddRows = false;
-        _grid.AllowUserToDeleteRows = false;
-        _grid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
-        _grid.MultiSelect = true;
+        actionRow.Controls.Add(scanButton);
+        actionRow.Controls.Add(addFilesButton);
+        actionRow.Controls.Add(selectAllButton);
+        actionRow.Controls.Add(selectNoneButton);
+        actionRow.Controls.Add(invertButton);
+        actionRow.Controls.Add(removeButton);
+        actionRow.Controls.Add(refreshNameButton);
+        actionRow.Controls.Add(exportCsvButton);
+        actionRow.Controls.Add(openLogButton);
+        actionRow.Controls.Add(manageLibraryButton);
+        actionRow.Controls.Add(importButton);
+        actionRow.Controls.Add(exportButton);
+
+        settingsRow.Controls.Add(MakeLabel("输出:"), 0, 0);
+        settingsRow.Controls.Add(_outputDirectory, 1, 0);
+        settingsRow.Controls.Add(chooseOutputButton, 2, 0);
+        settingsRow.Controls.Add(MakeLabel("打印机:"), 3, 0);
+        settingsRow.Controls.Add(_deviceCombo, 4, 0);
+        settingsRow.Controls.Add(MakeLabel("CTB:"), 5, 0);
+        settingsRow.Controls.Add(_styleCombo, 6, 0);
+        settingsRow.Controls.Add(_printButton, 7, 0);
+
+        top.Controls.Add(actionRow, 0, 0);
+        top.Controls.Add(settingsRow, 0, 1);
+
+        UiLayout.StyleGrid(_grid, Font);
         _grid.DataSource = _jobs;
         AddColumns();
 
         _statusLabel.Dock = DockStyle.Bottom;
-        _statusLabel.Height = 26;
-        _statusLabel.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
-        _statusLabel.Padding = new Padding(8, 0, 0, 0);
+        _statusLabel.Height = Math.Max(UiLayout.Scale(28), Font.Height + UiLayout.Scale(10));
+        _statusLabel.TextAlign = ContentAlignment.MiddleLeft;
+        _statusLabel.Padding = new Padding(UiLayout.Scale(8), 0, 0, 0);
+        _statusLabel.BackColor = SystemColors.Control;
 
         Controls.Add(_grid);
         Controls.Add(_statusLabel);
@@ -137,17 +194,18 @@ public sealed class BatchPlotForm : Form
 
     private void AddColumns()
     {
-        _grid.Columns.Add(new DataGridViewCheckBoxColumn { DataPropertyName = nameof(PlotJob.Selected), HeaderText = "打印", Width = 52 });
-        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(PlotJob.DrawingNumber), HeaderText = "图号", Width = 140 });
-        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(PlotJob.Title), HeaderText = "图名", Width = 220 });
-        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(PlotJob.PaperName), HeaderText = "图幅", Width = 70 });
-        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(PlotJob.ScaleText), HeaderText = "比例", Width = 70 });
-        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(PlotJob.SizeText), HeaderText = "实际尺寸", Width = 130 });
-        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(PlotJob.BlockName), HeaderText = "块名", Width = 130 });
-        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(PlotJob.SpaceName), HeaderText = "空间", Width = 100 });
-        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(PlotJob.SourceFile), HeaderText = "文件", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill });
-        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(PlotJob.OutputPath), HeaderText = "输出PDF", Width = 260 });
-        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(PlotJob.DetectionNote), HeaderText = "识别说明", Width = 200 });
+        _grid.Columns.Add(new DataGridViewCheckBoxColumn { DataPropertyName = nameof(PlotJob.Selected), HeaderText = "打印", Width = UiLayout.Scale(58) });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(PlotJob.DrawingNumber), HeaderText = "图号", Width = UiLayout.Scale(160) });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(PlotJob.Title), HeaderText = "图名", Width = UiLayout.Scale(240) });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(PlotJob.PaperName), HeaderText = "图幅", Width = UiLayout.Scale(82) });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(PlotJob.ScaleText), HeaderText = "比例", Width = UiLayout.Scale(82) });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(PlotJob.SizeText), HeaderText = "实际尺寸", Width = UiLayout.Scale(150) });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(PlotJob.PaperSizeText), HeaderText = "输出纸张", Width = UiLayout.Scale(150) });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(PlotJob.BlockName), HeaderText = "块名", Width = UiLayout.Scale(150) });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(PlotJob.SpaceName), HeaderText = "空间", Width = UiLayout.Scale(110) });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(PlotJob.SourceFile), HeaderText = "文件", Width = UiLayout.Scale(320) });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(PlotJob.OutputPath), HeaderText = "输出PDF", Width = UiLayout.Scale(360) });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(PlotJob.DetectionNote), HeaderText = "识别说明", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill, MinimumWidth = UiLayout.Scale(220) });
     }
 
     private void LoadPlotOptions()
@@ -216,7 +274,8 @@ public sealed class BatchPlotForm : Form
         var library = TitleBlockLibraryStore.Load();
         if (library.Blocks.Count == 0)
         {
-            MessageBox.Show("图框库为空。请先运行 BPADD 新增图框块。", "批量打印", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show("图框库为空。请先从“批量打印”菜单点击“新增图框”。", "批量打印", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            RefreshStatus();
             return;
         }
 
@@ -421,6 +480,15 @@ public sealed class BatchPlotForm : Form
         CsvExporter.ExportJobs(dialog.FileName, _jobs);
         AppendLog("INFO", "导出清单 " + dialog.FileName);
         MessageBox.Show("清单已导出。", "批量打印", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+
+    private void ManageLibrary()
+    {
+        using var form = new TitleBlockLibraryManagerForm();
+        if (form.ShowDialog(this) == DialogResult.OK)
+        {
+            ScanCurrentDrawing();
+        }
     }
 
     private void OpenLastLog()

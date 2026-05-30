@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using ZwSoft.ZwCAD.ApplicationServices;
 using ZwSoft.ZwCAD.DatabaseServices;
 using ZwSoft.ZwCAD.Geometry;
@@ -11,6 +13,12 @@ namespace ZwcadBatchPlot;
 
 public static class PlotterService
 {
+    private sealed class MediaSelection
+    {
+        public string Name { get; set; } = "";
+        public bool NeedsRotation { get; set; }
+    }
+
     public static void Plot(PlotJob job, string deviceName, string styleSheet, Document currentDocument)
     {
         var doc = GetDocumentForJob(job, currentDocument, out var shouldClose);
@@ -58,11 +66,17 @@ public static class PlotterService
 
         var validator = PlotSettingsValidator.Current;
         validator.SetPlotConfigurationName(plotSettings, deviceName, null);
+        validator.SetPlotPaperUnits(plotSettings, PlotPaperUnit.Millimeters);
         validator.RefreshLists(plotSettings);
-        var mediaName = SelectMediaName(validator, plotSettings, job.PaperName);
-        if (!string.IsNullOrWhiteSpace(mediaName))
+        var media = SelectMedia(validator, plotSettings, job);
+        if (media != null)
         {
-            validator.SetCanonicalMediaName(plotSettings, mediaName);
+            validator.SetCanonicalMediaName(plotSettings, media.Name);
+        }
+        else
+        {
+            throw new InvalidOperationException(
+                $"未找到匹配 {job.PaperSizeText} 的 PDF 纸张。请在中望 PDF 打印机中添加这个自定义纸张后再打印。");
         }
 
         if (!string.IsNullOrWhiteSpace(styleSheet))
@@ -75,8 +89,7 @@ public static class PlotterService
         validator.SetUseStandardScale(plotSettings, true);
         validator.SetStdScaleType(plotSettings, StdScaleType.ScaleToFit);
         validator.SetPlotCentered(plotSettings, true);
-        validator.SetPlotRotation(plotSettings, DetectRotation(job));
-        validator.SetPlotPaperUnits(plotSettings, PlotPaperUnit.Millimeters);
+        validator.SetPlotRotation(plotSettings, DetectRotation(media));
 
         var plotInfo = new PlotInfo
         {
@@ -144,24 +157,93 @@ public static class PlotterService
         return (Layout)tr.GetObject(LayoutManager.Current.GetLayoutId(LayoutManager.Current.CurrentLayout), OpenMode.ForRead);
     }
 
-    private static string? SelectMediaName(PlotSettingsValidator validator, PlotSettings settings, string paperName)
+    private static MediaSelection? SelectMedia(PlotSettingsValidator validator, PlotSettings settings, PlotJob job)
     {
-        var basePaper = (paperName ?? "").Replace("+", "");
-        if (string.IsNullOrWhiteSpace(basePaper))
+        var media = validator.GetCanonicalMediaNameList(settings).Cast<string>().ToList();
+        if (media.Count == 0)
         {
             return null;
         }
 
-        var media = validator.GetCanonicalMediaNameList(settings).Cast<string>().ToList();
-        return media.FirstOrDefault(x => x.IndexOf(basePaper, StringComparison.OrdinalIgnoreCase) >= 0)
-            ?? media.FirstOrDefault(x => x.IndexOf(basePaper.Replace("A", "ISO_A"), StringComparison.OrdinalIgnoreCase) >= 0)
-            ?? media.FirstOrDefault();
+        var exact = FindByPhysicalSize(media, job.PaperWidthMm, job.PaperHeightMm, toleranceMm: 3);
+        if (exact != null)
+        {
+            return exact;
+        }
+
+        if (job.PaperName.EndsWith("+", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var basePaper = (job.PaperName ?? "").Replace("+", "");
+        var named = media.FirstOrDefault(x => x.IndexOf(basePaper, StringComparison.OrdinalIgnoreCase) >= 0)
+            ?? media.FirstOrDefault(x => x.IndexOf(basePaper.Replace("A", "ISO_A"), StringComparison.OrdinalIgnoreCase) >= 0);
+        return named == null ? null : new MediaSelection { Name = named, NeedsRotation = false };
     }
 
-    private static PlotRotation DetectRotation(PlotJob job)
+    private static MediaSelection? FindByPhysicalSize(IEnumerable<string> mediaNames, double widthMm, double heightMm, double toleranceMm)
     {
-        var width = Math.Abs(job.MaxX - job.MinX);
-        var height = Math.Abs(job.MaxY - job.MinY);
-        return width >= height ? PlotRotation.Degrees090 : PlotRotation.Degrees000;
+        if (widthMm <= 0 || heightMm <= 0)
+        {
+            return null;
+        }
+
+        var parsed = mediaNames
+            .Select(name => new { Name = name, Size = TryParseMediaSize(name) })
+            .Where(x => x.Size != null)
+            .Select(x => new
+            {
+                x.Name,
+                DirectError = DirectSizeError(x.Size!.Value.Width, x.Size.Value.Height, widthMm, heightMm),
+                RotatedError = DirectSizeError(x.Size.Value.Width, x.Size.Value.Height, heightMm, widthMm)
+            })
+            .ToList();
+
+        var direct = parsed
+            .Where(x => x.DirectError <= toleranceMm)
+            .OrderBy(x => x.DirectError)
+            .Select(x => new MediaSelection { Name = x.Name, NeedsRotation = false })
+            .FirstOrDefault();
+        if (direct != null)
+        {
+            return direct;
+        }
+
+        return parsed
+            .Where(x => x.RotatedError <= toleranceMm)
+            .OrderBy(x => x.RotatedError)
+            .Select(x => new MediaSelection { Name = x.Name, NeedsRotation = true })
+            .FirstOrDefault();
+    }
+
+    private static (double Width, double Height)? TryParseMediaSize(string mediaName)
+    {
+        var match = Regex.Match(mediaName, @"(?<w>\d+(?:\.\d+)?)\s*[xX]\s*(?<h>\d+(?:\.\d+)?)\s*(?<unit>MM|毫米|IN|英寸)?", RegexOptions.IgnoreCase);
+        if (!match.Success)
+        {
+            return null;
+        }
+
+        var width = double.Parse(match.Groups["w"].Value, System.Globalization.CultureInfo.InvariantCulture);
+        var height = double.Parse(match.Groups["h"].Value, System.Globalization.CultureInfo.InvariantCulture);
+        var unit = match.Groups["unit"].Value.ToUpperInvariant();
+        if (unit is "IN" or "英寸")
+        {
+            width *= 25.4;
+            height *= 25.4;
+        }
+
+        return (width, height);
+    }
+
+    private static double DirectSizeError(double mediaWidth, double mediaHeight, double targetWidth, double targetHeight)
+    {
+        return Math.Max(Math.Abs(mediaWidth - targetWidth), Math.Abs(mediaHeight - targetHeight));
+    }
+
+    private static PlotRotation DetectRotation(MediaSelection? media)
+    {
+        return media?.NeedsRotation == true ? PlotRotation.Degrees090 : PlotRotation.Degrees000;
     }
 }

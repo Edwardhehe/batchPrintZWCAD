@@ -1,3 +1,10 @@
 bin/
 bin-dev/
+bin-dpi/
+bin-menu/
+bin-paperlib/
+bin-paperfix/
+bin-rotatefix/
+bin-ui/
+bin-visible/
 obj/
