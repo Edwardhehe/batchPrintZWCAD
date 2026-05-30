@@ -30,3 +30,12 @@ bin-textpriorityfix/
 bin-ui/
 bin-visible/
 obj/
+release/
+.vs/
+*.user
+*.suo
+*.zip
+*.log
+TitleBlockLibrary.json
+Settings.json
+Logs/

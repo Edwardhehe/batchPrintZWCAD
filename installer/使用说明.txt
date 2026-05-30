@@ -1,0 +1,20 @@
+中望CAD批量打印插件
+
+安装:
+1. 关闭中望CAD。
+2. 双击“安装.cmd”。
+3. 重新打开中望CAD，菜单栏会出现“批量打印”。
+
+卸载:
+1. 关闭中望CAD。
+2. 双击“卸载.cmd”。
+3. 卸载只删除自动加载和插件文件，不删除图框库、设置、日志。
+
+手动加载:
+如果不想安装自动加载，也可以在中望CAD里 NETLOAD 加载 BatchPlotter.dll。
+
+用户数据位置:
+%APPDATA%\ZwcadBatchPlot
+
+插件安装位置:
+%LOCALAPPDATA%\ZwcadBatchPlot\Plugin

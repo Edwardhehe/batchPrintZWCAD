@@ -97,6 +97,56 @@ public sealed class BatchPlotCommands : IExtensionApplication
         ReloadMenu();
     }
 
+    [CommandMethod("ZBP_INSTALL_AUTOLOAD")]
+    public void InstallAutoload()
+    {
+        try
+        {
+            var roots = AutoloadManager.Install();
+            MessageBox.Show(
+                "已安装自动加载。\n\n下次启动中望CAD会自动加载批量打印插件。\n\n写入位置:\n" + string.Join("\n", roots),
+                "批量打印",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+        catch (System.Exception ex)
+        {
+            MessageBox.Show("安装自动加载失败: " + ex.Message, "批量打印", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    [CommandMethod("_ZBP_INTERNAL_INSTALL_AUTOLOAD")]
+    public void InstallAutoloadLegacy()
+    {
+        InstallAutoload();
+    }
+
+    [CommandMethod("ZBP_UNINSTALL_AUTOLOAD")]
+    public void UninstallAutoload()
+    {
+        try
+        {
+            var removed = AutoloadManager.Uninstall();
+            MessageBox.Show(
+                removed > 0
+                    ? "已卸载自动加载。\n\n当前已加载的插件会在本次CAD会话继续可用，关闭CAD后不会再自动加载。"
+                    : "没有找到已安装的自动加载项。",
+                "批量打印",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+        catch (System.Exception ex)
+        {
+            MessageBox.Show("卸载自动加载失败: " + ex.Message, "批量打印", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    [CommandMethod("_ZBP_INTERNAL_UNINSTALL_AUTOLOAD")]
+    public void UninstallAutoloadLegacy()
+    {
+        UninstallAutoload();
+    }
+
     private static void AddTitleBlockCore()
     {
         var doc = CadApp.DocumentManager.MdiActiveDocument;
