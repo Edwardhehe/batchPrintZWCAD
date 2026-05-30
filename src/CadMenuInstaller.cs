@@ -58,6 +58,7 @@ public static class CadMenuInstaller
             AddMenuItem(menu, "图框库管理", "_ZBP_INTERNAL_MANAGE_LIBRARY ");
             AddMenuItem(menu, "批量打印", "_ZBP_INTERNAL_SHOW_PANEL ");
             AddSeparator(menu);
+            AddMenuItem(menu, "设置", "_ZBP_INTERNAL_SETTINGS ");
             AddMenuItem(menu, "打开配置目录", "_ZBP_INTERNAL_OPEN_CONFIG ");
             AddMenuItem(menu, "刷新菜单", "_ZBP_INTERNAL_RELOAD_MENU ");
 
@@ -113,6 +114,7 @@ public static class CadMenuInstaller
         AddToolbarButton(toolbar, "新增图框", "学习图框块", "_ZBP_INTERNAL_ADD_TITLE_BLOCK ");
         AddToolbarButton(toolbar, "图框库管理", "管理图框信息库", "_ZBP_INTERNAL_MANAGE_LIBRARY ");
         AddToolbarButton(toolbar, "批量打印", "打开批量打印窗口", "_ZBP_INTERNAL_SHOW_PANEL ");
+        AddToolbarButton(toolbar, "设置", "打开批量打印设置", "_ZBP_INTERNAL_SETTINGS ");
         TrySetProperty(toolbar, "Visible", true);
     }
 

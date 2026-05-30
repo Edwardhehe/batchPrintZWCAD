@@ -45,6 +45,13 @@ public sealed class BatchPlotCommands : IExtensionApplication
         var blockName = CadTextExtractor.GetBlockName(blockRef, tr);
         var inverse = blockRef.BlockTransform.Inverse();
 
+        var hasPrintRegion = TryGetOptionalRegion(
+            editor,
+            "\n框选图框打印外边界第一个角点，或回车使用块外包框: ",
+            "\n框选图框打印外边界对角点: ",
+            inverse,
+            out var printRegion);
+
         if (!TryGetRegion(editor, "\n框选图名区域第一个角点: ", "\n框选图名区域对角点: ", inverse, out var titleRegion))
         {
             return;
@@ -58,6 +65,8 @@ public sealed class BatchPlotCommands : IExtensionApplication
         var definition = new TitleBlockDefinition
         {
             BlockName = blockName,
+            HasPrintRegion = hasPrintRegion,
+            PrintRegion = printRegion,
             TitleRegion = titleRegion,
             DrawingNumberRegion = numberRegion,
             CreatedAt = DateTime.Now,
@@ -68,6 +77,7 @@ public sealed class BatchPlotCommands : IExtensionApplication
         tr.Commit();
 
         editor.WriteMessage($"\n已保存图框块: {blockName}");
+        editor.WriteMessage(hasPrintRegion ? "\n已保存图框打印边界。" : "\n未保存打印边界，打印时使用块外包框。");
         editor.WriteMessage($"\n图框库: {TitleBlockLibraryStore.DefaultPath}");
     }
 
@@ -98,6 +108,13 @@ public sealed class BatchPlotCommands : IExtensionApplication
         CadApp.ShowModalDialog(form);
     }
 
+    [CommandMethod("_ZBP_INTERNAL_SETTINGS")]
+    public void ShowSettings()
+    {
+        using var form = new SettingsForm();
+        CadApp.ShowModalDialog(form);
+    }
+
     [CommandMethod("_ZBP_INTERNAL_RELOAD_MENU")]
     public void ReloadMenu()
     {
@@ -108,6 +125,37 @@ public sealed class BatchPlotCommands : IExtensionApplication
     {
         region = new LocalRectangle();
         var first = editor.GetPoint(new PromptPointOptions(firstPrompt));
+        if (first.Status != PromptStatus.OK)
+        {
+            return false;
+        }
+
+        var cornerOptions = new PromptCornerOptions(secondPrompt, first.Value);
+        var second = editor.GetCorner(cornerOptions);
+        if (second.Status != PromptStatus.OK)
+        {
+            return false;
+        }
+
+        var p1 = first.Value.TransformBy(inverseBlockTransform);
+        var p2 = second.Value.TransformBy(inverseBlockTransform);
+        region = LocalRectangle.FromPoints(p1.X, p1.Y, p2.X, p2.Y);
+        return true;
+    }
+
+    private static bool TryGetOptionalRegion(Editor editor, string firstPrompt, string secondPrompt, Matrix3d inverseBlockTransform, out LocalRectangle region)
+    {
+        region = new LocalRectangle();
+        var firstOptions = new PromptPointOptions(firstPrompt)
+        {
+            AllowNone = true
+        };
+        var first = editor.GetPoint(firstOptions);
+        if (first.Status == PromptStatus.None)
+        {
+            return false;
+        }
+
         if (first.Status != PromptStatus.OK)
         {
             return false;

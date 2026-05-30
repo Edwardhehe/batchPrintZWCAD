@@ -89,6 +89,11 @@ public sealed class TitleBlockLibraryManagerForm : Form
     private void AddColumns()
     {
         _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.BlockName), HeaderText = "块名", Width = UiLayout.Scale(190) });
+        _grid.Columns.Add(new DataGridViewCheckBoxColumn { DataPropertyName = nameof(TitleBlockRow.HasPrintRegion), HeaderText = "有打印边界", Width = UiLayout.Scale(96) });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.PrintMinX), HeaderText = "边界MinX", Width = UiLayout.Scale(96) });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.PrintMinY), HeaderText = "边界MinY", Width = UiLayout.Scale(96) });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.PrintMaxX), HeaderText = "边界MaxX", Width = UiLayout.Scale(96) });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.PrintMaxY), HeaderText = "边界MaxY", Width = UiLayout.Scale(96) });
         _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.TitleMinX), HeaderText = "图名MinX", Width = UiLayout.Scale(96) });
         _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.TitleMinY), HeaderText = "图名MinY", Width = UiLayout.Scale(96) });
         _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.TitleMaxX), HeaderText = "图名MaxX", Width = UiLayout.Scale(96) });
@@ -212,6 +217,11 @@ public sealed class TitleBlockLibraryManagerForm : Form
     private sealed class TitleBlockRow
     {
         public string BlockName { get; set; } = "";
+        public bool HasPrintRegion { get; set; }
+        public double PrintMinX { get; set; }
+        public double PrintMinY { get; set; }
+        public double PrintMaxX { get; set; }
+        public double PrintMaxY { get; set; }
         public double TitleMinX { get; set; }
         public double TitleMinY { get; set; }
         public double TitleMaxX { get; set; }
@@ -228,6 +238,11 @@ public sealed class TitleBlockLibraryManagerForm : Form
             return new TitleBlockRow
             {
                 BlockName = definition.BlockName,
+                HasPrintRegion = definition.HasPrintRegion,
+                PrintMinX = definition.PrintRegion.MinX,
+                PrintMinY = definition.PrintRegion.MinY,
+                PrintMaxX = definition.PrintRegion.MaxX,
+                PrintMaxY = definition.PrintRegion.MaxY,
                 TitleMinX = definition.TitleRegion.MinX,
                 TitleMinY = definition.TitleRegion.MinY,
                 TitleMaxX = definition.TitleRegion.MaxX,
@@ -246,6 +261,8 @@ public sealed class TitleBlockLibraryManagerForm : Form
             return new TitleBlockDefinition
             {
                 BlockName = BlockName.Trim(),
+                HasPrintRegion = HasPrintRegion,
+                PrintRegion = LocalRectangle.FromPoints(PrintMinX, PrintMinY, PrintMaxX, PrintMaxY),
                 TitleRegion = LocalRectangle.FromPoints(TitleMinX, TitleMinY, TitleMaxX, TitleMaxY),
                 DrawingNumberRegion = LocalRectangle.FromPoints(NumberMinX, NumberMinY, NumberMaxX, NumberMaxY),
                 CreatedAt = CreatedAt == default ? DateTime.Now : CreatedAt,

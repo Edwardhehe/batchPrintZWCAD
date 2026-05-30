@@ -9,6 +9,14 @@ public sealed class AppSettings
     public string LastOutputDirectory { get; set; } = "";
     public string LastPlotDevice { get; set; } = "";
     public string LastStyleSheet { get; set; } = "";
+    public bool RememberLastOutputDirectory { get; set; } = true;
+    public string DefaultOutputSubfolder { get; set; } = "PDF";
+    public bool AutoScanCurrentDrawing { get; set; } = true;
+    public double PaperMatchToleranceMm { get; set; } = 3;
+    public bool AllowStandardPaperNameFallback { get; set; } = true;
+    public bool ShowPlotProgress { get; set; } = true;
+    public bool AddSequenceWhenPdfExists { get; set; } = false;
+    public bool OpenExternalDwgForPlot { get; set; } = true;
 }
 
 public static class AppSettingsStore
@@ -26,7 +34,7 @@ public static class AppSettingsStore
             }
 
             var json = File.ReadAllText(Path);
-            return JsonConvert.DeserializeObject<AppSettings>(json) ?? new AppSettings();
+            return Normalize(JsonConvert.DeserializeObject<AppSettings>(json) ?? new AppSettings());
         }
         catch
         {
@@ -39,5 +47,25 @@ public static class AppSettingsStore
         Directory.CreateDirectory(TitleBlockLibraryStore.DefaultDirectory);
         var json = JsonConvert.SerializeObject(settings, Formatting.Indented);
         File.WriteAllText(Path, json);
+    }
+
+    public static AppSettings Default()
+    {
+        return new AppSettings();
+    }
+
+    private static AppSettings Normalize(AppSettings settings)
+    {
+        if (string.IsNullOrWhiteSpace(settings.DefaultOutputSubfolder))
+        {
+            settings.DefaultOutputSubfolder = "PDF";
+        }
+
+        if (settings.PaperMatchToleranceMm <= 0)
+        {
+            settings.PaperMatchToleranceMm = 3;
+        }
+
+        return settings;
     }
 }

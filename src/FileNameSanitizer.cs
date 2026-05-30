@@ -21,11 +21,16 @@ public static class FileNameSanitizer
 
     public static string MakeUnique(string directory, string fileNameWithoutExtension, ISet<string>? reservedPaths)
     {
+        return MakeUnique(directory, fileNameWithoutExtension, reservedPaths, true);
+    }
+
+    public static string MakeUnique(string directory, string fileNameWithoutExtension, ISet<string>? reservedPaths, bool avoidExistingFile)
+    {
         Directory.CreateDirectory(directory);
         var clean = Clean(fileNameWithoutExtension);
         var path = Path.Combine(directory, clean + ".pdf");
         var index = 1;
-        while (File.Exists(path) || reservedPaths?.Contains(path) == true)
+        while ((avoidExistingFile && File.Exists(path)) || reservedPaths?.Contains(path) == true)
         {
             path = Path.Combine(directory, $"{clean}_{index}.pdf");
             index++;

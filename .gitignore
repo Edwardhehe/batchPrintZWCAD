@@ -1,10 +1,17 @@
 bin/
+bin-boundary/
+bin-crossscan/
+bin-crossfix/
 bin-dev/
 bin-dpi/
+bin-layoutfix/
+bin-layoutwindow/
 bin-menu/
 bin-paperlib/
 bin-paperfix/
+bin-plotfix/
 bin-rotatefix/
+bin-settings/
 bin-ui/
 bin-visible/
 obj/

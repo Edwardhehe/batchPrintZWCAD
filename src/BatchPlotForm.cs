@@ -32,7 +32,14 @@ public sealed class BatchPlotForm : Form
         _settings = AppSettingsStore.Load();
         InitializeComponents();
         LoadPlotOptions();
-        ScanCurrentDrawing();
+        if (_settings.AutoScanCurrentDrawing)
+        {
+            ScanCurrentDrawing();
+        }
+        else
+        {
+            RefreshStatus();
+        }
     }
 
     private void InitializeComponents()
@@ -124,6 +131,9 @@ public sealed class BatchPlotForm : Form
         var manageLibraryButton = MakeButton("图框库管理", 104);
         manageLibraryButton.Click += (_, _) => ManageLibrary();
 
+        var settingsButton = MakeButton("设置", 72);
+        settingsButton.Click += (_, _) => ShowSettings();
+
         var chooseOutputButton = MakeButton("浏览...", 84);
         chooseOutputButton.Click += (_, _) => ChooseOutputDirectory();
 
@@ -162,6 +172,7 @@ public sealed class BatchPlotForm : Form
         actionRow.Controls.Add(exportCsvButton);
         actionRow.Controls.Add(openLogButton);
         actionRow.Controls.Add(manageLibraryButton);
+        actionRow.Controls.Add(settingsButton);
         actionRow.Controls.Add(importButton);
         actionRow.Controls.Add(exportButton);
 
@@ -342,18 +353,10 @@ public sealed class BatchPlotForm : Form
             return TitleBlockScanner.Scan(_currentDocument, library);
         }
 
-        var doc = CadApp.DocumentManager.Open(file, false);
-        try
-        {
-            using (doc.LockDocument())
-            {
-                return TitleBlockScanner.Scan(doc, library);
-            }
-        }
-        finally
-        {
-            doc.CloseAndDiscard();
-        }
+        using var db = new Database(false, true);
+        db.ReadDwgFile(file, FileOpenMode.OpenForReadAndAllShare, true, "");
+        db.CloseInput(true);
+        return TitleBlockScanner.Scan(db, library, file);
     }
 
     private void SortAndRefreshOutputPaths()
@@ -422,12 +425,12 @@ public sealed class BatchPlotForm : Form
     private string BuildOutputPath(PlotJob job, ISet<string> reservedPaths)
     {
         var baseName = $"{job.DrawingNumber}_{job.Title}";
-        return FileNameSanitizer.MakeUnique(_outputDirectory.Text, baseName, reservedPaths);
+        return FileNameSanitizer.MakeUnique(_outputDirectory.Text, baseName, reservedPaths, _settings.AddSequenceWhenPdfExists);
     }
 
     private string GetDefaultOutputDirectory()
     {
-        if (!string.IsNullOrWhiteSpace(_settings.LastOutputDirectory))
+        if (_settings.RememberLastOutputDirectory && !string.IsNullOrWhiteSpace(_settings.LastOutputDirectory))
         {
             return _settings.LastOutputDirectory;
         }
@@ -437,7 +440,7 @@ public sealed class BatchPlotForm : Form
             ? Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments)
             : Path.GetDirectoryName(file) ?? Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
 
-        return Path.Combine(directory, "PDF");
+        return Path.Combine(directory, _settings.DefaultOutputSubfolder);
     }
 
     private void ChooseOutputDirectory()
@@ -488,6 +491,25 @@ public sealed class BatchPlotForm : Form
         if (form.ShowDialog(this) == DialogResult.OK)
         {
             ScanCurrentDrawing();
+        }
+    }
+
+    private void ShowSettings()
+    {
+        using var form = new SettingsForm();
+        if (form.ShowDialog(this) == DialogResult.OK)
+        {
+            var updated = AppSettingsStore.Load();
+            _settings.RememberLastOutputDirectory = updated.RememberLastOutputDirectory;
+            _settings.DefaultOutputSubfolder = updated.DefaultOutputSubfolder;
+            _settings.AutoScanCurrentDrawing = updated.AutoScanCurrentDrawing;
+            _settings.PaperMatchToleranceMm = updated.PaperMatchToleranceMm;
+            _settings.AllowStandardPaperNameFallback = updated.AllowStandardPaperNameFallback;
+            _settings.ShowPlotProgress = updated.ShowPlotProgress;
+            _settings.AddSequenceWhenPdfExists = updated.AddSequenceWhenPdfExists;
+            _settings.OpenExternalDwgForPlot = updated.OpenExternalDwgForPlot;
+            SortAndRefreshOutputPaths();
+            AppendLog("INFO", "设置已更新。");
         }
     }
 
@@ -558,6 +580,12 @@ public sealed class BatchPlotForm : Form
         selected = _jobs.Where(x => x.Selected).ToList();
 
         _printButton.Enabled = false;
+        var wasVisible = Visible;
+        if (_settings.OpenExternalDwgForPlot)
+        {
+            Hide();
+            System.Windows.Forms.Application.DoEvents();
+        }
         try
         {
             var printed = 0;
@@ -567,7 +595,7 @@ public sealed class BatchPlotForm : Form
                 try
                 {
                     AppendLog("INFO", $"开始打印 {job.DrawingNumber}_{job.Title} -> {job.OutputPath}");
-                    PlotterService.Plot(job, device, style, _currentDocument);
+                    PlotterService.Plot(job, device, style, _currentDocument, _settings);
                     AppendLog("INFO", $"打印成功 {job.OutputPath}");
                     printed++;
                 }
@@ -575,6 +603,7 @@ public sealed class BatchPlotForm : Form
                 {
                     var message = $"{job.DrawingNumber}_{job.Title}: {ex.Message}";
                     failed.Add(message);
+                    AppendLog("ERROR", ex.ToString());
                     AppendLog("ERROR", "打印失败，" + message);
                 }
             }
@@ -594,6 +623,12 @@ public sealed class BatchPlotForm : Form
         }
         finally
         {
+            if (wasVisible && !Visible)
+            {
+                Show();
+                Activate();
+            }
+
             _printButton.Enabled = true;
             RefreshStatus();
         }

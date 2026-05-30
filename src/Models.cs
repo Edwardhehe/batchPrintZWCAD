@@ -6,6 +6,8 @@ namespace ZwcadBatchPlot;
 public sealed class TitleBlockDefinition
 {
     public string BlockName { get; set; } = "";
+    public bool HasPrintRegion { get; set; }
+    public LocalRectangle PrintRegion { get; set; } = new();
     public LocalRectangle TitleRegion { get; set; } = new();
     public LocalRectangle DrawingNumberRegion { get; set; } = new();
     public DateTime CreatedAt { get; set; } = DateTime.Now;
@@ -50,7 +52,9 @@ public sealed class PlotJob
     public bool Selected { get; set; } = true;
     public string SourceFile { get; set; } = "";
     public string SpaceName { get; set; } = "";
+    public bool IsPaperSpace { get; set; }
     public string BlockName { get; set; } = "";
+    public int MatchIndex { get; set; }
     public string DrawingNumber { get; set; } = "";
     public string Title { get; set; } = "";
     public string PaperName { get; set; } = "";

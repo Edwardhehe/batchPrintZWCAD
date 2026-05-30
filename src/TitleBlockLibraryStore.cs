@@ -44,6 +44,8 @@ public static class TitleBlockLibraryStore
         }
         else
         {
+            existing.HasPrintRegion = definition.HasPrintRegion;
+            existing.PrintRegion = definition.PrintRegion;
             existing.TitleRegion = definition.TitleRegion;
             existing.DrawingNumberRegion = definition.DrawingNumberRegion;
             existing.UpdatedAt = DateTime.Now;
