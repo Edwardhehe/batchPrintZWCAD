@@ -67,7 +67,8 @@ public static class TitleBlockScanner
 
                 var width = extents.MaxPoint.X - extents.MinPoint.X;
                 var height = extents.MaxPoint.Y - extents.MinPoint.Y;
-                var paper = PaperSizeDetector.Detect(width, height);
+                var detectedPaper = PaperSizeDetector.Detect(width, height);
+                var paper = ApplyFixedPaper(definition, detectedPaper);
                 var boundaryNote = definition.HasPrintRegion ? "打印边界: 图框库框选边界" : "打印边界: 块外包框";
                 var title = CadTextExtractor.ExtractRegionText(tr, blockRef, owner, definition.TitleRegion);
                 var number = CadTextExtractor.ExtractRegionText(tr, blockRef, owner, definition.DrawingNumberRegion);
@@ -128,5 +129,28 @@ public static class TitleBlockScanner
         var maxX = points.Max(p => p.X);
         var maxY = points.Max(p => p.Y);
         return new Extents3d(new Point3d(minX, minY, 0), new Point3d(maxX, maxY, 0));
+    }
+
+    private static PaperDetection ApplyFixedPaper(TitleBlockDefinition definition, PaperDetection detected)
+    {
+        if (definition.PaperWidthMm <= 0 || definition.PaperHeightMm <= 0)
+        {
+            return detected;
+        }
+
+        var name = string.IsNullOrWhiteSpace(definition.PaperName)
+            ? detected.PaperName
+            : definition.PaperName;
+
+        return new PaperDetection
+        {
+            PaperName = name,
+            ScaleText = detected.ScaleText,
+            ScaleValue = detected.ScaleValue,
+            IsLong = name.EndsWith("+", StringComparison.OrdinalIgnoreCase),
+            PaperWidthMm = definition.PaperWidthMm,
+            PaperHeightMm = definition.PaperHeightMm,
+            Note = $"固定纸张来自图框库，输出纸张 {definition.PaperWidthMm:0.##} x {definition.PaperHeightMm:0.##} mm；比例按图框边界自动识别为 {detected.ScaleText}"
+        };
     }
 }

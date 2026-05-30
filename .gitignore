@@ -6,6 +6,7 @@ bin-crossfix/
 bin-dev/
 bin-dpi/
 bin-filebatch/
+bin-fixedpaper/
 bin-layoutfix/
 bin-layoutwindow/
 bin-menu/

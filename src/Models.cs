@@ -8,6 +8,9 @@ public sealed class TitleBlockDefinition
     public string BlockName { get; set; } = "";
     public bool HasPrintRegion { get; set; }
     public LocalRectangle PrintRegion { get; set; } = new();
+    public string PaperName { get; set; } = "";
+    public double PaperWidthMm { get; set; }
+    public double PaperHeightMm { get; set; }
     public LocalRectangle TitleRegion { get; set; } = new();
     public LocalRectangle DrawingNumberRegion { get; set; } = new();
     public DateTime CreatedAt { get; set; } = DateTime.Now;

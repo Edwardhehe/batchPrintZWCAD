@@ -62,11 +62,37 @@ public sealed class BatchPlotCommands : IExtensionApplication
             return;
         }
 
+        Extents3d printExtents;
+        try
+        {
+            printExtents = hasPrintRegion
+                ? TransformRegion(printRegion, blockRef.BlockTransform)
+                : blockRef.GeometricExtents;
+        }
+        catch
+        {
+            editor.WriteMessage("\n无法读取图框打印边界。");
+            return;
+        }
+
+        var detected = PaperSizeDetector.Detect(
+            printExtents.MaxPoint.X - printExtents.MinPoint.X,
+            printExtents.MaxPoint.Y - printExtents.MinPoint.Y);
+
+        using var paperForm = new PaperSizeSelectionForm(detected);
+        if (CadApp.ShowModalDialog(paperForm) != System.Windows.Forms.DialogResult.OK)
+        {
+            return;
+        }
+
         var definition = new TitleBlockDefinition
         {
             BlockName = blockName,
             HasPrintRegion = hasPrintRegion,
             PrintRegion = printRegion,
+            PaperName = paperForm.PaperName,
+            PaperWidthMm = paperForm.PaperWidthMm,
+            PaperHeightMm = paperForm.PaperHeightMm,
             TitleRegion = titleRegion,
             DrawingNumberRegion = numberRegion,
             CreatedAt = DateTime.Now,
@@ -176,5 +202,22 @@ public sealed class BatchPlotCommands : IExtensionApplication
         var p2 = second.Value.TransformBy(inverseBlockTransform);
         region = LocalRectangle.FromPoints(p1.X, p1.Y, p2.X, p2.Y);
         return true;
+    }
+
+    private static Extents3d TransformRegion(LocalRectangle region, Matrix3d transform)
+    {
+        var points = new[]
+        {
+            new Point3d(region.MinX, region.MinY, 0).TransformBy(transform),
+            new Point3d(region.MinX, region.MaxY, 0).TransformBy(transform),
+            new Point3d(region.MaxX, region.MinY, 0).TransformBy(transform),
+            new Point3d(region.MaxX, region.MaxY, 0).TransformBy(transform)
+        };
+
+        var minX = Math.Min(Math.Min(points[0].X, points[1].X), Math.Min(points[2].X, points[3].X));
+        var minY = Math.Min(Math.Min(points[0].Y, points[1].Y), Math.Min(points[2].Y, points[3].Y));
+        var maxX = Math.Max(Math.Max(points[0].X, points[1].X), Math.Max(points[2].X, points[3].X));
+        var maxY = Math.Max(Math.Max(points[0].Y, points[1].Y), Math.Max(points[2].Y, points[3].Y));
+        return new Extents3d(new Point3d(minX, minY, 0), new Point3d(maxX, maxY, 0));
     }
 }

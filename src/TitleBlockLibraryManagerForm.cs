@@ -75,6 +75,9 @@ public sealed class TitleBlockLibraryManagerForm : Form
         _grid.DataSource = _rows;
 
         AddColumns();
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.PaperName), HeaderText = "输出纸张", Width = UiLayout.Scale(90) });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.PaperWidthMm), HeaderText = "纸宽mm", Width = UiLayout.Scale(90) });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.PaperHeightMm), HeaderText = "纸高mm", Width = UiLayout.Scale(90) });
 
         _status.Dock = DockStyle.Bottom;
         _status.Height = Math.Max(UiLayout.Scale(28), Font.Height + UiLayout.Scale(10));
@@ -230,6 +233,9 @@ public sealed class TitleBlockLibraryManagerForm : Form
         public double NumberMinY { get; set; }
         public double NumberMaxX { get; set; }
         public double NumberMaxY { get; set; }
+        public string PaperName { get; set; } = "";
+        public double PaperWidthMm { get; set; }
+        public double PaperHeightMm { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
 
@@ -251,6 +257,9 @@ public sealed class TitleBlockLibraryManagerForm : Form
                 NumberMinY = definition.DrawingNumberRegion.MinY,
                 NumberMaxX = definition.DrawingNumberRegion.MaxX,
                 NumberMaxY = definition.DrawingNumberRegion.MaxY,
+                PaperName = definition.PaperName,
+                PaperWidthMm = definition.PaperWidthMm,
+                PaperHeightMm = definition.PaperHeightMm,
                 CreatedAt = definition.CreatedAt,
                 UpdatedAt = definition.UpdatedAt
             };
@@ -263,6 +272,9 @@ public sealed class TitleBlockLibraryManagerForm : Form
                 BlockName = BlockName.Trim(),
                 HasPrintRegion = HasPrintRegion,
                 PrintRegion = LocalRectangle.FromPoints(PrintMinX, PrintMinY, PrintMaxX, PrintMaxY),
+                PaperName = PaperName?.Trim() ?? "",
+                PaperWidthMm = PaperWidthMm,
+                PaperHeightMm = PaperHeightMm,
                 TitleRegion = LocalRectangle.FromPoints(TitleMinX, TitleMinY, TitleMaxX, TitleMaxY),
                 DrawingNumberRegion = LocalRectangle.FromPoints(NumberMinX, NumberMinY, NumberMaxX, NumberMaxY),
                 CreatedAt = CreatedAt == default ? DateTime.Now : CreatedAt,
