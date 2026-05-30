@@ -22,24 +22,25 @@ public static class CadMenuInstaller
                 return;
             }
 
+            var menuGroup = InvokeItem(menuGroups, 0);
+            if (menuGroup == null)
+            {
+                WriteMessage("\n批量打印插件已加载，但未取得默认菜单组。");
+                return;
+            }
+
+            RemoveToolbar(menuGroup);
+
             var existing = FindNamedItem(menuBar, MenuName);
             if (existing != null)
             {
                 if (!force)
                 {
                     TrySetProperty(existing, "Visible", true);
-                    InstallToolbar(InvokeItem(menuGroups, 0), force);
                     return;
                 }
 
                 TryInvoke(existing, "Delete");
-            }
-
-            var menuGroup = InvokeItem(menuGroups, 0);
-            if (menuGroup == null)
-            {
-                WriteMessage("\n批量打印插件已加载，但未取得默认菜单组。");
-                return;
             }
 
             var menus = GetProperty(menuGroup, "Menus");
@@ -69,8 +70,7 @@ public static class CadMenuInstaller
             var menuCount = Convert.ToInt32(GetProperty(menuBar, "Count") ?? 0);
             TryInvoke(menu, "InsertInMenuBar", menuCount);
 
-            InstallToolbar(menuGroup, force);
-            WriteMessage("\n批量打印菜单/工具栏已加载。");
+            WriteMessage("\n批量打印菜单已加载。");
         }
         catch (Exception ex)
         {
@@ -89,7 +89,7 @@ public static class CadMenuInstaller
         }
     }
 
-    private static void InstallToolbar(object? menuGroup, bool force)
+    private static void RemoveToolbar(object? menuGroup)
     {
         if (menuGroup == null)
         {
@@ -105,27 +105,8 @@ public static class CadMenuInstaller
         var existing = FindNamedItem(toolbars, MenuName);
         if (existing != null)
         {
-            if (!force)
-            {
-                TrySetProperty(existing, "Visible", true);
-                return;
-            }
-
             TryInvoke(existing, "Delete");
         }
-
-        var toolbar = TryInvoke(toolbars, "Add", MenuName);
-        if (toolbar == null)
-        {
-            return;
-        }
-
-        AddToolbarButton(toolbar, "新增图框", "学习图框块", "ZBP_ADD_TITLE_BLOCK ");
-        AddToolbarButton(toolbar, "图框库管理", "管理图框信息库", "ZBP_MANAGE_LIBRARY ");
-        AddToolbarButton(toolbar, "批量打印", "打开批量打印窗口", "ZBP_SHOW_PANEL ");
-        AddToolbarButton(toolbar, "设置", "打开批量打印设置", "ZBP_SETTINGS ");
-        AddToolbarButton(toolbar, "自动加载", "安装批量打印自动加载", "ZBP_INSTALL_AUTOLOAD ");
-        TrySetProperty(toolbar, "Visible", true);
     }
 
     private static void AddMenuItem(object menu, string label, string command)
@@ -138,12 +119,6 @@ public static class CadMenuInstaller
     {
         var count = Convert.ToInt32(GetProperty(menu, "Count") ?? 0);
         TryInvoke(menu, "AddSeparator", count);
-    }
-
-    private static void AddToolbarButton(object toolbar, string name, string help, string command)
-    {
-        var count = Convert.ToInt32(GetProperty(toolbar, "Count") ?? 0);
-        TryInvoke(toolbar, "AddToolbarButton", count, name, help, "^C^C" + command, false);
     }
 
     private static object? FindNamedItem(object collection, string name)

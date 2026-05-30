@@ -9,6 +9,10 @@ bin-commandprint/
 bin-crossscan/
 bin-crossfix/
 bin-dev/
+bin-directoryfeature/
+bin-directorypickfix/
+bin-directorysettingsfix/
+bin-directorystylefix/
 bin-dpi/
 bin-filebatch/
 bin-fixedpaper/
@@ -18,6 +22,7 @@ bin-layoutwindow/
 bin-longpaperfix/
 bin-localcoordfix/
 bin-menu/
+bin-menubaronly/
 bin-outputfolderfix/
 bin-paperlib/
 bin-paperfix/

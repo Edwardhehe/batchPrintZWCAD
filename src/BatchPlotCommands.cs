@@ -75,8 +75,14 @@ public sealed class BatchPlotCommands : IExtensionApplication
     [CommandMethod("ZBP_SETTINGS", CommandFlags.Session)]
     public void ShowSettings()
     {
-        using var form = new SettingsForm();
-        CadApp.ShowModalDialog(form);
+        var doc = CadApp.DocumentManager.MdiActiveDocument;
+        using var form = new SettingsForm(doc);
+        if (CadApp.ShowModalDialog(form) == DialogResult.OK && form.RequestPickDirectoryCellSizes && doc != null)
+        {
+            var settings = AppSettingsStore.Load();
+            var ok = DirectoryTableGenerator.PromptCellSizes(doc, settings, out _, out var message);
+            MessageBox.Show(message, "批量打印设置", MessageBoxButtons.OK, ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+        }
     }
 
     [CommandMethod("_ZBP_INTERNAL_SETTINGS", CommandFlags.Session)]

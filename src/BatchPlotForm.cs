@@ -141,6 +141,9 @@ public sealed class BatchPlotForm : Form
         var exportCsvButton = MakeButton("导出清单", 92);
         exportCsvButton.Click += (_, _) => ExportCsv();
 
+        var generateDirectoryButton = MakeButton("生成目录", 92);
+        generateDirectoryButton.Click += (_, _) => GenerateDrawingDirectory();
+
         var openLogButton = MakeButton("打开日志", 92);
         openLogButton.Click += (_, _) => OpenLastLog();
 
@@ -196,6 +199,7 @@ public sealed class BatchPlotForm : Form
         actionRow.Controls.Add(removeButton);
         actionRow.Controls.Add(refreshNameButton);
         actionRow.Controls.Add(exportCsvButton);
+        actionRow.Controls.Add(generateDirectoryButton);
         actionRow.Controls.Add(openLogButton);
         actionRow.Controls.Add(manageLibraryButton);
         actionRow.Controls.Add(settingsButton);
@@ -608,6 +612,29 @@ public sealed class BatchPlotForm : Form
         MessageBox.Show("清单已导出。", "批量打印", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
+    private void GenerateDrawingDirectory()
+    {
+        if (_jobs.Count == 0)
+        {
+            MessageBox.Show("当前没有可生成目录的图纸清单。", "批量打印", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        Hide();
+        System.Windows.Forms.Application.DoEvents();
+        try
+        {
+            var ok = DirectoryTableGenerator.PromptAndGenerate(_currentDocument, _jobs.ToList(), _settings, out var message);
+            AppendLog(ok ? "INFO" : "WARN", message);
+            MessageBox.Show(message, "批量打印", MessageBoxButtons.OK, ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+        }
+        finally
+        {
+            Show();
+            Activate();
+        }
+    }
+
     private void ManageLibrary()
     {
         using var form = new TitleBlockLibraryManagerForm();
@@ -619,21 +646,57 @@ public sealed class BatchPlotForm : Form
 
     private void ShowSettings()
     {
-        using var form = new SettingsForm();
+        using var form = new SettingsForm(_currentDocument);
         if (form.ShowDialog(this) == DialogResult.OK)
         {
-            var updated = AppSettingsStore.Load();
-            _settings.RememberLastOutputDirectory = updated.RememberLastOutputDirectory;
-            _settings.DefaultOutputSubfolder = updated.DefaultOutputSubfolder;
-            _settings.AutoScanCurrentDrawing = updated.AutoScanCurrentDrawing;
-            _settings.PaperMatchToleranceMm = updated.PaperMatchToleranceMm;
-            _settings.AllowStandardPaperNameFallback = updated.AllowStandardPaperNameFallback;
-            _settings.ShowPlotProgress = updated.ShowPlotProgress;
-            _settings.AddSequenceWhenPdfExists = updated.AddSequenceWhenPdfExists;
-            _settings.OpenExternalDwgForPlot = updated.OpenExternalDwgForPlot;
+            ReloadSettings();
             SortAndRefreshOutputPaths();
             AppendLog("INFO", "设置已更新。");
+
+            if (form.RequestPickDirectoryCellSizes)
+            {
+                PickDirectoryCellSizesFromCad();
+            }
         }
+    }
+
+    private void PickDirectoryCellSizesFromCad()
+    {
+        Hide();
+        System.Windows.Forms.Application.DoEvents();
+        try
+        {
+            var ok = DirectoryTableGenerator.PromptCellSizes(_currentDocument, _settings, out _, out var message);
+            ReloadSettings();
+            AppendLog(ok ? "INFO" : "WARN", message);
+            MessageBox.Show(message, "批量打印设置", MessageBoxButtons.OK, ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+        }
+        finally
+        {
+            Show();
+            Activate();
+        }
+    }
+
+    private void ReloadSettings()
+    {
+        var updated = AppSettingsStore.Load();
+        _settings.RememberLastOutputDirectory = updated.RememberLastOutputDirectory;
+        _settings.DefaultOutputSubfolder = updated.DefaultOutputSubfolder;
+        _settings.AutoScanCurrentDrawing = updated.AutoScanCurrentDrawing;
+        _settings.PaperMatchToleranceMm = updated.PaperMatchToleranceMm;
+        _settings.AllowStandardPaperNameFallback = updated.AllowStandardPaperNameFallback;
+        _settings.ShowPlotProgress = updated.ShowPlotProgress;
+        _settings.AddSequenceWhenPdfExists = updated.AddSequenceWhenPdfExists;
+        _settings.OpenExternalDwgForPlot = updated.OpenExternalDwgForPlot;
+        _settings.DirectoryIndexWidth = updated.DirectoryIndexWidth;
+        _settings.DirectoryNumberWidth = updated.DirectoryNumberWidth;
+        _settings.DirectoryTitleWidth = updated.DirectoryTitleWidth;
+        _settings.DirectoryPaperWidth = updated.DirectoryPaperWidth;
+        _settings.DirectoryRemarkWidth = updated.DirectoryRemarkWidth;
+        _settings.DirectoryRowHeight = updated.DirectoryRowHeight;
+        _settings.DirectoryTextHeightRatio = updated.DirectoryTextHeightRatio;
+        _settings.DirectoryTextStyleName = updated.DirectoryTextStyleName;
     }
 
     private void OpenLastLog()

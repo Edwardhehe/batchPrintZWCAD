@@ -17,6 +17,14 @@ public sealed class AppSettings
     public bool ShowPlotProgress { get; set; } = true;
     public bool AddSequenceWhenPdfExists { get; set; } = false;
     public bool OpenExternalDwgForPlot { get; set; } = true;
+    public double DirectoryIndexWidth { get; set; } = 900;
+    public double DirectoryNumberWidth { get; set; } = 3200;
+    public double DirectoryTitleWidth { get; set; } = 5200;
+    public double DirectoryPaperWidth { get; set; } = 1200;
+    public double DirectoryRemarkWidth { get; set; } = 1400;
+    public double DirectoryRowHeight { get; set; } = 650;
+    public double DirectoryTextHeightRatio { get; set; } = 0.42;
+    public string DirectoryTextStyleName { get; set; } = "";
 }
 
 public static class AppSettingsStore
@@ -65,6 +73,43 @@ public static class AppSettingsStore
         {
             settings.PaperMatchToleranceMm = 3;
         }
+
+        if (settings.DirectoryIndexWidth <= 0)
+        {
+            settings.DirectoryIndexWidth = 900;
+        }
+
+        if (settings.DirectoryNumberWidth <= 0)
+        {
+            settings.DirectoryNumberWidth = 3200;
+        }
+
+        if (settings.DirectoryTitleWidth <= 0)
+        {
+            settings.DirectoryTitleWidth = 5200;
+        }
+
+        if (settings.DirectoryPaperWidth <= 0)
+        {
+            settings.DirectoryPaperWidth = 1200;
+        }
+
+        if (settings.DirectoryRemarkWidth <= 0)
+        {
+            settings.DirectoryRemarkWidth = 1400;
+        }
+
+        if (settings.DirectoryRowHeight <= 0)
+        {
+            settings.DirectoryRowHeight = 650;
+        }
+
+        if (settings.DirectoryTextHeightRatio <= 0 || settings.DirectoryTextHeightRatio > 0.9)
+        {
+            settings.DirectoryTextHeightRatio = 0.42;
+        }
+
+        settings.DirectoryTextStyleName ??= "";
 
         return settings;
     }
