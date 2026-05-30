@@ -81,7 +81,7 @@ public static class PlotterService
             {
                 ActivateLayout(job);
                 RefreshJobWindowFromOpenedDocument(currentDocument.Database, job);
-                PlotDatabase(currentDocument.Database, currentDocument.Name, job, deviceName, styleSheet, settings);
+                PlotDatabase(currentDocument.Database, currentDocument.Name, job, deviceName, styleSheet, settings, currentDocument);
             }
 
             return;
@@ -130,7 +130,7 @@ public static class PlotterService
                 {
                     ActivateLayout(job);
                     RefreshJobWindowFromOpenedDocument(currentDocument.Database, job);
-                    PlotDatabase(currentDocument.Database, currentDocument.Name, job, deviceName, styleSheet, settings);
+                    PlotDatabase(currentDocument.Database, currentDocument.Name, job, deviceName, styleSheet, settings, currentDocument);
                 }
 
                 results.Add(new PlotJobResult { Job = job });
@@ -167,7 +167,7 @@ public static class PlotterService
                     {
                         ActivateLayout(job);
                         RefreshJobWindowFromOpenedDocument(doc.Database, job);
-                        PlotDatabase(doc.Database, doc.Name, job, deviceName, styleSheet, settings);
+                        PlotDatabase(doc.Database, doc.Name, job, deviceName, styleSheet, settings, doc);
                     }
 
                     results.Add(new PlotJobResult { Job = job });
@@ -230,7 +230,7 @@ public static class PlotterService
             {
                 ActivateLayout(job);
                 RefreshJobWindowFromOpenedDocument(doc.Database, job);
-                PlotDatabase(doc.Database, doc.Name, job, deviceName, styleSheet, settings);
+                PlotDatabase(doc.Database, doc.Name, job, deviceName, styleSheet, settings, doc);
             }
         }
         finally
@@ -332,7 +332,7 @@ public static class PlotterService
         return string.Equals(Path.GetFullPath(job.SourceFile), Path.GetFullPath(currentFile), StringComparison.OrdinalIgnoreCase);
     }
 
-    private static void PlotDatabase(Database db, string documentName, PlotJob job, string deviceName, string styleSheet, AppSettings settings)
+    private static void PlotDatabase(Database db, string documentName, PlotJob job, string deviceName, string styleSheet, AppSettings settings, Document? plotDocument = null)
     {
         if (PlotFactory.ProcessPlotState != ProcessPlotState.NotPlotting)
         {
@@ -366,7 +366,8 @@ public static class PlotterService
                 validator.SetCurrentStyleSheet(plotSettings, styleSheet);
             }
 
-            validator.SetPlotWindowArea(plotSettings, new Extents2d(job.MinX, job.MinY, job.MaxX, job.MaxY));
+            var plotWindow = GetPlotWindow(job, plotDocument);
+            validator.SetPlotWindowArea(plotSettings, plotWindow);
             validator.SetPlotType(plotSettings, ZwSoft.ZwCAD.DatabaseServices.PlotType.Window);
             validator.SetUseStandardScale(plotSettings, true);
             validator.SetStdScaleType(plotSettings, StdScaleType.ScaleToFit);
@@ -455,6 +456,50 @@ public static class PlotterService
         throw new InvalidOperationException("未找到可打印布局。");
     }
 
+    private static Extents2d GetPlotWindow(PlotJob job, Document? plotDocument)
+    {
+        if (plotDocument != null)
+        {
+            try
+            {
+                var view = plotDocument.Editor.GetCurrentView();
+                var worldToDisplay = GetWorldToDisplayMatrix(view);
+                var points = new[]
+                {
+                    new Point3d(job.MinX, job.MinY, 0).TransformBy(worldToDisplay),
+                    new Point3d(job.MinX, job.MaxY, 0).TransformBy(worldToDisplay),
+                    new Point3d(job.MaxX, job.MinY, 0).TransformBy(worldToDisplay),
+                    new Point3d(job.MaxX, job.MaxY, 0).TransformBy(worldToDisplay)
+                };
+
+                return new Extents2d(
+                    points.Min(p => p.X),
+                    points.Min(p => p.Y),
+                    points.Max(p => p.X),
+                    points.Max(p => p.Y));
+            }
+            catch
+            {
+                // Some side databases and layout states cannot expose a reliable editor view.
+                // In that case the plot API falls back to raw layout/model coordinates.
+            }
+        }
+
+        return new Extents2d(
+            Math.Min(job.MinX, job.MaxX),
+            Math.Min(job.MinY, job.MaxY),
+            Math.Max(job.MinX, job.MaxX),
+            Math.Max(job.MinY, job.MaxY));
+    }
+
+    private static Matrix3d GetWorldToDisplayMatrix(ViewTableRecord view)
+    {
+        var matrix = Matrix3d.PlaneToWorld(view.ViewDirection);
+        matrix = Matrix3d.Displacement(view.Target - Point3d.Origin) * matrix;
+        matrix = Matrix3d.Rotation(-view.ViewTwist, view.ViewDirection, view.Target) * matrix;
+        return matrix.Inverse();
+    }
+
     private static MediaSelection? SelectMedia(PlotSettingsValidator validator, PlotSettings plotSettings, PlotJob job, AppSettings settings)
     {
         var media = validator.GetCanonicalMediaNameList(plotSettings).Cast<string>().ToList();
@@ -469,12 +514,21 @@ public static class PlotterService
             return exact;
         }
 
-        if (!settings.AllowStandardPaperNameFallback || job.PaperName.EndsWith("+", StringComparison.OrdinalIgnoreCase))
+        if (!settings.AllowStandardPaperNameFallback)
         {
             return null;
         }
 
-        var basePaper = (job.PaperName ?? "").Replace("+", "");
+        var paperName = job.PaperName ?? "";
+        var basePaper = paperName.Replace("+", "");
+        if (paperName.EndsWith("+", StringComparison.OrdinalIgnoreCase))
+        {
+            var longNamed = media.FirstOrDefault(x => x.IndexOf(paperName, StringComparison.OrdinalIgnoreCase) >= 0)
+                ?? media.FirstOrDefault(x => x.IndexOf(basePaper, StringComparison.OrdinalIgnoreCase) >= 0
+                    && x.IndexOf("加长", StringComparison.OrdinalIgnoreCase) >= 0);
+            return longNamed == null ? null : new MediaSelection { Name = longNamed, NeedsRotation = false };
+        }
+
         var named = media.FirstOrDefault(x => x.IndexOf(basePaper, StringComparison.OrdinalIgnoreCase) >= 0)
             ?? media.FirstOrDefault(x => x.IndexOf(basePaper.Replace("A", "ISO_A"), StringComparison.OrdinalIgnoreCase) >= 0);
         return named == null ? null : new MediaSelection { Name = named, NeedsRotation = false };

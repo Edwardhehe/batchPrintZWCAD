@@ -27,6 +27,8 @@ public static class CadMenuInstaller
             {
                 if (!force)
                 {
+                    TrySetProperty(existing, "Visible", true);
+                    InstallToolbar(InvokeItem(menuGroups, 0), force);
                     return;
                 }
 
@@ -54,19 +56,19 @@ public static class CadMenuInstaller
                 return;
             }
 
-            AddMenuItem(menu, "新增图框", "_ZBP_INTERNAL_ADD_TITLE_BLOCK ");
-            AddMenuItem(menu, "图框库管理", "_ZBP_INTERNAL_MANAGE_LIBRARY ");
-            AddMenuItem(menu, "批量打印", "_ZBP_INTERNAL_SHOW_PANEL ");
+            AddMenuItem(menu, "新增图框", "ZBP_ADD_TITLE_BLOCK ");
+            AddMenuItem(menu, "图框库管理", "ZBP_MANAGE_LIBRARY ");
+            AddMenuItem(menu, "批量打印", "ZBP_SHOW_PANEL ");
             AddSeparator(menu);
-            AddMenuItem(menu, "设置", "_ZBP_INTERNAL_SETTINGS ");
-            AddMenuItem(menu, "打开配置目录", "_ZBP_INTERNAL_OPEN_CONFIG ");
-            AddMenuItem(menu, "刷新菜单", "_ZBP_INTERNAL_RELOAD_MENU ");
+            AddMenuItem(menu, "设置", "ZBP_SETTINGS ");
+            AddMenuItem(menu, "打开配置目录", "ZBP_OPEN_CONFIG ");
+            AddMenuItem(menu, "刷新菜单", "ZBP_RELOAD_MENU ");
 
             var menuCount = Convert.ToInt32(GetProperty(menuBar, "Count") ?? 0);
             TryInvoke(menu, "InsertInMenuBar", menuCount);
 
             InstallToolbar(menuGroup, force);
-            WriteMessage("\n批量打印菜单/工具条已加载。");
+            WriteMessage("\n批量打印菜单/工具栏已加载。");
         }
         catch (Exception ex)
         {
@@ -85,8 +87,13 @@ public static class CadMenuInstaller
         }
     }
 
-    private static void InstallToolbar(object menuGroup, bool force)
+    private static void InstallToolbar(object? menuGroup, bool force)
     {
+        if (menuGroup == null)
+        {
+            return;
+        }
+
         var toolbars = GetProperty(menuGroup, "Toolbars");
         if (toolbars == null)
         {
@@ -111,10 +118,10 @@ public static class CadMenuInstaller
             return;
         }
 
-        AddToolbarButton(toolbar, "新增图框", "学习图框块", "_ZBP_INTERNAL_ADD_TITLE_BLOCK ");
-        AddToolbarButton(toolbar, "图框库管理", "管理图框信息库", "_ZBP_INTERNAL_MANAGE_LIBRARY ");
-        AddToolbarButton(toolbar, "批量打印", "打开批量打印窗口", "_ZBP_INTERNAL_SHOW_PANEL ");
-        AddToolbarButton(toolbar, "设置", "打开批量打印设置", "_ZBP_INTERNAL_SETTINGS ");
+        AddToolbarButton(toolbar, "新增图框", "学习图框块", "ZBP_ADD_TITLE_BLOCK ");
+        AddToolbarButton(toolbar, "图框库管理", "管理图框信息库", "ZBP_MANAGE_LIBRARY ");
+        AddToolbarButton(toolbar, "批量打印", "打开批量打印窗口", "ZBP_SHOW_PANEL ");
+        AddToolbarButton(toolbar, "设置", "打开批量打印设置", "ZBP_SETTINGS ");
         TrySetProperty(toolbar, "Visible", true);
     }
 

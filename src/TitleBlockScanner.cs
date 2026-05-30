@@ -18,7 +18,20 @@ public static class TitleBlockScanner
         return Scan(doc.Database, library, sourceName);
     }
 
+    public static List<PlotJob> Scan(Document doc, TitleBlockLibrary library, Extents3d? scanWindow)
+    {
+        var sourceName = string.IsNullOrWhiteSpace(doc.Database.Filename)
+            ? doc.Name
+            : doc.Database.Filename;
+        return Scan(doc.Database, library, sourceName, scanWindow);
+    }
+
     public static List<PlotJob> Scan(Database db, TitleBlockLibrary library, string sourceName)
+    {
+        return Scan(db, library, sourceName, null);
+    }
+
+    public static List<PlotJob> Scan(Database db, TitleBlockLibrary library, string sourceName, Extents3d? scanWindow)
     {
         var jobs = new List<PlotJob>();
         if (string.IsNullOrWhiteSpace(sourceName))
@@ -54,13 +67,24 @@ public static class TitleBlockScanner
                 }
 
                 Extents3d extents;
+                LocalRectangle titleRegion;
+                LocalRectangle numberRegion;
+                RegionCoordinateMode coordinateMode;
                 try
                 {
+                    coordinateMode = GetCoordinateMode(definition);
                     extents = definition.HasPrintRegion
-                        ? TransformRegion(definition.PrintRegion, blockRef.BlockTransform)
+                        ? ResolveWorldExtents(definition.PrintRegion, blockRef.BlockTransform, coordinateMode)
                         : blockRef.GeometricExtents;
+                    titleRegion = ResolveLocalRegion(definition.TitleRegion, blockRef.BlockTransform, coordinateMode);
+                    numberRegion = ResolveLocalRegion(definition.DrawingNumberRegion, blockRef.BlockTransform, coordinateMode);
                 }
                 catch
+                {
+                    continue;
+                }
+
+                if (scanWindow.HasValue && !Intersects(extents, scanWindow.Value))
                 {
                     continue;
                 }
@@ -69,9 +93,8 @@ public static class TitleBlockScanner
                 var height = extents.MaxPoint.Y - extents.MinPoint.Y;
                 var detectedPaper = PaperSizeDetector.Detect(width, height);
                 var paper = ApplyFixedPaper(definition, detectedPaper);
-                var boundaryNote = definition.HasPrintRegion ? "打印边界: 图框库框选边界" : "打印边界: 块外包框";
-                var title = CadTextExtractor.ExtractRegionText(tr, blockRef, owner, definition.TitleRegion);
-                var number = CadTextExtractor.ExtractRegionText(tr, blockRef, owner, definition.DrawingNumberRegion);
+                var title = CadTextExtractor.ExtractRegionText(tr, blockRef, owner, titleRegion);
+                var number = CadTextExtractor.ExtractRegionText(tr, blockRef, owner, numberRegion);
 
                 if (string.IsNullOrWhiteSpace(title))
                 {
@@ -83,6 +106,16 @@ public static class TitleBlockScanner
                     number = "未识别图号";
                 }
 
+                var boundaryNote = definition.HasPrintRegion ? "打印边界: 图框库框选边界" : "打印边界: 块外包框";
+                if (coordinateMode == RegionCoordinateMode.World)
+                {
+                    boundaryNote += "；图框库坐标模式: 图纸坐标";
+                }
+                else
+                {
+                    boundaryNote += "；图框库坐标模式: 块内坐标";
+                }
+
                 jobs.Add(new PlotJob
                 {
                     SourceFile = sourceName,
@@ -92,11 +125,13 @@ public static class TitleBlockScanner
                     MatchIndex = matchIndex++,
                     DrawingNumber = number,
                     Title = title,
+                    CadDrawingNumber = number,
+                    CadTitle = title,
                     PaperName = paper.PaperName,
                     ScaleText = paper.ScaleText,
                     SizeText = $"{Math.Abs(width):0.##} x {Math.Abs(height):0.##}",
                     PaperSizeText = $"{paper.PaperWidthMm:0.##} x {paper.PaperHeightMm:0.##} mm",
-                    DetectionNote = $"{boundaryNote}；{paper.Note}",
+                    DetectionNote = $"{boundaryNote}; {paper.Note}",
                     PaperWidthMm = paper.PaperWidthMm,
                     PaperHeightMm = paper.PaperHeightMm,
                     MinX = extents.MinPoint.X,
@@ -112,6 +147,56 @@ public static class TitleBlockScanner
             .OrderBy(x => x.DrawingNumber, NaturalStringComparer.Instance)
             .ThenBy(x => Path.GetFileName(x.SourceFile), StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    private static RegionCoordinateMode GetCoordinateMode(TitleBlockDefinition definition)
+    {
+        return string.Equals(definition.CoordinateMode, "World", StringComparison.OrdinalIgnoreCase)
+            ? RegionCoordinateMode.World
+            : RegionCoordinateMode.Local;
+    }
+
+    private static Extents3d ResolveWorldExtents(LocalRectangle region, Matrix3d blockTransform, RegionCoordinateMode mode)
+    {
+        return mode == RegionCoordinateMode.World
+            ? ToExtents(region)
+            : TransformRegion(region, blockTransform);
+    }
+
+    private static LocalRectangle ResolveLocalRegion(LocalRectangle region, Matrix3d blockTransform, RegionCoordinateMode mode)
+    {
+        if (mode == RegionCoordinateMode.Local)
+        {
+            return region;
+        }
+
+        var inverse = blockTransform.Inverse();
+        var points = new[]
+        {
+            new Point3d(region.MinX, region.MinY, 0).TransformBy(inverse),
+            new Point3d(region.MinX, region.MaxY, 0).TransformBy(inverse),
+            new Point3d(region.MaxX, region.MinY, 0).TransformBy(inverse),
+            new Point3d(region.MaxX, region.MaxY, 0).TransformBy(inverse)
+        };
+
+        return LocalRectangle.FromPoints(
+            points.Min(p => p.X),
+            points.Min(p => p.Y),
+            points.Max(p => p.X),
+            points.Max(p => p.Y));
+    }
+
+    private static bool Intersects(Extents3d a, Extents3d b)
+    {
+        return a.MinPoint.X <= b.MaxPoint.X
+            && a.MaxPoint.X >= b.MinPoint.X
+            && a.MinPoint.Y <= b.MaxPoint.Y
+            && a.MaxPoint.Y >= b.MinPoint.Y;
+    }
+
+    private static Extents3d ToExtents(LocalRectangle region)
+    {
+        return new Extents3d(new Point3d(region.MinX, region.MinY, 0), new Point3d(region.MaxX, region.MaxY, 0));
     }
 
     private static Extents3d TransformRegion(LocalRectangle region, Matrix3d transform)
@@ -152,5 +237,11 @@ public static class TitleBlockScanner
             PaperHeightMm = definition.PaperHeightMm,
             Note = $"固定纸张来自图框库，输出纸张 {definition.PaperWidthMm:0.##} x {definition.PaperHeightMm:0.##} mm；比例按图框边界自动识别为 {detected.ScaleText}"
         };
+    }
+
+    private enum RegionCoordinateMode
+    {
+        Local,
+        World
     }
 }

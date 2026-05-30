@@ -7,6 +7,7 @@ public sealed class TitleBlockDefinition
 {
     public string BlockName { get; set; } = "";
     public bool HasPrintRegion { get; set; }
+    public string CoordinateMode { get; set; } = "Local";
     public LocalRectangle PrintRegion { get; set; } = new();
     public string PaperName { get; set; } = "";
     public double PaperWidthMm { get; set; }
@@ -60,6 +61,8 @@ public sealed class PlotJob
     public int MatchIndex { get; set; }
     public string DrawingNumber { get; set; } = "";
     public string Title { get; set; } = "";
+    public string CadDrawingNumber { get; set; } = "";
+    public string CadTitle { get; set; } = "";
     public string PaperName { get; set; } = "";
     public string ScaleText { get; set; } = "";
     public string SizeText { get; set; } = "";

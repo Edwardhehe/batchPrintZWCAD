@@ -8,6 +8,8 @@ using System.Linq;
 using System.Windows.Forms;
 using ZwSoft.ZwCAD.ApplicationServices;
 using ZwSoft.ZwCAD.DatabaseServices;
+using ZwSoft.ZwCAD.EditorInput;
+using ZwSoft.ZwCAD.Geometry;
 using CadApp = ZwSoft.ZwCAD.ApplicationServices.Application;
 
 namespace ZwcadBatchPlot;
@@ -23,6 +25,7 @@ public sealed class BatchPlotForm : Form
     private readonly Button _printButton = new();
     private readonly Label _statusLabel = new();
     private readonly List<string> _logLines = new();
+    private readonly List<string> _selectedDwgFiles = new();
     private readonly AppSettings _settings;
     private string _lastLogPath = "";
     public bool HasPendingPrint { get; private set; }
@@ -51,14 +54,15 @@ public sealed class BatchPlotForm : Form
         var top = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
-            Height = UiLayout.Scale(124),
+            Height = UiLayout.Scale(160),
             ColumnCount = 1,
-            RowCount = 2,
+            RowCount = 3,
             Padding = new Padding(UiLayout.Scale(10), UiLayout.Scale(8), UiLayout.Scale(10), UiLayout.Scale(6)),
             BackColor = SystemColors.Control
         };
         top.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.ButtonHeight() + UiLayout.Scale(12)));
         top.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.ButtonHeight() + UiLayout.Scale(18)));
+        top.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.ButtonHeight() + UiLayout.Scale(8)));
 
         var actionRow = new FlowLayoutPanel
         {
@@ -76,6 +80,14 @@ public sealed class BatchPlotForm : Form
             RowCount = 1,
             Margin = Padding.Empty,
             Padding = new Padding(0, UiLayout.Scale(6), 0, 0)
+        };
+        var pathRow = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight,
+            WrapContents = false,
+            AutoScroll = true,
+            Margin = Padding.Empty
         };
         settingsRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(48)));
         settingsRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -104,6 +116,9 @@ public sealed class BatchPlotForm : Form
 
         var scanButton = MakeButton("扫描当前图", 108);
         scanButton.Click += (_, _) => ScanCurrentDrawing();
+
+        var scanWindowButton = MakeButton("框选扫描", 92);
+        scanWindowButton.Click += (_, _) => ScanSelectedWindow();
 
         var addFilesButton = MakeButton("添加DWG", 92);
         addFilesButton.Click += (_, _) => AddDwgFiles();
@@ -138,6 +153,15 @@ public sealed class BatchPlotForm : Form
         var chooseOutputButton = MakeButton("浏览...", 84);
         chooseOutputButton.Click += (_, _) => ChooseOutputDirectory();
 
+        var currentFolderButton = MakeButton("当前文件夹", 96);
+        currentFolderButton.Click += (_, _) => SetOutputDirectory(GetSelectedCadDirectory());
+
+        var currentPdfButton = MakeButton("当前文件夹/PDF", 116);
+        currentPdfButton.Click += (_, _) => SetOutputDirectory(Path.Combine(GetSelectedCadDirectory(), "PDF"));
+
+        var specifiedFolderButton = MakeButton("指定文件夹", 96);
+        specifiedFolderButton.Click += (_, _) => ChooseOutputDirectory();
+
         var importButton = MakeButton("导入图框库", 104);
         importButton.Click += (_, _) => ImportLibrary();
 
@@ -164,6 +188,7 @@ public sealed class BatchPlotForm : Form
         _styleCombo.DropDownStyle = ComboBoxStyle.DropDownList;
 
         actionRow.Controls.Add(scanButton);
+        actionRow.Controls.Add(scanWindowButton);
         actionRow.Controls.Add(addFilesButton);
         actionRow.Controls.Add(selectAllButton);
         actionRow.Controls.Add(selectNoneButton);
@@ -188,10 +213,22 @@ public sealed class BatchPlotForm : Form
 
         top.Controls.Add(actionRow, 0, 0);
         top.Controls.Add(settingsRow, 0, 1);
+        pathRow.Controls.Add(new Label
+        {
+            Text = "保存路径快捷:",
+            AutoSize = true,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Margin = new Padding(0, UiLayout.Scale(8), UiLayout.Scale(8), 0)
+        });
+        pathRow.Controls.Add(currentFolderButton);
+        pathRow.Controls.Add(currentPdfButton);
+        pathRow.Controls.Add(specifiedFolderButton);
+        top.Controls.Add(pathRow, 0, 2);
 
         UiLayout.StyleGrid(_grid, Font);
-        _grid.DataSource = _jobs;
         AddColumns();
+        _grid.DataSource = _jobs;
+        _grid.CellEndEdit += GridCellEndEdit;
 
         _statusLabel.Dock = DockStyle.Bottom;
         _statusLabel.Height = Math.Max(UiLayout.Scale(28), Font.Height + UiLayout.Scale(10));
@@ -301,6 +338,52 @@ public sealed class BatchPlotForm : Form
         AppendLog("INFO", $"扫描当前图完成，识别 {_jobs.Count} 张。");
     }
 
+    private void ScanSelectedWindow()
+    {
+        var library = TitleBlockLibraryStore.Load();
+        if (library.Blocks.Count == 0)
+        {
+            MessageBox.Show("图框库为空，请先新增图框。", "批量打印", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        Hide();
+        System.Windows.Forms.Application.DoEvents();
+        try
+        {
+            var editor = _currentDocument.Editor;
+            var first = editor.GetPoint(new PromptPointOptions("\n框选扫描范围第一个角点: "));
+            if (first.Status != PromptStatus.OK)
+            {
+                return;
+            }
+
+            var second = editor.GetCorner(new PromptCornerOptions("\n框选扫描范围对角点: ", first.Value));
+            if (second.Status != PromptStatus.OK)
+            {
+                return;
+            }
+
+            var window = new Extents3d(
+                new Point3d(Math.Min(first.Value.X, second.Value.X), Math.Min(first.Value.Y, second.Value.Y), 0),
+                new Point3d(Math.Max(first.Value.X, second.Value.X), Math.Max(first.Value.Y, second.Value.Y), 0));
+
+            _jobs.Clear();
+            foreach (var job in TitleBlockScanner.Scan(_currentDocument, library, window))
+            {
+                _jobs.Add(job);
+            }
+
+            SortAndRefreshOutputPaths();
+            AppendLog("INFO", $"框选扫描当前图完成，识别 {_jobs.Count} 张。");
+        }
+        finally
+        {
+            Show();
+            Activate();
+        }
+    }
+
     private void AddDwgFiles()
     {
         using var dialog = new OpenFileDialog
@@ -313,6 +396,15 @@ public sealed class BatchPlotForm : Form
         if (dialog.ShowDialog(this) != DialogResult.OK)
         {
             return;
+        }
+
+        foreach (var file in dialog.FileNames)
+        {
+            var fullPath = Path.GetFullPath(file);
+            if (!_selectedDwgFiles.Any(x => string.Equals(x, fullPath, StringComparison.OrdinalIgnoreCase)))
+            {
+                _selectedDwgFiles.Add(fullPath);
+            }
         }
 
         var library = TitleBlockLibraryStore.Load();
@@ -459,6 +551,36 @@ public sealed class BatchPlotForm : Form
             SortAndRefreshOutputPaths();
             AppendLog("INFO", "输出目录切换为 " + dialog.SelectedPath);
         }
+    }
+
+    private string GetSelectedCadDirectory()
+    {
+        var selectedFile = _selectedDwgFiles.FirstOrDefault(File.Exists);
+        if (!string.IsNullOrWhiteSpace(selectedFile))
+        {
+            return Path.GetDirectoryName(selectedFile) ?? Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        }
+
+        var firstJobFile = _jobs
+            .Select(x => x.SourceFile)
+            .FirstOrDefault(x => !string.IsNullOrWhiteSpace(x) && File.Exists(x));
+        if (!string.IsNullOrWhiteSpace(firstJobFile))
+        {
+            return Path.GetDirectoryName(firstJobFile) ?? Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        }
+
+        var file = _currentDocument.Database.Filename;
+        return string.IsNullOrWhiteSpace(file)
+            ? Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments)
+            : Path.GetDirectoryName(file) ?? Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+    }
+
+    private void SetOutputDirectory(string directory)
+    {
+        _outputDirectory.Text = directory;
+        SaveCurrentSettings();
+        SortAndRefreshOutputPaths();
+        AppendLog("INFO", "输出目录切换为 " + directory);
     }
 
     private void ExportCsv()
@@ -661,6 +783,50 @@ public sealed class BatchPlotForm : Form
             _printButton.Enabled = true;
             RefreshStatus();
         }
+    }
+
+    private void GridCellEndEdit(object? sender, DataGridViewCellEventArgs e)
+    {
+        if (e.RowIndex < 0 || e.ColumnIndex < 0)
+        {
+            return;
+        }
+
+        if (_grid.Rows[e.RowIndex].DataBoundItem is not PlotJob job)
+        {
+            return;
+        }
+
+        var property = _grid.Columns[e.ColumnIndex].DataPropertyName;
+        var titleChanged = property == nameof(PlotJob.Title) && !string.Equals(job.Title, job.CadTitle, StringComparison.Ordinal);
+        var numberChanged = property == nameof(PlotJob.DrawingNumber) && !string.Equals(job.DrawingNumber, job.CadDrawingNumber, StringComparison.Ordinal);
+        if (!titleChanged && !numberChanged)
+        {
+            return;
+        }
+
+        var ok = CadTextUpdater.TryUpdateOpenDocument(
+            job,
+            titleChanged ? job.Title : null,
+            numberChanged ? job.DrawingNumber : null,
+            _currentDocument,
+            out var message);
+
+        if (ok)
+        {
+            if (titleChanged)
+            {
+                job.CadTitle = job.Title;
+            }
+
+            if (numberChanged)
+            {
+                job.CadDrawingNumber = job.DrawingNumber;
+            }
+        }
+
+        AppendLog(ok ? "INFO" : "WARN", message);
+        SortAndRefreshOutputPaths();
     }
 
     private void ExecutePendingPrintLegacy()

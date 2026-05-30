@@ -34,10 +34,10 @@ public static class PaperSizeDetector
 
     private static readonly StandardPaper[] Standards =
     {
-        new StandardPaper("A0", 841, 1189),
-        new StandardPaper("A1", 594, 841),
-        new StandardPaper("A2", 420, 594),
-        new StandardPaper("A3", 297, 420)
+        new("A0", 841, 1189),
+        new("A1", 594, 841),
+        new("A2", 420, 594),
+        new("A3", 297, 420)
     };
 
     private static readonly double[] CommonScales =
@@ -60,8 +60,8 @@ public static class PaperSizeDetector
         }
 
         var best = candidates
-            .Where(x => x.Score < 0.18)
             .OrderBy(x => x.Score)
+            .ThenBy(x => x.IsLong ? 0 : 1)
             .ThenByDescending(x => x.Scale)
             .ThenBy(x => Array.IndexOf(Standards, x.Paper))
             .FirstOrDefault();
@@ -73,7 +73,6 @@ public static class PaperSizeDetector
 
         var paperName = best.IsLong ? best.Paper.Name + "+" : best.Paper.Name;
         var paperSizeText = $"{best.PaperWidthMm:0.##} x {best.PaperHeightMm:0.##} mm";
-
         return new PaperDetection
         {
             PaperName = paperName,
@@ -88,88 +87,98 @@ public static class PaperSizeDetector
         };
     }
 
+    public static (double Width, double Height) GetDefaultSize(string paperName, double currentWidth = 0, double currentHeight = 0)
+    {
+        var standard = Standards.FirstOrDefault(x => string.Equals(x.Name, paperName.Replace("+", ""), StringComparison.OrdinalIgnoreCase));
+        if (standard == null)
+        {
+            return (Math.Max(currentWidth, 1), Math.Max(currentHeight, 1));
+        }
+
+        var landscape = currentWidth <= 0 || currentHeight <= 0 || currentWidth >= currentHeight;
+        if (!paperName.EndsWith("+", StringComparison.OrdinalIgnoreCase))
+        {
+            return landscape ? (standard.LongSide, standard.ShortSide) : (standard.ShortSide, standard.LongSide);
+        }
+
+        var measuredLong = Math.Max(currentWidth, currentHeight);
+        var longSide = measuredLong > standard.LongSide
+            ? SnapLongSide(measuredLong, standard.LongSide)
+            : standard.LongSide * 1.25;
+        return landscape ? (longSide, standard.ShortSide) : (standard.ShortSide, longSide);
+    }
+
     private static void AddCandidate(List<PaperCandidate> candidates, StandardPaper paper, double scale, double actualWidth, double actualHeight)
     {
         var widthMm = actualWidth / scale;
         var heightMm = actualHeight / scale;
 
-        var landscape = ScoreStandard(widthMm, heightMm, paper.LongSide, paper.ShortSide);
-        var portrait = ScoreStandard(widthMm, heightMm, paper.ShortSide, paper.LongSide);
-        var standard = landscape.Score <= portrait.Score
-            ? (landscape.Score, Width: paper.LongSide, Height: paper.ShortSide, landscape.Reason)
-            : (portrait.Score, Width: paper.ShortSide, Height: paper.LongSide, portrait.Reason);
+        AddOrientation(candidates, paper, scale, widthMm, heightMm, actualWidth, actualHeight, paper.LongSide, paper.ShortSide);
+        AddOrientation(candidates, paper, scale, widthMm, heightMm, actualWidth, actualHeight, paper.ShortSide, paper.LongSide);
+    }
 
-        if (standard.Score < 0.18)
+    private static void AddOrientation(
+        List<PaperCandidate> candidates,
+        StandardPaper paper,
+        double scale,
+        double widthMm,
+        double heightMm,
+        double actualWidth,
+        double actualHeight,
+        double standardWidth,
+        double standardHeight)
+    {
+        var widthError = RelativeError(widthMm, standardWidth);
+        var heightError = RelativeError(heightMm, standardHeight);
+        if (widthError <= 0.04 && heightError <= 0.04)
         {
             candidates.Add(new PaperCandidate
             {
                 Paper = paper,
                 Scale = scale,
-                Score = standard.Score,
+                Score = Math.Max(widthError, heightError),
                 IsLong = false,
-                PaperWidthMm = standard.Width,
-                PaperHeightMm = standard.Height,
-                Reason = $"{standard.Reason}，CAD尺寸 {actualWidth:0.##} x {actualHeight:0.##}"
+                PaperWidthMm = standardWidth,
+                PaperHeightMm = standardHeight,
+                Reason = $"按常用比例匹配，宽误差 {widthError:P1}，高误差 {heightError:P1}，CAD尺寸 {actualWidth:0.##} x {actualHeight:0.##}"
             });
         }
 
-        var longPaper = ScoreLong(widthMm, heightMm, paper);
-        if (longPaper.Score < 0.08)
+        var expectedShort = Math.Min(standardWidth, standardHeight);
+        var expectedLong = Math.Max(standardWidth, standardHeight);
+        var actualShort = Math.Min(widthMm, heightMm);
+        var actualLong = Math.Max(widthMm, heightMm);
+        var shortError = RelativeError(actualShort, expectedShort);
+        var isLong = actualLong > expectedLong * 1.03;
+        if (!isLong || shortError > 0.04)
         {
-            candidates.Add(new PaperCandidate
-            {
-                Paper = paper,
-                Scale = scale,
-                Score = longPaper.Score + 0.01,
-                IsLong = true,
-                PaperWidthMm = longPaper.Width,
-                PaperHeightMm = longPaper.Height,
-                Reason = $"{longPaper.Reason}，CAD尺寸 {actualWidth:0.##} x {actualHeight:0.##}"
-            });
-        }
-    }
-
-    private static (double Score, string Reason) ScoreStandard(double widthMm, double heightMm, double targetWidth, double targetHeight)
-    {
-        var widthError = RelativeError(widthMm, targetWidth);
-        var heightError = RelativeError(heightMm, targetHeight);
-
-        // A real drawing block may include text or attributes outside the paper border.
-        // If one side hits a standard paper side exactly, let that side anchor the paper.
-        var anchorError = Math.Min(widthError, heightError);
-        var otherError = Math.Max(widthError, heightError);
-        var score = anchorError * 0.72 + otherError * 0.28;
-
-        if (anchorError < 0.025 && otherError < 0.16)
-        {
-            score *= 0.45;
+            return;
         }
 
-        return (score, $"按常用比例匹配，宽误差 {widthError:P1}，高误差 {heightError:P1}");
-    }
-
-    private static (double Score, double Width, double Height, string Reason) ScoreLong(double widthMm, double heightMm, StandardPaper paper)
-    {
-        var widthLandscape = ScoreLongOrientation(widthMm, heightMm, paper.LongSide, paper.ShortSide);
-        var widthPortrait = ScoreLongOrientation(widthMm, heightMm, paper.ShortSide, paper.LongSide);
-        return widthLandscape.Score <= widthPortrait.Score ? widthLandscape : widthPortrait;
-    }
-
-    private static (double Score, double Width, double Height, string Reason) ScoreLongOrientation(double widthMm, double heightMm, double standardLongAxis, double standardShortAxis)
-    {
-        var shortAxis = Math.Min(widthMm, heightMm);
-        var longAxis = Math.Max(widthMm, heightMm);
-        var shortError = RelativeError(shortAxis, standardShortAxis);
-        var isLong = longAxis > standardLongAxis * 1.08;
-        if (!isLong || shortError > 0.035)
+        var snappedLong = SnapLongSide(actualLong, expectedLong);
+        var longError = RelativeError(actualLong, snappedLong);
+        if (longError > 0.08)
         {
-            return (1, 0, 0, "");
+            return;
         }
 
         var landscape = widthMm >= heightMm;
-        var outputWidth = landscape ? longAxis : standardShortAxis;
-        var outputHeight = landscape ? standardShortAxis : longAxis;
-        return (shortError, outputWidth, outputHeight, $"短边匹配加长图，短边误差 {shortError:P1}");
+        candidates.Add(new PaperCandidate
+        {
+            Paper = paper,
+            Scale = scale,
+            Score = shortError + longError * 0.35,
+            IsLong = true,
+            PaperWidthMm = landscape ? snappedLong : expectedShort,
+            PaperHeightMm = landscape ? expectedShort : snappedLong,
+            Reason = $"短边锁定 {expectedShort:0.##}mm，长边按标准长边的 1/4 倍数匹配为 {snappedLong:0.##}mm，短边误差 {shortError:P1}，长边误差 {longError:P1}，CAD尺寸 {actualWidth:0.##} x {actualHeight:0.##}"
+        });
+    }
+
+    private static double SnapLongSide(double measuredLong, double standardLong)
+    {
+        var quarters = Math.Max(5, (int)Math.Round(measuredLong / standardLong * 4, MidpointRounding.AwayFromZero));
+        return standardLong * quarters / 4d;
     }
 
     private static PaperDetection FallbackDetect(double actualWidth, double actualHeight)

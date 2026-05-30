@@ -32,7 +32,7 @@ public static class TitleBlockLibraryStore
         File.WriteAllText(path, json);
     }
 
-    public static void Upsert(TitleBlockDefinition definition, string? path = null)
+    public static bool Upsert(TitleBlockDefinition definition, string? path = null)
     {
         var library = Load(path);
         var existing = library.Blocks.FirstOrDefault(x =>
@@ -41,16 +41,23 @@ public static class TitleBlockLibraryStore
         if (existing == null)
         {
             library.Blocks.Add(definition);
+            Save(library, path);
+            return true;
         }
         else
         {
             existing.HasPrintRegion = definition.HasPrintRegion;
+            existing.CoordinateMode = string.IsNullOrWhiteSpace(definition.CoordinateMode) ? "Local" : definition.CoordinateMode;
             existing.PrintRegion = definition.PrintRegion;
+            existing.PaperName = definition.PaperName;
+            existing.PaperWidthMm = definition.PaperWidthMm;
+            existing.PaperHeightMm = definition.PaperHeightMm;
             existing.TitleRegion = definition.TitleRegion;
             existing.DrawingNumberRegion = definition.DrawingNumberRegion;
             existing.UpdatedAt = DateTime.Now;
         }
 
         Save(library, path);
+        return false;
     }
 }

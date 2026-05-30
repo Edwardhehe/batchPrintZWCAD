@@ -22,7 +22,7 @@ public sealed class TitleBlockLibraryManagerForm : Form
     private void InitializeComponents()
     {
         Text = "图框信息库管理";
-        UiLayout.ConfigureForm(this, 1080, 640, 900, 520);
+        UiLayout.ConfigureForm(this, 1280, 700, 980, 560);
 
         var top = new FlowLayoutPanel
         {
@@ -72,12 +72,8 @@ public sealed class TitleBlockLibraryManagerForm : Form
         top.Controls.Add(closeButton);
 
         UiLayout.StyleGrid(_grid, Font);
-        _grid.DataSource = _rows;
-
         AddColumns();
-        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.PaperName), HeaderText = "输出纸张", Width = UiLayout.Scale(90) });
-        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.PaperWidthMm), HeaderText = "纸宽mm", Width = UiLayout.Scale(90) });
-        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.PaperHeightMm), HeaderText = "纸高mm", Width = UiLayout.Scale(90) });
+        _grid.DataSource = _rows;
 
         _status.Dock = DockStyle.Bottom;
         _status.Height = Math.Max(UiLayout.Scale(28), Font.Height + UiLayout.Scale(10));
@@ -91,7 +87,11 @@ public sealed class TitleBlockLibraryManagerForm : Form
 
     private void AddColumns()
     {
+        _grid.Columns.Clear();
         _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.BlockName), HeaderText = "块名", Width = UiLayout.Scale(190) });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.PaperName), HeaderText = "图幅", Width = UiLayout.Scale(80) });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.PaperWidthMm), HeaderText = "纸宽mm", Width = UiLayout.Scale(90) });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.PaperHeightMm), HeaderText = "纸高mm", Width = UiLayout.Scale(90) });
         _grid.Columns.Add(new DataGridViewCheckBoxColumn { DataPropertyName = nameof(TitleBlockRow.HasPrintRegion), HeaderText = "有打印边界", Width = UiLayout.Scale(96) });
         _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.PrintMinX), HeaderText = "边界MinX", Width = UiLayout.Scale(96) });
         _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.PrintMinY), HeaderText = "边界MinY", Width = UiLayout.Scale(96) });
@@ -126,6 +126,15 @@ public sealed class TitleBlockLibraryManagerForm : Form
         if (invalid != null)
         {
             MessageBox.Show("块名不能为空。", "图框信息库管理", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        var invalidPaper = _rows.FirstOrDefault(x =>
+            !string.IsNullOrWhiteSpace(x.PaperName)
+            && (x.PaperWidthMm <= 0 || x.PaperHeightMm <= 0));
+        if (invalidPaper != null)
+        {
+            MessageBox.Show($"图框 {invalidPaper.BlockName} 设置了图幅，但纸宽/纸高必须大于 0。", "图框信息库管理", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 
@@ -220,7 +229,11 @@ public sealed class TitleBlockLibraryManagerForm : Form
     private sealed class TitleBlockRow
     {
         public string BlockName { get; set; } = "";
+        public string PaperName { get; set; } = "";
+        public double PaperWidthMm { get; set; }
+        public double PaperHeightMm { get; set; }
         public bool HasPrintRegion { get; set; }
+        public string CoordinateMode { get; set; } = "Local";
         public double PrintMinX { get; set; }
         public double PrintMinY { get; set; }
         public double PrintMaxX { get; set; }
@@ -233,9 +246,6 @@ public sealed class TitleBlockLibraryManagerForm : Form
         public double NumberMinY { get; set; }
         public double NumberMaxX { get; set; }
         public double NumberMaxY { get; set; }
-        public string PaperName { get; set; } = "";
-        public double PaperWidthMm { get; set; }
-        public double PaperHeightMm { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
 
@@ -244,7 +254,11 @@ public sealed class TitleBlockLibraryManagerForm : Form
             return new TitleBlockRow
             {
                 BlockName = definition.BlockName,
+                PaperName = definition.PaperName,
+                PaperWidthMm = definition.PaperWidthMm,
+                PaperHeightMm = definition.PaperHeightMm,
                 HasPrintRegion = definition.HasPrintRegion,
+                CoordinateMode = string.IsNullOrWhiteSpace(definition.CoordinateMode) ? "Local" : definition.CoordinateMode,
                 PrintMinX = definition.PrintRegion.MinX,
                 PrintMinY = definition.PrintRegion.MinY,
                 PrintMaxX = definition.PrintRegion.MaxX,
@@ -257,9 +271,6 @@ public sealed class TitleBlockLibraryManagerForm : Form
                 NumberMinY = definition.DrawingNumberRegion.MinY,
                 NumberMaxX = definition.DrawingNumberRegion.MaxX,
                 NumberMaxY = definition.DrawingNumberRegion.MaxY,
-                PaperName = definition.PaperName,
-                PaperWidthMm = definition.PaperWidthMm,
-                PaperHeightMm = definition.PaperHeightMm,
                 CreatedAt = definition.CreatedAt,
                 UpdatedAt = definition.UpdatedAt
             };
@@ -270,11 +281,12 @@ public sealed class TitleBlockLibraryManagerForm : Form
             return new TitleBlockDefinition
             {
                 BlockName = BlockName.Trim(),
-                HasPrintRegion = HasPrintRegion,
-                PrintRegion = LocalRectangle.FromPoints(PrintMinX, PrintMinY, PrintMaxX, PrintMaxY),
                 PaperName = PaperName?.Trim() ?? "",
                 PaperWidthMm = PaperWidthMm,
                 PaperHeightMm = PaperHeightMm,
+                HasPrintRegion = HasPrintRegion,
+                CoordinateMode = string.IsNullOrWhiteSpace(CoordinateMode) ? "Local" : CoordinateMode.Trim(),
+                PrintRegion = LocalRectangle.FromPoints(PrintMinX, PrintMinY, PrintMaxX, PrintMaxY),
                 TitleRegion = LocalRectangle.FromPoints(TitleMinX, TitleMinY, TitleMaxX, TitleMaxY),
                 DrawingNumberRegion = LocalRectangle.FromPoints(NumberMinX, NumberMinY, NumberMaxX, NumberMaxY),
                 CreatedAt = CreatedAt == default ? DateTime.Now : CreatedAt,

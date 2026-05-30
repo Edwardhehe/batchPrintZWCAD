@@ -27,6 +27,7 @@ public sealed class PaperSizeSelectionForm : Form
         UiLayout.ConfigureForm(this, 460, 230, 420, 210);
         MaximizeBox = false;
         MinimizeBox = false;
+        ShowInTaskbar = false;
 
         var root = new TableLayoutPanel
         {
@@ -77,9 +78,12 @@ public sealed class PaperSizeSelectionForm : Form
         var ok = UiLayout.CreateButton("确定", 82);
         ok.Click += (_, _) => SaveAndClose();
         var cancel = UiLayout.CreateButton("取消", 82);
-        cancel.Click += (_, _) => Close();
+        cancel.DialogResult = DialogResult.Cancel;
         buttons.Controls.Add(ok);
         buttons.Controls.Add(cancel);
+
+        AcceptButton = ok;
+        CancelButton = cancel;
 
         root.Controls.Add(fields, 0, 0);
         root.Controls.Add(hint, 0, 1);
@@ -126,20 +130,10 @@ public sealed class PaperSizeSelectionForm : Form
 
     private void ApplyPreset(string paperName)
     {
-        switch (paperName.Trim().ToUpperInvariant())
+        var (width, height) = PaperSizeDetector.GetDefaultSize(paperName.Trim(), PaperWidthMm, PaperHeightMm);
+        if (width > 0 && height > 0)
         {
-            case "A0":
-                SetDimensions(1189, 841);
-                break;
-            case "A1":
-                SetDimensions(841, 594);
-                break;
-            case "A2":
-                SetDimensions(594, 420);
-                break;
-            case "A3":
-                SetDimensions(420, 297);
-                break;
+            SetDimensions(width, height);
         }
     }
 
