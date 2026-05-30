@@ -81,7 +81,7 @@ public sealed class BatchPlotCommands : IExtensionApplication
         editor.WriteMessage($"\n图框库: {TitleBlockLibraryStore.DefaultPath}");
     }
 
-    [CommandMethod("_ZBP_INTERNAL_SHOW_PANEL")]
+    [CommandMethod("_ZBP_INTERNAL_SHOW_PANEL", CommandFlags.Session)]
     public void ShowBatchPlotWindow()
     {
         var doc = CadApp.DocumentManager.MdiActiveDocument;
@@ -92,6 +92,10 @@ public sealed class BatchPlotCommands : IExtensionApplication
 
         using var form = new BatchPlotForm(doc);
         CadApp.ShowModalDialog(form);
+        if (form.HasPendingPrint)
+        {
+            form.ExecutePendingPrint();
+        }
     }
 
     [CommandMethod("_ZBP_INTERNAL_OPEN_CONFIG")]

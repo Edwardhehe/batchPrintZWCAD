@@ -1,9 +1,11 @@
 bin/
 bin-boundary/
+bin-commandprint/
 bin-crossscan/
 bin-crossfix/
 bin-dev/
 bin-dpi/
+bin-filebatch/
 bin-layoutfix/
 bin-layoutwindow/
 bin-menu/

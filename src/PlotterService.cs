@@ -13,10 +13,64 @@ namespace ZwcadBatchPlot;
 
 public static class PlotterService
 {
+    public sealed class PlotJobResult
+    {
+        public PlotJob Job { get; set; } = new();
+        public Exception? Error { get; set; }
+        public bool Succeeded => Error == null;
+    }
+
     private sealed class MediaSelection
     {
         public string Name { get; set; } = "";
         public bool NeedsRotation { get; set; }
+    }
+
+    public static List<PlotJobResult> PlotMany(
+        IReadOnlyList<PlotJob> jobs,
+        string deviceName,
+        string styleSheet,
+        Document currentDocument,
+        AppSettings settings,
+        Action<PlotJob>? beforeJob = null)
+    {
+        var results = new List<PlotJobResult>();
+        var oldActive = CadApp.DocumentManager.MdiActiveDocument;
+
+        foreach (var group in jobs.GroupBy(job => GetPlotGroupKey(job, currentDocument, settings)))
+        {
+            var groupJobs = group.ToList();
+            try
+            {
+                if (group.Key == "__CURRENT__")
+                {
+                    PlotCurrentDocumentGroup(groupJobs, currentDocument, deviceName, styleSheet, settings, beforeJob, results);
+                    continue;
+                }
+
+                if (group.Key.StartsWith("__DB__:", StringComparison.OrdinalIgnoreCase))
+                {
+                    PlotSideDatabaseGroup(groupJobs, groupJobs[0].SourceFile, deviceName, styleSheet, settings, beforeJob, results);
+                    continue;
+                }
+
+                PlotOpenedDocumentGroup(groupJobs, groupJobs[0].SourceFile, deviceName, styleSheet, settings, beforeJob, results);
+            }
+            catch (Exception ex)
+            {
+                foreach (var job in groupJobs)
+                {
+                    results.Add(new PlotJobResult { Job = job, Error = ex });
+                }
+            }
+        }
+
+        if (oldActive != null && !oldActive.IsDisposed)
+        {
+            CadApp.DocumentManager.MdiActiveDocument = oldActive;
+        }
+
+        return results;
     }
 
     public static void Plot(PlotJob job, string deviceName, string styleSheet, Document currentDocument, AppSettings settings)
@@ -44,6 +98,122 @@ public static class PlotterService
         }
 
         PlotOpenedDocument(job, deviceName, styleSheet, settings);
+    }
+
+    private static string GetPlotGroupKey(PlotJob job, Document currentDocument, AppSettings settings)
+    {
+        if (IsCurrentDocumentJob(job, currentDocument))
+        {
+            return "__CURRENT__";
+        }
+
+        var file = string.IsNullOrWhiteSpace(job.SourceFile) ? "" : Path.GetFullPath(job.SourceFile);
+        return settings.OpenExternalDwgForPlot ? file : "__DB__:" + file;
+    }
+
+    private static void PlotCurrentDocumentGroup(
+        IReadOnlyList<PlotJob> jobs,
+        Document currentDocument,
+        string deviceName,
+        string styleSheet,
+        AppSettings settings,
+        Action<PlotJob>? beforeJob,
+        List<PlotJobResult> results)
+    {
+        CadApp.DocumentManager.MdiActiveDocument = currentDocument;
+        foreach (var job in jobs)
+        {
+            try
+            {
+                beforeJob?.Invoke(job);
+                using (currentDocument.LockDocument())
+                {
+                    ActivateLayout(job);
+                    RefreshJobWindowFromOpenedDocument(currentDocument.Database, job);
+                    PlotDatabase(currentDocument.Database, currentDocument.Name, job, deviceName, styleSheet, settings);
+                }
+
+                results.Add(new PlotJobResult { Job = job });
+            }
+            catch (Exception ex)
+            {
+                results.Add(new PlotJobResult { Job = job, Error = ex });
+            }
+        }
+    }
+
+    private static void PlotOpenedDocumentGroup(
+        IReadOnlyList<PlotJob> jobs,
+        string sourceFile,
+        string deviceName,
+        string styleSheet,
+        AppSettings settings,
+        Action<PlotJob>? beforeJob,
+        List<PlotJobResult> results)
+    {
+        var doc = FindOpenDocument(sourceFile);
+        var shouldClose = doc == null;
+        doc ??= CadApp.DocumentManager.Open(sourceFile, false);
+
+        try
+        {
+            CadApp.DocumentManager.MdiActiveDocument = doc;
+            foreach (var job in jobs)
+            {
+                try
+                {
+                    beforeJob?.Invoke(job);
+                    using (doc.LockDocument())
+                    {
+                        ActivateLayout(job);
+                        RefreshJobWindowFromOpenedDocument(doc.Database, job);
+                        PlotDatabase(doc.Database, doc.Name, job, deviceName, styleSheet, settings);
+                    }
+
+                    results.Add(new PlotJobResult { Job = job });
+                }
+                catch (Exception ex)
+                {
+                    results.Add(new PlotJobResult { Job = job, Error = ex });
+                }
+            }
+        }
+        finally
+        {
+            if (shouldClose)
+            {
+                doc.CloseAndDiscard();
+            }
+        }
+    }
+
+    private static void PlotSideDatabaseGroup(
+        IReadOnlyList<PlotJob> jobs,
+        string sourceFile,
+        string deviceName,
+        string styleSheet,
+        AppSettings settings,
+        Action<PlotJob>? beforeJob,
+        List<PlotJobResult> results)
+    {
+        using var db = new Database(false, true);
+        db.ReadDwgFile(sourceFile, FileOpenMode.OpenForReadAndAllShare, true, "");
+        db.CloseInput(true);
+        db.ResolveXrefs(true, false);
+
+        foreach (var job in jobs)
+        {
+            try
+            {
+                beforeJob?.Invoke(job);
+                PlotDatabase(db, Path.GetFileName(sourceFile), job, deviceName, styleSheet, settings);
+                results.Add(new PlotJobResult { Job = job });
+            }
+            catch (Exception ex)
+            {
+                results.Add(new PlotJobResult { Job = job, Error = ex });
+            }
+        }
     }
 
     private static void PlotOpenedDocument(PlotJob job, string deviceName, string styleSheet, AppSettings settings)

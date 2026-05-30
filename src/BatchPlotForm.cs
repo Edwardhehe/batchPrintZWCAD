@@ -25,6 +25,7 @@ public sealed class BatchPlotForm : Form
     private readonly List<string> _logLines = new();
     private readonly AppSettings _settings;
     private string _lastLogPath = "";
+    public bool HasPendingPrint { get; private set; }
 
     public BatchPlotForm(Document currentDocument)
     {
@@ -577,7 +578,101 @@ public sealed class BatchPlotForm : Form
         Directory.CreateDirectory(_outputDirectory.Text);
         SaveCurrentSettings();
         SortAndRefreshOutputPaths();
-        selected = _jobs.Where(x => x.Selected).ToList();
+        HasPendingPrint = true;
+        DialogResult = DialogResult.OK;
+        Close();
+    }
+
+    public void ExecutePendingPrint()
+    {
+        if (!HasPendingPrint)
+        {
+            return;
+        }
+
+        var selected = _jobs.Where(x => x.Selected).ToList();
+        var device = _deviceCombo.SelectedItem?.ToString() ?? "";
+        var style = _styleCombo.SelectedItem?.ToString() ?? "";
+
+        _printButton.Enabled = false;
+        var wasVisible = Visible;
+        if (_settings.OpenExternalDwgForPlot)
+        {
+            Hide();
+            System.Windows.Forms.Application.DoEvents();
+        }
+
+        try
+        {
+            var failed = new List<string>();
+            var results = PlotterService.PlotMany(
+                selected,
+                device,
+                style,
+                _currentDocument,
+                _settings,
+                job => AppendLog("INFO", $"开始打印 {job.DrawingNumber}_{job.Title} -> {job.OutputPath}"));
+
+            foreach (var result in results)
+            {
+                var job = result.Job;
+                if (result.Succeeded)
+                {
+                    AppendLog("INFO", $"打印成功 {job.OutputPath}");
+                    continue;
+                }
+
+                var ex = result.Error!;
+                var message = $"{job.DrawingNumber}_{job.Title}: {ex.Message}";
+                failed.Add(message);
+                AppendLog("ERROR", ex.ToString());
+                AppendLog("ERROR", "打印失败，" + message);
+            }
+
+            foreach (var skipped in selected.Except(results.Select(x => x.Job)))
+            {
+                var message = $"{skipped.DrawingNumber}_{skipped.Title}: 文件打开失败，未开始打印。";
+                failed.Add(message);
+                AppendLog("ERROR", message);
+            }
+
+            var printed = results.Count(x => x.Succeeded);
+            _lastLogPath = BatchPlotLogger.SaveRunLog(_logLines);
+            var summary = $"打印完成: 成功 {printed} 张，失败 {failed.Count} 张。\n日志: {_lastLogPath}";
+            if (failed.Count > 0)
+            {
+                summary += "\n\n失败项:\n" + string.Join("\n", failed);
+            }
+
+            MessageBox.Show(summary, "批量打印", MessageBoxButtons.OK, failed.Count > 0 ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show("打印失败: " + ex.Message, "批量打印", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            if (wasVisible && !Visible)
+            {
+                Show();
+                Activate();
+            }
+
+            _printButton.Enabled = true;
+            RefreshStatus();
+        }
+    }
+
+    private void ExecutePendingPrintLegacy()
+    {
+        if (!HasPendingPrint)
+        {
+            return;
+        }
+
+        var selected = _jobs.Where(x => x.Selected).ToList();
+        var device = _deviceCombo.SelectedItem?.ToString() ?? "";
+        var style = _styleCombo.SelectedItem?.ToString() ?? "";
 
         _printButton.Enabled = false;
         var wasVisible = Visible;
