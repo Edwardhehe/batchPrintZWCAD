@@ -16,6 +16,7 @@ public sealed class AppSettings
     public bool AllowStandardPaperNameFallback { get; set; } = true;
     public bool ShowPlotProgress { get; set; } = true;
     public bool AddSequenceWhenPdfExists { get; set; } = false;
+    public string PdfFileNameSeparator { get; set; } = "_";
     public bool OpenExternalDwgForPlot { get; set; } = true;
     public double DirectoryIndexWidth { get; set; } = 900;
     public double DirectoryNumberWidth { get; set; } = 3200;
@@ -110,6 +111,7 @@ public static class AppSettingsStore
         }
 
         settings.DirectoryTextStyleName ??= "";
+        settings.PdfFileNameSeparator ??= "_";
 
         return settings;
     }

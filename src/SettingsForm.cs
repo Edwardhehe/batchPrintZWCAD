@@ -8,6 +8,8 @@ namespace ZwcadBatchPlot;
 
 public sealed class SettingsForm : Form
 {
+    private const string DefaultTextStyleDisplay = "(默认)";
+
     private readonly Document? _document;
     private readonly CheckBox _rememberOutput = new();
     private readonly TextBox _outputSubfolder = new();
@@ -16,6 +18,7 @@ public sealed class SettingsForm : Form
     private readonly CheckBox _allowPaperNameFallback = new();
     private readonly CheckBox _showProgress = new();
     private readonly CheckBox _addSequenceWhenPdfExists = new();
+    private readonly ComboBox _pdfFileNameSeparator = new();
     private readonly CheckBox _openExternalDwgForPlot = new();
     private readonly NumericUpDown _directoryIndexWidth = new();
     private readonly NumericUpDown _directoryNumberWidth = new();
@@ -90,7 +93,7 @@ public sealed class SettingsForm : Form
     private TabPage BuildGeneralTab()
     {
         var page = new TabPage("常规");
-        var table = CreateSettingsTable(8);
+        var table = CreateSettingsTable(9);
 
         _rememberOutput.Text = "记住上次输出目录";
         _rememberOutput.AutoSize = true;
@@ -116,6 +119,18 @@ public sealed class SettingsForm : Form
         _addSequenceWhenPdfExists.AutoSize = true;
         _addSequenceWhenPdfExists.Dock = DockStyle.Fill;
 
+        _pdfFileNameSeparator.DropDownStyle = ComboBoxStyle.DropDownList;
+        _pdfFileNameSeparator.Dock = DockStyle.Left;
+        _pdfFileNameSeparator.Width = UiLayout.Scale(220);
+        _pdfFileNameSeparator.Items.AddRange(new object[]
+        {
+            "_  下划线",
+            "空格",
+            "-  短横线",
+            " -  前后带空格",
+            "无"
+        });
+
         _openExternalDwgForPlot.Text = "跨文件打印时临时打开 DWG";
         _openExternalDwgForPlot.AutoSize = true;
         _openExternalDwgForPlot.Dock = DockStyle.Fill;
@@ -127,7 +142,8 @@ public sealed class SettingsForm : Form
         AddRow(table, 4, "", _allowPaperNameFallback);
         AddRow(table, 5, "", _showProgress);
         AddRow(table, 6, "", _addSequenceWhenPdfExists);
-        AddRow(table, 7, "", _openExternalDwgForPlot);
+        AddRow(table, 7, "PDF文件名连接符", _pdfFileNameSeparator);
+        AddRow(table, 8, "", _openExternalDwgForPlot);
         page.Controls.Add(table);
         return page;
     }
@@ -225,6 +241,7 @@ public sealed class SettingsForm : Form
         _allowPaperNameFallback.Checked = settings.AllowStandardPaperNameFallback;
         _showProgress.Checked = settings.ShowPlotProgress;
         _addSequenceWhenPdfExists.Checked = settings.AddSequenceWhenPdfExists;
+        SelectPdfFileNameSeparator(settings.PdfFileNameSeparator);
         _openExternalDwgForPlot.Checked = settings.OpenExternalDwgForPlot;
         _directoryIndexWidth.Value = Clamp(_directoryIndexWidth, settings.DirectoryIndexWidth);
         _directoryNumberWidth.Value = Clamp(_directoryNumberWidth, settings.DirectoryNumberWidth);
@@ -259,6 +276,7 @@ public sealed class SettingsForm : Form
         current.AllowStandardPaperNameFallback = _allowPaperNameFallback.Checked;
         current.ShowPlotProgress = _showProgress.Checked;
         current.AddSequenceWhenPdfExists = _addSequenceWhenPdfExists.Checked;
+        current.PdfFileNameSeparator = ReadPdfFileNameSeparator();
         current.OpenExternalDwgForPlot = _openExternalDwgForPlot.Checked;
         current.DirectoryIndexWidth = (double)_directoryIndexWidth.Value;
         current.DirectoryNumberWidth = (double)_directoryNumberWidth.Value;
@@ -267,16 +285,45 @@ public sealed class SettingsForm : Form
         current.DirectoryRemarkWidth = (double)_directoryRemarkWidth.Value;
         current.DirectoryRowHeight = (double)_directoryRowHeight.Value;
         current.DirectoryTextHeightRatio = (double)_directoryTextRatio.Value;
-        current.DirectoryTextStyleName = _directoryTextStyle.SelectedItem?.ToString() == "(默认)"
+        current.DirectoryTextStyleName = _directoryTextStyle.SelectedItem?.ToString() == DefaultTextStyleDisplay
             ? ""
             : _directoryTextStyle.SelectedItem?.ToString() ?? "";
         return current;
     }
 
+    private string ReadPdfFileNameSeparator()
+    {
+        return _pdfFileNameSeparator.SelectedItem?.ToString() switch
+        {
+            "空格" => " ",
+            "-  短横线" => "-",
+            " -  前后带空格" => " - ",
+            "无" => "",
+            _ => "_"
+        };
+    }
+
+    private void SelectPdfFileNameSeparator(string? separator)
+    {
+        var item = separator switch
+        {
+            " " => "空格",
+            "-" => "-  短横线",
+            " - " => " -  前后带空格",
+            "" => "无",
+            _ => "_  下划线"
+        };
+        _pdfFileNameSeparator.SelectedItem = item;
+        if (_pdfFileNameSeparator.SelectedIndex < 0 && _pdfFileNameSeparator.Items.Count > 0)
+        {
+            _pdfFileNameSeparator.SelectedIndex = 0;
+        }
+    }
+
     private void LoadTextStyles()
     {
         _directoryTextStyle.Items.Clear();
-        _directoryTextStyle.Items.Add("(默认)");
+        _directoryTextStyle.Items.Add(DefaultTextStyleDisplay);
 
         if (_document != null)
         {
@@ -308,7 +355,7 @@ public sealed class SettingsForm : Form
 
     private void SelectTextStyle(string? name)
     {
-        var target = string.IsNullOrWhiteSpace(name) ? "(默认)" : name;
+        var target = string.IsNullOrWhiteSpace(name) ? DefaultTextStyleDisplay : name;
         for (var i = 0; i < _directoryTextStyle.Items.Count; i++)
         {
             if (string.Equals(_directoryTextStyle.Items[i]?.ToString(), target, StringComparison.OrdinalIgnoreCase))

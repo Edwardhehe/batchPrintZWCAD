@@ -48,8 +48,15 @@ public sealed class BatchPlotForm : Form
 
     private void InitializeComponents()
     {
-        Text = "批量打印";
+        Text = "批量打印 - ZWCAD";
         UiLayout.ConfigureForm(this, 1320, 820, 1080, 680);
+        var tips = new ToolTip
+        {
+            AutoPopDelay = 8000,
+            InitialDelay = 450,
+            ReshowDelay = 100,
+            ShowAlways = true
+        };
 
         var top = new TableLayoutPanel
         {
@@ -132,8 +139,11 @@ public sealed class BatchPlotForm : Form
         var invertButton = MakeButton("反选", 68);
         invertButton.Click += (_, _) => InvertSelected();
 
-        var removeButton = MakeButton("删除选中", 92);
-        removeButton.Click += (_, _) => RemoveGridSelection();
+        var removeHighlightedButton = MakeButton("删除行", 82);
+        removeHighlightedButton.Click += (_, _) => RemoveHighlightedJobs();
+
+        var clearButton = MakeButton("清空清单", 92);
+        clearButton.Click += (_, _) => ClearJobs();
 
         var refreshNameButton = MakeButton("刷新文件名", 104);
         refreshNameButton.Click += (_, _) => SortAndRefreshOutputPaths();
@@ -146,9 +156,6 @@ public sealed class BatchPlotForm : Form
 
         var openLogButton = MakeButton("打开日志", 92);
         openLogButton.Click += (_, _) => OpenLastLog();
-
-        var manageLibraryButton = MakeButton("图框库管理", 104);
-        manageLibraryButton.Click += (_, _) => ManageLibrary();
 
         var settingsButton = MakeButton("设置", 72);
         settingsButton.Click += (_, _) => ShowSettings();
@@ -165,18 +172,36 @@ public sealed class BatchPlotForm : Form
         var specifiedFolderButton = MakeButton("指定文件夹", 96);
         specifiedFolderButton.Click += (_, _) => ChooseOutputDirectory();
 
-        var importButton = MakeButton("导入图框库", 104);
-        importButton.Click += (_, _) => ImportLibrary();
-
-        var exportButton = MakeButton("导出图框库", 104);
-        exportButton.Click += (_, _) => ExportLibrary();
-
         _printButton.Text = "开始打印";
         _printButton.Width = UiLayout.ButtonWidth(_printButton.Text, 104);
         _printButton.Height = UiLayout.ButtonHeight();
         _printButton.Dock = DockStyle.Fill;
         _printButton.Margin = new Padding(UiLayout.Scale(8), UiLayout.Scale(2), 0, UiLayout.Scale(6));
+        _printButton.BackColor = Color.FromArgb(0, 120, 215);
+        _printButton.ForeColor = Color.White;
+        _printButton.FlatStyle = FlatStyle.Flat;
+        _printButton.FlatAppearance.BorderColor = Color.FromArgb(0, 95, 170);
+        _printButton.UseVisualStyleBackColor = false;
         _printButton.Click += (_, _) => PrintSelectedJobs();
+        tips.SetToolTip(_printButton, "打印当前勾选的图纸。");
+
+        SetTip(scanButton, "扫描当前打开图纸中的全部匹配图框。");
+        SetTip(scanWindowButton, "回到 CAD 框选区域，只识别框内图框。");
+        SetTip(addFilesButton, "选择一个或多个 DWG，加入批量打印清单。");
+        SetTip(selectAllButton, "勾选全部图纸用于打印。");
+        SetTip(selectNoneButton, "取消全部打印勾选。");
+        SetTip(invertButton, "反转打印勾选状态。");
+        SetTip(removeHighlightedButton, "删除鼠标高亮的行，可 Ctrl/Shift 多选。");
+        SetTip(clearButton, "清空当前清单，不影响 CAD 文件和图框库。");
+        SetTip(refreshNameButton, "按当前图号、图名和设置重新生成输出 PDF 文件名。");
+        SetTip(exportCsvButton, "导出当前清单为 CSV。");
+        SetTip(generateDirectoryButton, "在当前 CAD 指定基点，生成图纸目录表。");
+        SetTip(openLogButton, "打开最近一次运行日志。");
+        SetTip(settingsButton, "打开批量打印设置。");
+        SetTip(chooseOutputButton, "选择 PDF 输出目录。");
+        SetTip(currentFolderButton, "输出到所选 CAD 文件所在目录。");
+        SetTip(currentPdfButton, "输出到所选 CAD 文件所在目录下的 PDF 文件夹。");
+        SetTip(specifiedFolderButton, "手动指定 PDF 输出目录。");
 
         _outputDirectory.Dock = DockStyle.Fill;
         _outputDirectory.Margin = new Padding(0, UiLayout.Scale(4), UiLayout.Scale(8), UiLayout.Scale(8));
@@ -193,18 +218,20 @@ public sealed class BatchPlotForm : Form
         actionRow.Controls.Add(scanButton);
         actionRow.Controls.Add(scanWindowButton);
         actionRow.Controls.Add(addFilesButton);
+        actionRow.Controls.Add(MakeSeparator());
         actionRow.Controls.Add(selectAllButton);
         actionRow.Controls.Add(selectNoneButton);
         actionRow.Controls.Add(invertButton);
-        actionRow.Controls.Add(removeButton);
+        actionRow.Controls.Add(MakeSeparator());
+        actionRow.Controls.Add(removeHighlightedButton);
+        actionRow.Controls.Add(clearButton);
+        actionRow.Controls.Add(MakeSeparator());
         actionRow.Controls.Add(refreshNameButton);
         actionRow.Controls.Add(exportCsvButton);
         actionRow.Controls.Add(generateDirectoryButton);
+        actionRow.Controls.Add(MakeSeparator());
         actionRow.Controls.Add(openLogButton);
-        actionRow.Controls.Add(manageLibraryButton);
         actionRow.Controls.Add(settingsButton);
-        actionRow.Controls.Add(importButton);
-        actionRow.Controls.Add(exportButton);
 
         settingsRow.Controls.Add(MakeLabel("输出:"), 0, 0);
         settingsRow.Controls.Add(_outputDirectory, 1, 0);
@@ -243,22 +270,56 @@ public sealed class BatchPlotForm : Form
         Controls.Add(_grid);
         Controls.Add(_statusLabel);
         Controls.Add(top);
+
+        void SetTip(Control control, string text)
+        {
+            tips.SetToolTip(control, text);
+        }
+
+        Control MakeSeparator()
+        {
+            return new Label
+            {
+                Width = UiLayout.Scale(1),
+                Height = UiLayout.ButtonHeight() - UiLayout.Scale(8),
+                BackColor = Color.FromArgb(205, 205, 205),
+                Margin = new Padding(UiLayout.Scale(4), UiLayout.Scale(6), UiLayout.Scale(12), UiLayout.Scale(4))
+            };
+        }
     }
 
     private void AddColumns()
     {
         _grid.Columns.Add(new DataGridViewCheckBoxColumn { DataPropertyName = nameof(PlotJob.Selected), HeaderText = "打印", Width = UiLayout.Scale(58) });
-        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(PlotJob.DrawingNumber), HeaderText = "图号", Width = UiLayout.Scale(160) });
-        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(PlotJob.Title), HeaderText = "图名", Width = UiLayout.Scale(240) });
-        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(PlotJob.PaperName), HeaderText = "图幅", Width = UiLayout.Scale(82) });
-        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(PlotJob.ScaleText), HeaderText = "比例", Width = UiLayout.Scale(82) });
-        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(PlotJob.SizeText), HeaderText = "实际尺寸", Width = UiLayout.Scale(150) });
-        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(PlotJob.PaperSizeText), HeaderText = "输出纸张", Width = UiLayout.Scale(150) });
-        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(PlotJob.BlockName), HeaderText = "块名", Width = UiLayout.Scale(150) });
-        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(PlotJob.SpaceName), HeaderText = "空间", Width = UiLayout.Scale(110) });
-        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(PlotJob.SourceFile), HeaderText = "文件", Width = UiLayout.Scale(320) });
-        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(PlotJob.OutputPath), HeaderText = "输出PDF", Width = UiLayout.Scale(360) });
-        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(PlotJob.DetectionNote), HeaderText = "识别说明", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill, MinimumWidth = UiLayout.Scale(220) });
+        _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.DrawingNumber), "图号", 160, readOnly: false));
+        _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.Title), "图名", 240, readOnly: false));
+        _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.PaperName), "图幅", 82));
+        _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.ScaleText), "比例", 82));
+        _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.SizeText), "实际尺寸", 150));
+        _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.PaperSizeText), "输出纸张", 150));
+        _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.BlockName), "块名", 150));
+        _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.SpaceName), "空间", 110));
+        _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.SourceFile), "文件", 320));
+        _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.OutputPath), "输出PDF", 360));
+        _grid.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            DataPropertyName = nameof(PlotJob.DetectionNote),
+            HeaderText = "识别说明",
+            AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+            MinimumWidth = UiLayout.Scale(220),
+            ReadOnly = true
+        });
+
+        static DataGridViewTextBoxColumn MakeTextColumn(string propertyName, string header, int width, bool readOnly = true)
+        {
+            return new DataGridViewTextBoxColumn
+            {
+                DataPropertyName = propertyName,
+                HeaderText = header,
+                Width = UiLayout.Scale(width),
+                ReadOnly = readOnly
+            };
+        }
     }
 
     private void LoadPlotOptions()
@@ -498,20 +559,28 @@ public sealed class BatchPlotForm : Form
         RefreshStatus();
     }
 
-    private void RemoveGridSelection()
+    private void RemoveHighlightedJobs()
     {
-        if (_grid.SelectedRows.Count == 0)
-        {
-            return;
-        }
-
-        var selected = _grid.SelectedRows
+        _grid.EndEdit();
+        var highlightedJobs = _grid.SelectedRows
             .Cast<DataGridViewRow>()
             .Select(row => row.DataBoundItem)
             .OfType<PlotJob>()
+            .Distinct()
             .ToList();
 
-        foreach (var job in selected)
+        if (highlightedJobs.Count == 0 && _grid.CurrentRow?.DataBoundItem is PlotJob currentJob)
+        {
+            highlightedJobs.Add(currentJob);
+        }
+
+        if (highlightedJobs.Count == 0)
+        {
+            MessageBox.Show("没有高亮选中的图纸行。", "批量打印", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        foreach (var job in highlightedJobs)
         {
             _jobs.Remove(job);
         }
@@ -519,9 +588,27 @@ public sealed class BatchPlotForm : Form
         SortAndRefreshOutputPaths();
     }
 
+    private void ClearJobs()
+    {
+        _grid.EndEdit();
+        if (_jobs.Count == 0)
+        {
+            return;
+        }
+
+        if (MessageBox.Show("确定清空当前图纸清单吗？", "批量打印", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK)
+        {
+            return;
+        }
+
+        _jobs.Clear();
+        _selectedDwgFiles.Clear();
+        RefreshStatus();
+    }
+
     private string BuildOutputPath(PlotJob job, ISet<string> reservedPaths)
     {
-        var baseName = $"{job.DrawingNumber}_{job.Title}";
+        var baseName = $"{job.DrawingNumber}{_settings.PdfFileNameSeparator}{job.Title}";
         return FileNameSanitizer.MakeUnique(_outputDirectory.Text, baseName, reservedPaths, _settings.AddSequenceWhenPdfExists);
     }
 
@@ -688,6 +775,7 @@ public sealed class BatchPlotForm : Form
         _settings.AllowStandardPaperNameFallback = updated.AllowStandardPaperNameFallback;
         _settings.ShowPlotProgress = updated.ShowPlotProgress;
         _settings.AddSequenceWhenPdfExists = updated.AddSequenceWhenPdfExists;
+        _settings.PdfFileNameSeparator = updated.PdfFileNameSeparator;
         _settings.OpenExternalDwgForPlot = updated.OpenExternalDwgForPlot;
         _settings.DirectoryIndexWidth = updated.DirectoryIndexWidth;
         _settings.DirectoryNumberWidth = updated.DirectoryNumberWidth;
