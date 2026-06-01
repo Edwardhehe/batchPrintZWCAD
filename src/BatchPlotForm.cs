@@ -154,6 +154,9 @@ public sealed class BatchPlotForm : Form
         var generateDirectoryButton = MakeButton("生成目录", 92);
         generateDirectoryButton.Click += (_, _) => GenerateDrawingDirectory();
 
+        var previewPdfButton = MakeButton("PDF工具", 88);
+        previewPdfButton.Click += (_, _) => PreviewPdfFiles();
+
         var openLogButton = MakeButton("打开日志", 92);
         openLogButton.Click += (_, _) => OpenLastLog();
 
@@ -196,6 +199,7 @@ public sealed class BatchPlotForm : Form
         SetTip(refreshNameButton, "按当前图号、图名和设置重新生成输出 PDF 文件名。");
         SetTip(exportCsvButton, "导出当前清单为 CSV。");
         SetTip(generateDirectoryButton, "在当前 CAD 指定基点，生成图纸目录表。");
+        SetTip(previewPdfButton, "跨文件阅读当前清单中已经生成的 PDF，并支持合并 PDF、批量改名。");
         SetTip(openLogButton, "打开最近一次运行日志。");
         SetTip(settingsButton, "打开批量打印设置。");
         SetTip(chooseOutputButton, "选择 PDF 输出目录。");
@@ -229,6 +233,7 @@ public sealed class BatchPlotForm : Form
         actionRow.Controls.Add(refreshNameButton);
         actionRow.Controls.Add(exportCsvButton);
         actionRow.Controls.Add(generateDirectoryButton);
+        actionRow.Controls.Add(previewPdfButton);
         actionRow.Controls.Add(MakeSeparator());
         actionRow.Controls.Add(openLogButton);
         actionRow.Controls.Add(settingsButton);
@@ -720,6 +725,26 @@ public sealed class BatchPlotForm : Form
             Show();
             Activate();
         }
+    }
+
+    private void PreviewPdfFiles()
+    {
+        var existingPdfs = _jobs
+            .Select(x => x.OutputPath)
+            .Where(x => !string.IsNullOrWhiteSpace(x) && File.Exists(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (existingPdfs.Count == 0 && Directory.Exists(_outputDirectory.Text))
+        {
+            existingPdfs = Directory
+                .EnumerateFiles(_outputDirectory.Text, "*.pdf", SearchOption.TopDirectoryOnly)
+                .OrderBy(Path.GetFileNameWithoutExtension, NaturalStringComparer.Instance)
+                .ToList();
+        }
+
+        using var form = new PdfPreviewForm(existingPdfs);
+        form.ShowDialog(this);
     }
 
     private void ManageLibrary()

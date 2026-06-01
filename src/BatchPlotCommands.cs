@@ -46,6 +46,19 @@ public sealed class BatchPlotCommands : IExtensionApplication
         ShowBatchPlotWindowCore();
     }
 
+    [CommandMethod("ZBP_PDF_VIEWER", CommandFlags.Session)]
+    public void ShowPdfViewer()
+    {
+        using var form = new PdfPreviewForm(Array.Empty<string>());
+        CadApp.ShowModalDialog(form);
+    }
+
+    [CommandMethod("_ZBP_INTERNAL_PDF_VIEWER", CommandFlags.Session)]
+    public void ShowPdfViewerLegacy()
+    {
+        ShowPdfViewer();
+    }
+
     [CommandMethod("ZBP_OPEN_CONFIG")]
     public void OpenConfigDirectory()
     {

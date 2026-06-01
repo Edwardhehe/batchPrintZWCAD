@@ -17,6 +17,9 @@ bin-directorystylefix/
 bin-dpi/
 bin-filebatch/
 bin-finalcheck/
+bin-pdfpreview/
+bin-pdftools/
+bin-releasecheck/
 bin-filenameseparator/
 bin-fixedpaper/
 bin-guifix/
@@ -52,3 +55,4 @@ release/
 TitleBlockLibrary.json
 Settings.json
 Logs/
+FileTools/

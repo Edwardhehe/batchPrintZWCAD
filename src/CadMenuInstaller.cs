@@ -63,6 +63,7 @@ public static class CadMenuInstaller
             AddMenuItem(menu, "新增图框", "ZBP_ADD_TITLE_BLOCK ");
             AddMenuItem(menu, "图框库管理", "ZBP_MANAGE_LIBRARY ");
             AddMenuItem(menu, "批量打印", "ZBP_SHOW_PANEL ");
+            AddMenuItem(menu, "PDF跨文件阅读", "ZBP_PDF_VIEWER ");
             AddSeparator(menu);
             AddMenuItem(menu, "设置", "ZBP_SETTINGS ");
             AddMenuItem(menu, "安装自动加载", "ZBP_INSTALL_AUTOLOAD ");

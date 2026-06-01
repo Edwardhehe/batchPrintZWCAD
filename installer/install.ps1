@@ -13,11 +13,14 @@ if (!(Test-Path $sourceDll)) {
 }
 
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
-Copy-Item -Force -Path $sourceDll -Destination $InstallDir
 
-$jsonDll = Join-Path $scriptDir "Newtonsoft.Json.dll"
-if (Test-Path $jsonDll) {
-    Copy-Item -Force -Path $jsonDll -Destination $InstallDir
+Get-ChildItem -Path (Join-Path $scriptDir "*") -File -Include *.dll,*.pdb,*.json,*.config | ForEach-Object {
+    Copy-Item -Force -Path $_.FullName -Destination $InstallDir
+}
+
+$runtimeDir = Join-Path $scriptDir "runtimes"
+if (Test-Path $runtimeDir) {
+    Copy-Item -Recurse -Force -Path $runtimeDir -Destination $InstallDir
 }
 
 $loader = Join-Path $InstallDir "BatchPlotter.dll"
