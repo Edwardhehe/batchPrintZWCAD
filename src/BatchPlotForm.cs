@@ -154,6 +154,9 @@ public sealed class BatchPlotForm : Form
         var generateDirectoryButton = MakeButton("生成目录", 92);
         generateDirectoryButton.Click += (_, _) => GenerateDrawingDirectory();
 
+        var splitDwgButton = MakeButton("批量拆图", 92);
+        splitDwgButton.Click += (_, _) => SplitSelectedDwgs();
+
         var previewPdfButton = MakeButton("PDF工具", 88);
         previewPdfButton.Click += (_, _) => PreviewPdfFiles();
 
@@ -199,6 +202,7 @@ public sealed class BatchPlotForm : Form
         SetTip(refreshNameButton, "按当前图号、图名和设置重新生成输出 PDF 文件名。");
         SetTip(exportCsvButton, "导出当前清单为 CSV。");
         SetTip(generateDirectoryButton, "在当前 CAD 指定基点，生成图纸目录表。");
+        SetTip(splitDwgButton, "按当前勾选图纸拆成单独 DWG。模型空间生成轻量新图，布局空间保留原模型并清理目标布局。");
         SetTip(previewPdfButton, "跨文件阅读当前清单中已经生成的 PDF，并支持合并 PDF、批量改名。");
         SetTip(openLogButton, "打开最近一次运行日志。");
         SetTip(settingsButton, "打开批量打印设置。");
@@ -233,6 +237,7 @@ public sealed class BatchPlotForm : Form
         actionRow.Controls.Add(refreshNameButton);
         actionRow.Controls.Add(exportCsvButton);
         actionRow.Controls.Add(generateDirectoryButton);
+        actionRow.Controls.Add(splitDwgButton);
         actionRow.Controls.Add(previewPdfButton);
         actionRow.Controls.Add(MakeSeparator());
         actionRow.Controls.Add(openLogButton);
@@ -745,6 +750,71 @@ public sealed class BatchPlotForm : Form
 
         using var form = new PdfPreviewForm(existingPdfs);
         form.ShowDialog(this);
+    }
+
+    private void SplitSelectedDwgs()
+    {
+        _grid.EndEdit();
+        var selectedJobs = _jobs.Where(x => x.Selected).ToList();
+        if (selectedJobs.Count == 0)
+        {
+            MessageBox.Show("请先勾选需要拆图的图纸。", "批量拆图", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        var confirm = MessageBox.Show(
+            $"将按当前勾选清单拆出 {selectedJobs.Count} 个 DWG 文件。\n\n模型空间: 新建轻量 DWG，只复制图框范围内或相交对象，打开后自动居中显示。\n布局空间: 不动模型空间，只保留当前布局并清理布局内其他图素。\n\n输出位置: 每个源 DWG 所在目录下的 DWG 文件夹。\n\n是否继续？",
+            "批量拆图",
+            MessageBoxButtons.OKCancel,
+            MessageBoxIcon.Question);
+        if (confirm != DialogResult.OK)
+        {
+            return;
+        }
+
+        Cursor = Cursors.WaitCursor;
+        Enabled = false;
+        try
+        {
+            AppendLog("INFO", $"开始批量拆图，共 {selectedJobs.Count} 张。");
+            var results = DwgSplitService.SplitMany(
+                selectedJobs,
+                _currentDocument,
+                _settings,
+                job => AppendLog("INFO", $"开始拆图 {job.DrawingNumber}_{job.Title}"));
+
+            var success = results.Count(x => x.Error == null);
+            var failed = results.Count - success;
+            foreach (var result in results)
+            {
+                if (result.Error == null)
+                {
+                    var actionText = result.Job.IsPaperSpace ? "清理" : "跳过";
+                    AppendLog("INFO", $"拆图成功 {result.OutputPath}，保留 {result.KeptEntities} 个对象，{actionText} {result.RemovedEntities} 个对象，未知外包框保留 {result.UnknownExtentsKept} 个。");
+                }
+                else
+                {
+                    AppendLog("ERROR", $"拆图失败 {result.Job.DrawingNumber}_{result.Job.Title}: {result.Error.Message}");
+                }
+            }
+
+            _lastLogPath = BatchPlotLogger.SaveRunLog(_logLines);
+            RefreshStatus();
+
+            var failedText = failed == 0
+                ? ""
+                : "\n\n失败项:\n" + string.Join("\n", results.Where(x => x.Error != null).Take(20).Select(x => $"{x.Job.DrawingNumber}_{x.Job.Title}: {x.Error!.Message}"));
+            MessageBox.Show(
+                $"拆图完成: 成功 {success} 张，失败 {failed} 张。\n日志:\n{_lastLogPath}{failedText}",
+                "批量拆图",
+                MessageBoxButtons.OK,
+                failed == 0 ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+        }
+        finally
+        {
+            Enabled = true;
+            Cursor = Cursors.Default;
+        }
     }
 
     private void ManageLibrary()
