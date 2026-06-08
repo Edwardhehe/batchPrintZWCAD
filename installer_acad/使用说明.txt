@@ -1,0 +1,26 @@
+AutoCAD 批量打印插件
+
+支持版本：
+- AcadBatchPlot.dll：AutoCAD 2021 ~ 2024（.NET Framework 4.8）
+- AcadBatchPlot.Core.dll：AutoCAD 2025 及以后（.NET 8）
+
+安装：
+1. 关闭 AutoCAD。
+2. 将对应版本的 DLL 和安装脚本放在同一文件夹。
+3. 双击"安装.cmd"。
+4. 重新打开 AutoCAD。
+5. AutoCAD 2021 ~ 2024 菜单栏会出现"批量打印"；AutoCAD 2025 及以后如果菜单栏未显示，可执行 ZBP_SHOW_PANEL 打开主界面。
+
+卸载：
+1. 关闭 AutoCAD。
+2. 双击"卸载.cmd"。
+3. 卸载只删除自动加载注册表项和插件文件，不删除图框库、设置和日志。
+
+手动加载：
+如果不想安装自动加载，也可以在 AutoCAD 中执行 NETLOAD，选择对应的 DLL。
+
+用户数据位置：
+%APPDATA%\AcadBatchPlot
+
+插件安装位置：
+%LOCALAPPDATA%\AcadBatchPlot\Plugin

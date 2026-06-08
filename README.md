@@ -1,6 +1,18 @@
 # 中望 CAD 批量打印插件
 
-一个面向中望 CAD 2025 的 .NET 批量打印插件。插件可以学习图框块，识别图名、图号、图幅、比例，支持跨文件批量扫描和打印，并按 `图号_图名.pdf` 输出 PDF。
+一个面向中望 CAD 和 AutoCAD 的 .NET 批量打印插件。插件可以学习图框块，识别图名、图号、图幅、比例，支持跨文件批量扫描和打印，并按 `图号_图名.pdf` 输出 PDF。
+
+## 版本选择
+
+发布包按 CAD 平台和 .NET 运行时拆分：
+
+| CAD 平台 | 适用版本 | 加载 DLL |
+| --- | --- | --- |
+| 中望 CAD | 当前主要面向 ZWCAD 2025 x64 | `BatchPlotter.dll` |
+| AutoCAD | AutoCAD 2021 ~ 2024 x64 | `AcadBatchPlot.dll` |
+| AutoCAD | AutoCAD 2025 及以后 x64 | `AcadBatchPlot.Core.dll` |
+
+AutoCAD 2025 及以后使用 .NET 8，AutoCAD 2021 ~ 2024 使用 .NET Framework 4.8，因此需要分别发布 DLL。代码主体复用，但项目文件和 CAD 托管 API 引用不同。
 
 ## 主要功能
 
@@ -37,6 +49,15 @@
 在中望 CAD 中执行 `NETLOAD`，选择编译后的 `BatchPlotter.dll`。
 
 如果已经加载过旧版本，建议重启 CAD 后再加载新 DLL，或者在菜单里点击“刷新菜单”。
+
+### AutoCAD 发布包
+
+AutoCAD 版本下载对应发布包后，关闭 AutoCAD，双击 `安装.cmd`。也可以手动 `NETLOAD`：
+
+- AutoCAD 2021 ~ 2024：选择 `AcadBatchPlot.dll`。
+- AutoCAD 2025 及以后：选择 `AcadBatchPlot.Core.dll`。
+
+AutoCAD 2025 及以后如果菜单栏未显示，可以执行 `ZBP_SHOW_PANEL` 打开批量打印主界面。
 
 ## 菜单说明
 
@@ -136,7 +157,7 @@ PDF 工具支持：
 
 ## 开发
 
-项目目标框架为 `.NET Framework 4.8`，依赖中望 CAD 的托管 DLL：
+中望 CAD 项目目标框架为 `.NET Framework 4.8`，依赖中望 CAD 的托管 DLL：
 
 - `ZwManaged.dll`
 - `ZwDatabaseMgd.dll`
@@ -170,6 +191,18 @@ dotnet build .\BatchPlotter.csproj -c Release -o .\bin-dev
 
 ```powershell
 dotnet build .\BatchPlotter.csproj -c Release -o .\release\ZwcadBatchPlot
+```
+
+AutoCAD 2021 ~ 2024:
+
+```powershell
+dotnet build .\AcadBatchPlot.csproj -c Release -o .\release\AcadBatchPlot-AutoCAD2021-2024
+```
+
+AutoCAD 2025 及以后:
+
+```powershell
+dotnet build .\AcadBatchPlot.Core.csproj -c Release -o .\release\AcadBatchPlot-AutoCAD2025Plus
 ```
 
 ## 说明

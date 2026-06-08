@@ -1,4 +1,6 @@
 bin/
+bin-acad/
+bin-acad-core/
 bin-addblockfix/
 bin-addblocksavefix/
 bin-addblockcmdfix/
@@ -50,6 +52,8 @@ bin-ui/
 bin-visible/
 bin-zwmenu/
 obj/
+_tmp*/
+._tmp*/
 release/
 .vs/
 *.user

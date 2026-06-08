@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <PlatformTarget>x64</PlatformTarget>
+    <Version>1.5.0</Version>
+    <AssemblyVersion>1.5.0.0</AssemblyVersion>
+    <FileVersion>1.5.0.0</FileVersion>
+    <AssemblyName>AcadBatchPlot</AssemblyName>
+    <RootNamespace>ZwcadBatchPlot</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <OutputPath>bin-acad\</OutputPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="src_acad\**\*.cs" />
+    <EmbeddedResource Include="src_acad\**\*.resx" />
+    <None Remove="src_acad\**\*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="FileTools\**\*.cs" />
+    <EmbeddedResource Remove="FileTools\**\*" />
+    <None Remove="FileTools\**\*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <PackageReference Include="AutoCAD.NET" Version="20.0.1">
+      <PrivateAssets>all</PrivateAssets>
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2535.41" />
+    <PackageReference Include="PDFsharp" Version="1.50.5147" />
+  </ItemGroup>
+</Project>
