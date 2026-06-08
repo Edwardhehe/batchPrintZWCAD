@@ -2,6 +2,7 @@ bin/
 bin-acad/
 bin-acad2019/
 bin-acad-core/
+bin-acad-core-publish/
 bin-addblockfix/
 bin-addblocksavefix/
 bin-addblockcmdfix/
@@ -51,6 +52,7 @@ bin-splitview/
 bin-textpriorityfix/
 bin-ui/
 bin-visible/
+bin-zwcad/
 bin-zwmenu/
 obj/
 obj-*/

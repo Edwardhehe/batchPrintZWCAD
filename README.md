@@ -2,6 +2,10 @@
 
 一个面向中望 CAD 和 AutoCAD 的 .NET 批量打印插件。插件可以学习图框块，识别图名、图号、图幅、比例，支持跨文件批量扫描和打印，并按 `图号_图名.pdf` 输出 PDF。
 
+## 使用教程
+
+图文教程网页：[docs/tutorial.html](docs/tutorial.html)
+
 ## 版本选择
 
 发布包按 CAD 平台和 .NET 运行时拆分：
@@ -60,6 +64,8 @@ AutoCAD 版本下载对应发布包后，关闭 AutoCAD，双击 `安装.cmd`。
 - AutoCAD 2025 及以后：选择 `AcadBatchPlot.Core.dll`。
 
 AutoCAD 2025 及以后如果菜单栏未显示，可以执行 `ZBP_SHOW_PANEL` 打开批量打印主界面。
+
+如果 AutoCAD 2019 ~ 2024 点击菜单后提示 `未知命令 "^C^CZBP_..."`，请升级到 v1.5.2 或更新版本。升级后若旧菜单仍存在，执行一次 `ZBP_RELOAD_MENU`，或在菜单中点击“刷新菜单”，让插件重建菜单项。
 
 ## 菜单说明
 

@@ -1,0 +1,660 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CAD 批量打印插件使用教程</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #1b2430;
+      --muted: #5d6876;
+      --line: #d9dee7;
+      --panel: #ffffff;
+      --soft: #f5f7fb;
+      --brand: #1769aa;
+      --brand-dark: #0f4774;
+      --ok: #1b7f5a;
+      --warn: #a35d00;
+      --shadow: 0 14px 36px rgba(21, 35, 54, .10);
+      --radius: 8px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", Arial, sans-serif;
+      color: var(--ink);
+      background: #eef2f7;
+      line-height: 1.65;
+    }
+
+    a {
+      color: var(--brand);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    .hero {
+      min-height: 520px;
+      color: #fff;
+      background:
+        linear-gradient(90deg, rgba(12, 29, 48, .92), rgba(20, 63, 96, .76) 48%, rgba(18, 31, 45, .62)),
+        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1600' height='900' viewBox='0 0 1600 900'%3E%3Crect width='1600' height='900' fill='%23222b35'/%3E%3Cg stroke='%238fa7bf' stroke-opacity='.32' fill='none'%3E%3Cpath d='M120 160h1180v560H120z'/%3E%3Cpath d='M160 200h1100v480H160z'/%3E%3Cpath d='M1060 560h180v90h-180zM1078 578h144M1078 602h144M1078 626h144M1110 560v90M1170 560v90'/%3E%3Cpath d='M210 260h360v230H210zM248 300h120M248 335h220M248 370h180M248 405h260M650 245l250 130-90 190-250-128zM704 308l126 66M672 375l150 80M250 585h420M250 620h330M250 655h210'/%3E%3Cpath d='M0 120h1600M0 240h1600M0 360h1600M0 480h1600M0 600h1600M0 720h1600M200 0v900M400 0v900M600 0v900M800 0v900M1000 0v900M1200 0v900M1400 0v900' stroke-opacity='.10'/%3E%3C/g%3E%3C/svg%3E");
+      background-size: cover;
+      background-position: center;
+      display: flex;
+      align-items: center;
+    }
+
+    .wrap {
+      width: min(1180px, calc(100% - 40px));
+      margin: 0 auto;
+    }
+
+    .hero h1 {
+      margin: 0 0 18px;
+      font-size: clamp(34px, 6vw, 68px);
+      line-height: 1.08;
+      letter-spacing: 0;
+      max-width: 900px;
+    }
+
+    .hero p {
+      max-width: 760px;
+      font-size: 19px;
+      color: rgba(255, 255, 255, .88);
+      margin: 0 0 28px;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 42px;
+      padding: 0 18px;
+      border-radius: 6px;
+      border: 1px solid rgba(255, 255, 255, .34);
+      font-weight: 700;
+      color: #fff;
+      background: var(--brand);
+      box-shadow: 0 10px 22px rgba(0, 0, 0, .18);
+    }
+
+    .button.secondary {
+      background: rgba(255, 255, 255, .10);
+      box-shadow: none;
+    }
+
+    .button:hover {
+      text-decoration: none;
+      background: var(--brand-dark);
+    }
+
+    .nav {
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      background: rgba(255, 255, 255, .96);
+      border-bottom: 1px solid var(--line);
+      backdrop-filter: blur(12px);
+    }
+
+    .nav .wrap {
+      display: flex;
+      gap: 18px;
+      overflow-x: auto;
+      white-space: nowrap;
+      padding: 12px 0;
+    }
+
+    .nav a {
+      color: #263241;
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    main {
+      background: var(--soft);
+    }
+
+    section {
+      padding: 52px 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    section:nth-child(even) {
+      background: #fff;
+    }
+
+    h2 {
+      margin: 0 0 18px;
+      font-size: 30px;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 28px 0 10px;
+      font-size: 20px;
+      letter-spacing: 0;
+    }
+
+    .lead {
+      color: var(--muted);
+      max-width: 850px;
+      margin: 0 0 26px;
+      font-size: 17px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .grid.two {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 20px;
+      box-shadow: var(--shadow);
+    }
+
+    .card h3 {
+      margin-top: 0;
+    }
+
+    .tag {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 3px 10px;
+      font-size: 12px;
+      font-weight: 700;
+      color: #fff;
+      background: var(--brand);
+      margin-bottom: 12px;
+    }
+
+    .tag.ok {
+      background: var(--ok);
+    }
+
+    .tag.warn {
+      background: var(--warn);
+    }
+
+    .steps {
+      counter-reset: step;
+      display: grid;
+      gap: 14px;
+      margin: 22px 0 0;
+    }
+
+    .step {
+      display: grid;
+      grid-template-columns: 44px 1fr;
+      gap: 14px;
+      align-items: start;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 16px;
+    }
+
+    .step::before {
+      counter-increment: step;
+      content: counter(step);
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      background: var(--brand);
+      color: #fff;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+    }
+
+    .step strong {
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .mock {
+      background: #1f252d;
+      border: 1px solid #303b48;
+      border-radius: var(--radius);
+      padding: 12px;
+      color: #d7e1ec;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .mock-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 8px;
+      background: #edf1f5;
+      border-radius: 6px 6px 0 0;
+      color: #17202b;
+    }
+
+    .mock-button {
+      min-width: 76px;
+      padding: 7px 10px;
+      border: 1px solid #b9c3d0;
+      border-radius: 5px;
+      background: #fff;
+      font-size: 12px;
+      text-align: center;
+    }
+
+    .mock-grid {
+      display: grid;
+      grid-template-columns: 70px 130px 1fr 86px 90px 150px;
+      min-width: 760px;
+      border-left: 1px solid #495566;
+      border-top: 1px solid #495566;
+    }
+
+    .mock-grid div {
+      padding: 9px 10px;
+      border-right: 1px solid #495566;
+      border-bottom: 1px solid #495566;
+      background: #28313b;
+      font-size: 13px;
+    }
+
+    .mock-grid .head {
+      background: #e9edf2;
+      color: #1d2733;
+      font-weight: 800;
+    }
+
+    .mock-grid .selected {
+      background: #1769aa;
+      color: #fff;
+    }
+
+    code {
+      background: #eef3f9;
+      border: 1px solid #d8e0eb;
+      border-radius: 5px;
+      padding: 2px 6px;
+      font-family: Consolas, "Cascadia Mono", monospace;
+      font-size: .94em;
+    }
+
+    .note {
+      border-left: 4px solid var(--brand);
+      background: #eef6ff;
+      padding: 14px 16px;
+      border-radius: 0 6px 6px 0;
+      color: #203246;
+    }
+
+    .faq details {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      margin-bottom: 10px;
+    }
+
+    .faq summary {
+      cursor: pointer;
+      font-weight: 800;
+    }
+
+    .footer {
+      background: #19212c;
+      color: #c9d3df;
+      padding: 34px 0;
+    }
+
+    .footer a {
+      color: #fff;
+    }
+
+    @media (max-width: 860px) {
+      .grid,
+      .grid.two {
+        grid-template-columns: 1fr;
+      }
+
+      .hero {
+        min-height: 460px;
+      }
+
+      .mock {
+        overflow-x: auto;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <div class="wrap">
+      <h1>CAD 批量打印插件使用教程</h1>
+      <p>从下载正确版本、安装自动加载，到新增图框、批量打印 PDF、生成图纸目录、批量拆图，一页走完整个工作流。</p>
+      <div class="actions">
+        <a class="button" href="https://github.com/Edwardhehe/batchPrintZWCAD/releases" target="_blank" rel="noreferrer">下载最新版</a>
+        <a class="button secondary" href="#quickstart">开始教程</a>
+      </div>
+    </div>
+  </header>
+
+  <nav class="nav" aria-label="页面导航">
+    <div class="wrap">
+      <a href="#choose">版本选择</a>
+      <a href="#install">安装</a>
+      <a href="#quickstart">第一次打印</a>
+      <a href="#library">图框库</a>
+      <a href="#directory">生成目录</a>
+      <a href="#split">批量拆图</a>
+      <a href="#pdf-tools">PDF 工具</a>
+      <a href="#faq">常见问题</a>
+    </div>
+  </nav>
+
+  <main>
+    <section id="choose">
+      <div class="wrap">
+        <h2>1. 先下载正确的版本</h2>
+        <p class="lead">不同 CAD 版本加载的 .NET 运行时不同，所以发布包按平台拆开。先确认自己的 CAD 版本，再下载对应 zip。</p>
+        <div class="grid">
+          <article class="card">
+            <span class="tag ok">ZWCAD</span>
+            <h3>中望 CAD</h3>
+            <p>当前主要面向 ZWCAD 2025 x64。</p>
+            <p>下载：<code>ZwcadBatchPlot-v*.zip</code></p>
+            <p>加载 DLL：<code>BatchPlotter.dll</code></p>
+          </article>
+          <article class="card">
+            <span class="tag">AutoCAD</span>
+            <h3>AutoCAD 2019-2020</h3>
+            <p>对应 .NET Framework 4.7。</p>
+            <p>下载：<code>AcadBatchPlot-AutoCAD2019-2020-v*.zip</code></p>
+            <p>加载 DLL：<code>AcadBatchPlot.dll</code></p>
+          </article>
+          <article class="card">
+            <span class="tag">AutoCAD</span>
+            <h3>AutoCAD 2021-2024</h3>
+            <p>对应 .NET Framework 4.8。</p>
+            <p>下载：<code>AcadBatchPlot-AutoCAD2021-2024-v*.zip</code></p>
+            <p>加载 DLL：<code>AcadBatchPlot.dll</code></p>
+          </article>
+          <article class="card">
+            <span class="tag warn">AutoCAD 2025+</span>
+            <h3>AutoCAD 2025 及以后</h3>
+            <p>对应 .NET 8。</p>
+            <p>下载：<code>AcadBatchPlot-AutoCAD2025Plus-v*.zip</code></p>
+            <p>加载 DLL：<code>AcadBatchPlot.Core.dll</code></p>
+          </article>
+          <article class="card">
+            <span class="tag">数据位置</span>
+            <h3>配置会保留</h3>
+            <p>图框库、设置、日志默认保存在用户 AppData 目录。卸载插件不会删除这些用户数据。</p>
+          </article>
+          <article class="card">
+            <span class="tag">建议</span>
+            <h3>优先用安装脚本</h3>
+            <p>普通用户推荐双击 <code>安装.cmd</code>，以后 CAD 启动自动加载。临时测试才用 <code>NETLOAD</code>。</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="install">
+      <div class="wrap">
+        <h2>2. 安装和卸载</h2>
+        <p class="lead">安装前建议关闭 CAD。安装完成后重新打开 CAD，菜单栏会出现“批量打印”。AutoCAD 2025+ 如果菜单栏没有出现，可以执行命令 <code>ZBP_SHOW_PANEL</code> 打开主界面。</p>
+        <div class="steps">
+          <div class="step">
+            <div>
+              <strong>下载并解压对应 zip</strong>
+              把压缩包解压到一个固定目录，不要直接在压缩包里双击运行。
+            </div>
+          </div>
+          <div class="step">
+            <div>
+              <strong>关闭 CAD，双击 <code>安装.cmd</code></strong>
+              脚本会复制插件文件，并写入当前用户的自动加载注册表项。
+            </div>
+          </div>
+          <div class="step">
+            <div>
+              <strong>重新打开 CAD</strong>
+              菜单栏出现“批量打印”后即可使用。也可以执行 <code>ZBP_SHOW_PANEL</code> 打开批量打印窗口。
+            </div>
+          </div>
+          <div class="step">
+            <div>
+              <strong>卸载</strong>
+              关闭 CAD 后双击 <code>卸载.cmd</code>。如果 CAD 正在运行，插件文件可能无法删除，关闭 CAD 后再执行一次即可。
+            </div>
+          </div>
+        </div>
+        <p class="note">手动加载方式：在 CAD 中执行 <code>NETLOAD</code>，选择对应 DLL。旧版本 DLL 已加载时，建议重启 CAD 后再加载新 DLL。</p>
+      </div>
+    </section>
+
+    <section id="quickstart">
+      <div class="wrap">
+        <h2>3. 第一次批量打印</h2>
+        <p class="lead">第一次使用的核心是先让插件认识你的图框块。图框入库后，后续同名图框会自动识别图号、图名、图幅和打印范围。</p>
+        <div class="grid two">
+          <div>
+            <div class="steps">
+              <div class="step">
+                <div>
+                  <strong>新增图框</strong>
+                  菜单栏点击“新增图框”，选择图框块，按提示框选打印边界、图名区域、图号区域，并确认输出纸张。
+                </div>
+              </div>
+              <div class="step">
+                <div>
+                  <strong>打开批量打印窗口</strong>
+                  点击“批量打印”，先试“扫描当前图”。只想识别局部时用“框选扫描”。
+                </div>
+              </div>
+              <div class="step">
+                <div>
+                  <strong>检查清单</strong>
+                  检查图号、图名、图幅、比例、空间和输出 PDF。可以直接在表格里改图号、图名。
+                </div>
+              </div>
+              <div class="step">
+                <div>
+                  <strong>选择输出和打印机</strong>
+                  输出路径可选“当前文件夹”“当前文件夹/PDF”或“指定文件夹”。打印机选择 CAD PDF 打印机，CTB 选择需要的样式。
+                </div>
+              </div>
+              <div class="step">
+                <div>
+                  <strong>开始打印</strong>
+                  勾选需要打印的行，点击“开始打印”。生成文件名默认类似 <code>图号_图名.pdf</code>。
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="mock" aria-label="批量打印窗口示意图">
+            <div class="mock-toolbar">
+              <div class="mock-button">扫描当前图</div>
+              <div class="mock-button">框选扫描</div>
+              <div class="mock-button">添加DWG</div>
+              <div class="mock-button">生成目录</div>
+              <div class="mock-button">批量拆图</div>
+              <div class="mock-button">PDF工具</div>
+              <div class="mock-button">开始打印</div>
+            </div>
+            <div class="mock-grid">
+              <div class="head">打印</div>
+              <div class="head">图号</div>
+              <div class="head">图名</div>
+              <div class="head">图幅</div>
+              <div class="head">比例</div>
+              <div class="head">输出纸张</div>
+              <div class="selected">✓</div>
+              <div class="selected">YFW-A-JK-003</div>
+              <div class="selected">基坑总平面图</div>
+              <div class="selected">A1</div>
+              <div class="selected">1:100</div>
+              <div class="selected">841 x 594 mm</div>
+              <div>✓</div>
+              <div>YFW-A-JK-004</div>
+              <div>围护结构平面图</div>
+              <div>A1</div>
+              <div>1:100</div>
+              <div>841 x 594 mm</div>
+              <div>✓</div>
+              <div>YFW-A-JK-010</div>
+              <div>支护桩配筋大样图</div>
+              <div>A1+</div>
+              <div>1:100</div>
+              <div>1051 x 594 mm</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="library">
+      <div class="wrap">
+        <h2>4. 图框信息库</h2>
+        <p class="lead">图框库是批量打印稳定识别的基础。一个图框块入库后，可以长期复用；图框库支持导入导出，方便在多台电脑之间迁移。</p>
+        <div class="grid">
+          <article class="card">
+            <h3>新增图框时要框选什么</h3>
+            <p>打印外边界、图名区域、图号区域。图名和图号区域内的真实文字会被读取，MText 格式码会被清理。</p>
+          </article>
+          <article class="card">
+            <h3>纸张尺寸怎么确定</h3>
+            <p>新增图框时会自动给出默认图幅，用户可以修改。以后该块名默认按这个纸张尺寸输出。</p>
+          </article>
+          <article class="card">
+            <h3>什么时候用图框库管理</h3>
+            <p>块名、图幅、纸张尺寸、打印边界不对时，打开“图框库管理”直接修改，比重新新增更快。</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="directory">
+      <div class="wrap">
+        <h2>5. 生成图纸目录</h2>
+        <p class="lead">识别图框后，点击“生成目录”，在当前 CAD 中指定目录左上角基点，插件会生成表格。</p>
+        <div class="grid two">
+          <div class="card">
+            <h3>目录表头</h3>
+            <p><code>序号、图号、图名、图幅、备注</code></p>
+            <p>目录内容来自当前批量打印清单，所以生成前先检查图号、图名、图幅是否正确。</p>
+          </div>
+          <div class="card">
+            <h3>目录样式设置</h3>
+            <p>在“设置 -> 图纸目录”中可设置列宽、行高、文字高度比例和文字样式。也可以从 CAD 框选单元格尺寸。</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="split">
+      <div class="wrap">
+        <h2>6. 批量 CAD 拆图</h2>
+        <p class="lead">拆图会按当前勾选清单输出单独 DWG，文件名使用图号和图名。适合给外部单位、审图或归档时拆分总图纸文件。</p>
+        <div class="grid two">
+          <div class="card">
+            <span class="tag ok">模型空间</span>
+            <h3>生成轻量新 DWG</h3>
+            <p>只复制图框范围内或与图框相交的对象。块对象按实际显示外包框判断，不按块基点判断。拆出的 DWG 打开后自动把图框居中并尽量全屏显示。</p>
+          </div>
+          <div class="card">
+            <span class="tag warn">布局空间</span>
+            <h3>保留原模型空间</h3>
+            <p>布局图纸不会裁剪模型空间。插件会复制原 DWG，只保留目标布局，并清理该布局图框外图素。</p>
+          </div>
+        </div>
+        <p class="note">输出位置为每个源 DWG 所在目录下的 <code>DWG</code> 子目录。拆图前建议先保存源 DWG。</p>
+      </div>
+    </section>
+
+    <section id="pdf-tools">
+      <div class="wrap">
+        <h2>7. PDF 工具</h2>
+        <p class="lead">批量打印后可以直接打开 PDF 工具检查成果，也可以手动添加 PDF 或整个文件夹。</p>
+        <div class="grid">
+          <article class="card">
+            <h3>跨文件阅读</h3>
+            <p>支持上一份、下一份、自然排序和手动上移下移，适合快速检查批量输出结果。</p>
+          </article>
+          <article class="card">
+            <h3>合并 PDF</h3>
+            <p>可将多个 PDF 合并，并按源 PDF 文件名生成书签。</p>
+          </article>
+          <article class="card">
+            <h3>批量改名</h3>
+            <p>支持批量加编号、替换文件名文字，并可撤回上一次批量改名。</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="faq" class="faq">
+      <div class="wrap">
+        <h2>常见问题</h2>
+        <details>
+          <summary>安装后没有看到菜单怎么办？</summary>
+          <p>先确认下载包是否匹配 CAD 版本。AutoCAD 2025+ 如果菜单栏没有显示，执行 <code>ZBP_SHOW_PANEL</code> 打开主界面。也可以执行 <code>NETLOAD</code> 手动加载对应 DLL。</p>
+        </details>
+        <details>
+          <summary>为什么要分这么多 AutoCAD 包？</summary>
+          <p>AutoCAD 2019-2020、2021-2024、2025+ 使用的 .NET 运行时和 CAD 托管 API 不同，一个 DLL 很难稳定通吃，所以按版本发布最稳。</p>
+        </details>
+        <details>
+          <summary>图框识别错了怎么办？</summary>
+          <p>打开“图框库管理”，检查块名、图幅、纸张尺寸、打印边界、图名区域、图号区域。必要时重新新增图框。</p>
+        </details>
+        <details>
+          <summary>批量打印输出尺寸不对怎么办？</summary>
+          <p>优先检查图框库里该块名绑定的图幅和纸张尺寸。插件按图框库里的固定输出纸张打印，而不是按 CAD 里图形实际放大比例直接输出巨大 PDF。</p>
+        </details>
+        <details>
+          <summary>PDF 工具无法内嵌预览怎么办？</summary>
+          <p>PDF 内嵌预览依赖 Microsoft Edge WebView2 Runtime。个别电脑无法预览时，可以安装 WebView2 Runtime，或使用外部打开方式检查 PDF。</p>
+        </details>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="wrap">
+      <strong>CAD 批量打印插件</strong>
+      <p>开源地址：<a href="https://github.com/Edwardhehe/batchPrintZWCAD" target="_blank" rel="noreferrer">github.com/Edwardhehe/batchPrintZWCAD</a></p>
+      <p>建议先用一两个 DWG 测试图框识别、打印尺寸和输出命名，确认无误后再做整批项目图纸。</p>
+    </div>
+  </footer>
+</body>
+</html>

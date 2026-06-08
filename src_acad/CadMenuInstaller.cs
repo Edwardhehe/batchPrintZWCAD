@@ -134,7 +134,7 @@ public static class CadMenuInstaller
     private static void AddMenuItem(object menu, string label, string command)
     {
         var count = Convert.ToInt32(GetProperty(menu, "Count") ?? 0);
-        TryInvoke(menu, "AddMenuItem", count, label, "^C^C" + command);
+        TryInvoke(menu, "AddMenuItem", count, label, command);
     }
 
     private static void AddSeparator(object menu)
