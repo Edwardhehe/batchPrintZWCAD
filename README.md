@@ -9,10 +9,11 @@
 | CAD 平台 | 适用版本 | 加载 DLL |
 | --- | --- | --- |
 | 中望 CAD | 当前主要面向 ZWCAD 2025 x64 | `BatchPlotter.dll` |
+| AutoCAD | AutoCAD 2019 ~ 2020 x64 | `AcadBatchPlot.dll` |
 | AutoCAD | AutoCAD 2021 ~ 2024 x64 | `AcadBatchPlot.dll` |
 | AutoCAD | AutoCAD 2025 及以后 x64 | `AcadBatchPlot.Core.dll` |
 
-AutoCAD 2025 及以后使用 .NET 8，AutoCAD 2021 ~ 2024 使用 .NET Framework 4.8，因此需要分别发布 DLL。代码主体复用，但项目文件和 CAD 托管 API 引用不同。
+AutoCAD 2019 ~ 2020 使用 .NET Framework 4.7，AutoCAD 2021 ~ 2024 使用 .NET Framework 4.8，AutoCAD 2025 及以后使用 .NET 8，因此需要分别发布 DLL。代码主体复用，但项目文件和 CAD 托管 API 引用不同。
 
 ## 主要功能
 
@@ -54,7 +55,8 @@ AutoCAD 2025 及以后使用 .NET 8，AutoCAD 2021 ~ 2024 使用 .NET Framework 
 
 AutoCAD 版本下载对应发布包后，关闭 AutoCAD，双击 `安装.cmd`。也可以手动 `NETLOAD`：
 
-- AutoCAD 2021 ~ 2024：选择 `AcadBatchPlot.dll`。
+- AutoCAD 2019 ~ 2020：选择对应发布包中的 `AcadBatchPlot.dll`。
+- AutoCAD 2021 ~ 2024：选择对应发布包中的 `AcadBatchPlot.dll`。
 - AutoCAD 2025 及以后：选择 `AcadBatchPlot.Core.dll`。
 
 AutoCAD 2025 及以后如果菜单栏未显示，可以执行 `ZBP_SHOW_PANEL` 打开批量打印主界面。
@@ -197,6 +199,12 @@ AutoCAD 2021 ~ 2024:
 
 ```powershell
 dotnet build .\AcadBatchPlot.csproj -c Release -o .\release\AcadBatchPlot-AutoCAD2021-2024
+```
+
+AutoCAD 2019 ~ 2020:
+
+```powershell
+dotnet build .\AcadBatchPlot.AutoCAD2019.csproj -c Release -o .\release\AcadBatchPlot-AutoCAD2019-2020
 ```
 
 AutoCAD 2025 及以后:

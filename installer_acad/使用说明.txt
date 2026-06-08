@@ -1,6 +1,7 @@
 AutoCAD 批量打印插件
 
 支持版本：
+- AcadBatchPlot.dll：AutoCAD 2019 ~ 2020（.NET Framework 4.7，对应 AutoCAD.NET 23.0）
 - AcadBatchPlot.dll：AutoCAD 2021 ~ 2024（.NET Framework 4.8）
 - AcadBatchPlot.Core.dll：AutoCAD 2025 及以后（.NET 8）
 
@@ -9,7 +10,7 @@ AutoCAD 批量打印插件
 2. 将对应版本的 DLL 和安装脚本放在同一文件夹。
 3. 双击"安装.cmd"。
 4. 重新打开 AutoCAD。
-5. AutoCAD 2021 ~ 2024 菜单栏会出现"批量打印"；AutoCAD 2025 及以后如果菜单栏未显示，可执行 ZBP_SHOW_PANEL 打开主界面。
+5. AutoCAD 2019 ~ 2024 菜单栏会出现"批量打印"；AutoCAD 2025 及以后如果菜单栏未显示，可执行 ZBP_SHOW_PANEL 打开主界面。
 
 卸载：
 1. 关闭 AutoCAD。
