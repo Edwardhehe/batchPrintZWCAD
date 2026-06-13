@@ -440,6 +440,80 @@ public sealed class BatchPlotForm : Form
         return false;
     }
 
+    private TitleBlockScanScope? PromptScanScope()
+    {
+        using var form = new Form
+        {
+            Text = "扫描当前图",
+            StartPosition = FormStartPosition.CenterParent,
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            MaximizeBox = false,
+            MinimizeBox = false,
+            ShowInTaskbar = false,
+            ClientSize = new Size(UiLayout.Scale(360), UiLayout.Scale(220))
+        };
+
+        var panel = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 6,
+            Padding = new Padding(UiLayout.Scale(16), UiLayout.Scale(12), UiLayout.Scale(16), UiLayout.Scale(12))
+        };
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(28)));
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(30)));
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(30)));
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(30)));
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(30)));
+        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+
+        var title = new Label { Text = "选择扫描范围", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
+        var layouts = new RadioButton { Text = "扫描全部布局", Dock = DockStyle.Fill, Checked = true };
+        var current = new RadioButton { Text = "扫描当前布局/模型", Dock = DockStyle.Fill };
+        var model = new RadioButton { Text = "扫描模型空间", Dock = DockStyle.Fill };
+        var all = new RadioButton { Text = "扫描本图全部模型和布局", Dock = DockStyle.Fill };
+
+        var buttons = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = System.Windows.Forms.FlowDirection.RightToLeft,
+            Padding = new Padding(0, UiLayout.Scale(10), 0, 0)
+        };
+        var ok = UiLayout.CreateButton("确定", 76);
+        var cancel = UiLayout.CreateButton("取消", 76);
+        ok.DialogResult = DialogResult.OK;
+        cancel.DialogResult = DialogResult.Cancel;
+        buttons.Controls.Add(ok);
+        buttons.Controls.Add(cancel);
+
+        panel.Controls.Add(title, 0, 0);
+        panel.Controls.Add(layouts, 0, 1);
+        panel.Controls.Add(current, 0, 2);
+        panel.Controls.Add(model, 0, 3);
+        panel.Controls.Add(all, 0, 4);
+        panel.Controls.Add(buttons, 0, 5);
+        form.Controls.Add(panel);
+        form.AcceptButton = ok;
+        form.CancelButton = cancel;
+
+        if (form.ShowDialog(this) != DialogResult.OK)
+        {
+            return null;
+        }
+
+        if (current.Checked)
+        {
+            return TitleBlockScanScope.CurrentSpace;
+        }
+
+        if (model.Checked)
+        {
+            return TitleBlockScanScope.ModelSpace;
+        }
+
+        return all.Checked ? TitleBlockScanScope.AllSpaces : TitleBlockScanScope.PaperLayouts;
+    }
+
     private void ScanCurrentDrawing()
     {
         var library = TitleBlockLibraryStore.Load();
@@ -451,8 +525,14 @@ public sealed class BatchPlotForm : Form
             return;
         }
 
+        var scope = PromptScanScope();
+        if (scope == null)
+        {
+            return;
+        }
+
         _jobs.Clear();
-        foreach (var job in TitleBlockScanner.Scan(_currentDocument, library))
+        foreach (var job in TitleBlockScanner.Scan(_currentDocument, library, scope.Value))
         {
             _jobs.Add(job);
         }
@@ -578,13 +658,13 @@ public sealed class BatchPlotForm : Form
     {
         if (string.Equals(Path.GetFullPath(file), Path.GetFullPath(_currentDocument.Database.Filename), StringComparison.OrdinalIgnoreCase))
         {
-            return TitleBlockScanner.Scan(_currentDocument, library);
+            return TitleBlockScanner.Scan(_currentDocument, library, TitleBlockScanScope.AllSpaces);
         }
 
         using var db = new Database(false, true);
         db.ReadDwgFile(file, FileOpenMode.OpenForReadAndAllShare, true, "");
         db.CloseInput(true);
-        return TitleBlockScanner.Scan(db, library, file);
+        return TitleBlockScanner.Scan(db, library, file, null, TitleBlockScanScope.AllSpaces);
     }
 
     private void SortAndRefreshOutputPaths()

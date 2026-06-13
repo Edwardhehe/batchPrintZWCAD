@@ -16,7 +16,15 @@ public static class TitleBlockScanner
         var sourceName = string.IsNullOrWhiteSpace(doc.Database.Filename)
             ? doc.Name
             : doc.Database.Filename;
-        return Scan(doc.Database, library, sourceName);
+        return Scan(doc.Database, library, sourceName, null, TitleBlockScanScope.AllSpaces, GetCurrentSpaceName(doc.Database));
+    }
+
+    public static List<PlotJob> Scan(Document doc, TitleBlockLibrary library, TitleBlockScanScope scope)
+    {
+        var sourceName = string.IsNullOrWhiteSpace(doc.Database.Filename)
+            ? doc.Name
+            : doc.Database.Filename;
+        return Scan(doc.Database, library, sourceName, null, scope, GetCurrentSpaceName(doc.Database));
     }
 
     public static List<PlotJob> Scan(Document doc, TitleBlockLibrary library, Extents3d? scanWindow)
@@ -24,7 +32,7 @@ public static class TitleBlockScanner
         var sourceName = string.IsNullOrWhiteSpace(doc.Database.Filename)
             ? doc.Name
             : doc.Database.Filename;
-        return Scan(doc.Database, library, sourceName, scanWindow);
+        return Scan(doc.Database, library, sourceName, scanWindow, TitleBlockScanScope.CurrentSpace, GetCurrentSpaceName(doc.Database));
     }
 
     public static List<PlotJob> Scan(Database db, TitleBlockLibrary library, string sourceName)
@@ -33,6 +41,11 @@ public static class TitleBlockScanner
     }
 
     public static List<PlotJob> Scan(Database db, TitleBlockLibrary library, string sourceName, Extents3d? scanWindow)
+    {
+        return Scan(db, library, sourceName, scanWindow, TitleBlockScanScope.AllSpaces, null);
+    }
+
+    public static List<PlotJob> Scan(Database db, TitleBlockLibrary library, string sourceName, Extents3d? scanWindow, TitleBlockScanScope scope, string? currentSpaceName = null)
     {
         var jobs = new List<PlotJob>();
         if (string.IsNullOrWhiteSpace(sourceName))
@@ -51,6 +64,15 @@ public static class TitleBlockScanner
             {
                 continue;
             }
+
+            var layout = (Layout)tr.GetObject(owner.LayoutId, OpenMode.ForRead);
+            var spaceName = layout.LayoutName;
+            if (!ShouldScanLayout(layout, owner, scope, currentSpaceName))
+            {
+                continue;
+            }
+
+            var ownerTextCache = CadTextExtractor.BuildOwnerTextCache(tr, owner);
 
             foreach (ObjectId id in owner)
             {
@@ -93,8 +115,8 @@ public static class TitleBlockScanner
                 var height = extents.MaxPoint.Y - extents.MinPoint.Y;
                 var detectedPaper = PaperSizeDetector.Detect(width, height);
                 var paper = ApplyFixedPaper(definition, detectedPaper);
-                var title = CadTextExtractor.ExtractRegionText(tr, blockRef, owner, titleRegion);
-                var number = CadTextExtractor.ExtractRegionText(tr, blockRef, owner, numberRegion);
+                var title = CadTextExtractor.ExtractRegionText(tr, blockRef, owner, titleRegion, ownerTextCache);
+                var number = CadTextExtractor.ExtractRegionText(tr, blockRef, owner, numberRegion, ownerTextCache);
 
                 if (string.IsNullOrWhiteSpace(title))
                 {
@@ -119,8 +141,8 @@ public static class TitleBlockScanner
                 jobs.Add(new PlotJob
                 {
                     SourceFile = sourceName,
-                    SpaceName = owner.Name,
-                    IsPaperSpace = !string.Equals(owner.Name, BlockTableRecord.ModelSpace, StringComparison.OrdinalIgnoreCase),
+                    SpaceName = spaceName,
+                    IsPaperSpace = !layout.ModelType,
                     BlockName = blockName,
                     MatchIndex = matchIndex++,
                     DrawingNumber = number,
@@ -154,7 +176,7 @@ public static class TitleBlockScanner
         var result = new List<PlotJob>();
         foreach (var job in jobs.OrderByDescending(ScoreJob))
         {
-            var duplicateIndex = result.FindIndex(existing => GetOverlapRatio(existing, job) >= 0.9);
+            var duplicateIndex = result.FindIndex(existing => IsSameScanSpace(existing, job) && GetOverlapRatio(existing, job) >= 0.9);
             if (duplicateIndex < 0)
             {
                 result.Add(job);
@@ -168,6 +190,73 @@ public static class TitleBlockScanner
         }
 
         return result;
+    }
+
+    private static bool IsSameScanSpace(PlotJob a, PlotJob b)
+    {
+        return string.Equals(a.SourceFile, b.SourceFile, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(a.SpaceName, b.SpaceName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool ShouldScanLayout(Layout layout, BlockTableRecord owner, TitleBlockScanScope scope, string? currentSpaceName)
+    {
+        switch (scope)
+        {
+            case TitleBlockScanScope.PaperLayouts:
+                return !layout.ModelType;
+            case TitleBlockScanScope.ModelSpace:
+                return layout.ModelType;
+            case TitleBlockScanScope.CurrentSpace:
+                return IsCurrentSpace(layout, owner, currentSpaceName);
+            case TitleBlockScanScope.AllSpaces:
+            default:
+                return true;
+        }
+    }
+
+    private static bool IsCurrentSpace(Layout layout, BlockTableRecord owner, string? currentSpaceName)
+    {
+        if (string.IsNullOrWhiteSpace(currentSpaceName))
+        {
+            return true;
+        }
+
+        return string.Equals(layout.LayoutName, currentSpaceName, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(owner.Name, currentSpaceName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? GetCurrentSpaceName(Database db)
+    {
+        try
+        {
+            var layoutName = LayoutManager.Current.CurrentLayout;
+            if (!string.IsNullOrWhiteSpace(layoutName))
+            {
+                return layoutName;
+            }
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            using var tr = db.TransactionManager.StartTransaction();
+            var current = (BlockTableRecord)tr.GetObject(db.CurrentSpaceId, OpenMode.ForRead);
+            if (current.IsLayout)
+            {
+                var layout = (Layout)tr.GetObject(current.LayoutId, OpenMode.ForRead);
+                tr.Commit();
+                return layout.LayoutName;
+            }
+
+            tr.Commit();
+        }
+        catch
+        {
+        }
+
+        return null;
     }
 
     private static int ScoreJob(PlotJob job)

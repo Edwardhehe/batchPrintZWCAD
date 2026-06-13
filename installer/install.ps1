@@ -23,6 +23,11 @@ if (Test-Path $runtimeDir) {
     Copy-Item -Recurse -Force -Path $runtimeDir -Destination $InstallDir
 }
 
+$plottersDir = Join-Path $scriptDir "Plotters"
+if (Test-Path $plottersDir) {
+    Copy-Item -Recurse -Force -Path $plottersDir -Destination $InstallDir
+}
+
 $loader = Join-Path $InstallDir "BatchPlotter.dll"
 $zwcadRoot = "HKCU:\Software\ZWSOFT\ZWCAD"
 if (!(Test-Path $zwcadRoot)) {
@@ -56,6 +61,9 @@ foreach ($root in $applicationRoots) {
 Write-Host ""
 Write-Host "Install completed." -ForegroundColor Green
 Write-Host "Plugin file: $loader"
+if (Test-Path (Join-Path $InstallDir "Plotters\LA_pdf.pc5")) {
+    Write-Host "Bundled plotter copied: LA_pdf.pc5 / LA_pdf.pmp"
+}
 Write-Host "ZWCAD will load this plugin automatically next time."
 Write-Host ""
 Read-Host "Press Enter to exit"

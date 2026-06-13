@@ -10,13 +10,43 @@ namespace ZwcadBatchPlot;
 
 public static class CadTextExtractor
 {
+    public sealed class OwnerTextCache
+    {
+        internal OwnerTextCache(IReadOnlyList<TextCandidate> candidates)
+        {
+            Candidates = candidates;
+        }
+
+        internal IReadOnlyList<TextCandidate> Candidates { get; }
+    }
+
     public static string GetBlockName(BlockReference blockRef, Transaction tr)
     {
         var btr = (BlockTableRecord)tr.GetObject(blockRef.BlockTableRecord, OpenMode.ForRead);
         return btr.Name;
     }
 
+    public static OwnerTextCache BuildOwnerTextCache(Transaction tr, BlockTableRecord owner)
+    {
+        var values = new List<TextCandidate>();
+        foreach (ObjectId id in owner)
+        {
+            if (tr.GetObject(id, OpenMode.ForRead, false) is Entity entity
+                && TryGetWorldText(entity, out var text, out var worldPoint))
+            {
+                AddText(values, text, worldPoint, TextSourcePriority.OwnerSpace);
+            }
+        }
+
+        return new OwnerTextCache(values);
+    }
+
     public static string ExtractRegionText(Transaction tr, BlockReference blockRef, BlockTableRecord owner, LocalRectangle region)
+    {
+        return ExtractRegionText(tr, blockRef, owner, region, null);
+    }
+
+    public static string ExtractRegionText(Transaction tr, BlockReference blockRef, BlockTableRecord owner, LocalRectangle region, OwnerTextCache? ownerTextCache)
     {
         var values = new List<TextCandidate>();
         var inverse = blockRef.BlockTransform.Inverse();
@@ -38,20 +68,17 @@ public static class CadTextExtractor
             }
         }
 
-        foreach (ObjectId id in owner)
+        if (ownerTextCache == null)
         {
-            if (id == blockRef.ObjectId)
-            {
-                continue;
-            }
+            ownerTextCache = BuildOwnerTextCache(tr, owner);
+        }
 
-            if (tr.GetObject(id, OpenMode.ForRead, false) is Entity entity && TryGetWorldText(entity, out var text, out var worldPoint))
+        foreach (var candidate in ownerTextCache.Candidates)
+        {
+            var local = candidate.Point.TransformBy(inverse);
+            if (region.Contains(local.X, local.Y))
             {
-                var local = worldPoint.TransformBy(inverse);
-                if (region.Contains(local.X, local.Y))
-                {
-                    AddText(values, text, local, TextSourcePriority.OwnerSpace);
-                }
+                values.Add(new TextCandidate(candidate.Text, local, TextSourcePriority.OwnerSpace));
             }
         }
 
@@ -154,7 +181,7 @@ public static class CadTextExtractor
         return value;
     }
 
-    private sealed class TextCandidate
+    internal sealed class TextCandidate
     {
         public TextCandidate(string text, Point3d point, TextSourcePriority priority)
         {
@@ -168,7 +195,7 @@ public static class CadTextExtractor
         public TextSourcePriority Priority { get; }
     }
 
-    private enum TextSourcePriority
+    internal enum TextSourcePriority
     {
         Attribute = 0,
         OwnerSpace = 1,

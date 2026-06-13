@@ -7,7 +7,7 @@ namespace ZwcadBatchPlot;
 
 public static class AcadPlotterInstaller
 {
-    public const string PreferredPdfPlotter = "LA_pdf.pc3";
+    public const string PreferredPdfPlotter = "LA_pdf.pc5";
     private const string PreferredPmp = "LA_pdf.pmp";
 
     public sealed class InstallResult
@@ -31,11 +31,11 @@ public static class AcadPlotterInstaller
             }
 
             result.SourceFound = true;
-            var sourcePc3 = Path.Combine(sourceRoot, PreferredPdfPlotter);
+            var sourcePc5 = Path.Combine(sourceRoot, PreferredPdfPlotter);
             var sourcePmp = Path.Combine(sourceRoot, "PMP Files", PreferredPmp);
-            if (!File.Exists(sourcePc3) || !File.Exists(sourcePmp))
+            if (!File.Exists(sourcePc5) || !File.Exists(sourcePmp))
             {
-                result.Message = "LA_pdf 打印机配置不完整，需要 LA_pdf.pc3 和 PMP Files\\LA_pdf.pmp。";
+                result.Message = "LA_pdf 打印机配置不完整，需要 LA_pdf.pc5 和 PMP Files\\LA_pdf.pmp。";
                 return result;
             }
 
@@ -51,12 +51,12 @@ public static class AcadPlotterInstaller
             Directory.CreateDirectory(targetRoot);
             Directory.CreateDirectory(targetPmpDir);
 
-            var targetPc3 = Path.Combine(targetRoot, PreferredPdfPlotter);
+            var targetPc5 = Path.Combine(targetRoot, PreferredPdfPlotter);
             var targetPmp = Path.Combine(targetPmpDir, PreferredPmp);
-            File.Copy(sourcePc3, targetPc3, overwrite: true);
             File.Copy(sourcePmp, targetPmp, overwrite: true);
+            InstallPc5(sourcePc5, targetPc5, targetPmp);
 
-            result.Installed = File.Exists(targetPc3) && File.Exists(targetPmp);
+            result.Installed = File.Exists(targetPc5) && File.Exists(targetPmp);
             result.Message = result.Installed
                 ? "LA_pdf 打印机配置已可用。"
                 : "LA_pdf 打印机配置未复制。";
@@ -79,7 +79,7 @@ public static class AcadPlotterInstaller
                 return candidate;
             }
 
-            candidate = Path.Combine(root, "resources", "acad", "Plotters");
+            candidate = Path.Combine(root, "resources", "zwcad", "Plotters");
             if (File.Exists(Path.Combine(candidate, PreferredPdfPlotter)))
             {
                 return candidate;
@@ -148,5 +148,12 @@ public static class AcadPlotterInstaller
 
         File.Copy(source, target, overwrite: true);
         return true;
+    }
+
+    private static void InstallPc5(string source, string target, string targetPmp)
+    {
+        var text = File.ReadAllText(source).Replace("{PMP_PATH}", targetPmp);
+        Directory.CreateDirectory(Path.GetDirectoryName(target) ?? "");
+        File.WriteAllText(target, text, new System.Text.ASCIIEncoding());
     }
 }

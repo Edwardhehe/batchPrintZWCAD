@@ -55,4 +55,11 @@
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2535.41" />
     <PackageReference Include="PDFsharp" Version="1.50.5147" />
   </ItemGroup>
+
+  <ItemGroup>
+    <None Include="resources\zwcad\Plotters\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>Plotters\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    </None>
+  </ItemGroup>
 </Project>

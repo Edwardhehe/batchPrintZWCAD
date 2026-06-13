@@ -27,7 +27,6 @@ public sealed class TemporarySequenceOverlay
         using var tr = _document.Database.TransactionManager.StartTransaction();
         var db = _document.Database;
         var layerId = EnsureLayer(tr, db);
-        var currentSpaceId = db.CurrentSpaceId;
 
         for (var i = 0; i < jobs.Count; i++)
         {
@@ -45,26 +44,29 @@ public sealed class TemporarySequenceOverlay
             var color = Color.FromColorIndex(ColorMethod.ByAci, 1);
             var frameWidth = GetFrameWidth(minSide);
 
-            foreach (var ownerId in GetOwnerIds(tr, db, job, currentSpaceId))
+            var ownerId = GetJobOwnerId(tr, db, job);
+            if (ownerId.IsNull)
             {
-                var owner = (BlockTableRecord)tr.GetObject(ownerId, OpenMode.ForWrite);
-                var frame = new Polyline(4)
-                {
-                    Closed = true,
-                    Color = color,
-                    LayerId = layerId,
-                    LineWeight = GetLineWeight(minSide),
-                    ConstantWidth = frameWidth
-                };
-                frame.AddVertexAt(0, new Point2d(minX - padding, minY - padding), 0, 0, 0);
-                frame.AddVertexAt(1, new Point2d(maxX + padding, minY - padding), 0, 0, 0);
-                frame.AddVertexAt(2, new Point2d(maxX + padding, maxY + padding), 0, 0, 0);
-                frame.AddVertexAt(3, new Point2d(minX - padding, maxY + padding), 0, 0, 0);
-                AddEntity(tr, owner, frame);
-
-                var center = new Point3d((minX + maxX) / 2d, (minY + maxY) / 2d, 0);
-                AddBoldLabel(tr, owner, layerId, color, center, (i + 1).ToString(), textHeight);
+                continue;
             }
+
+            var owner = (BlockTableRecord)tr.GetObject(ownerId, OpenMode.ForWrite);
+            var frame = new Polyline(4)
+            {
+                Closed = true,
+                Color = color,
+                LayerId = layerId,
+                LineWeight = GetLineWeight(minSide),
+                ConstantWidth = frameWidth
+            };
+            frame.AddVertexAt(0, new Point2d(minX - padding, minY - padding), 0, 0, 0);
+            frame.AddVertexAt(1, new Point2d(maxX + padding, minY - padding), 0, 0, 0);
+            frame.AddVertexAt(2, new Point2d(maxX + padding, maxY + padding), 0, 0, 0);
+            frame.AddVertexAt(3, new Point2d(minX - padding, maxY + padding), 0, 0, 0);
+            AddEntity(tr, owner, frame);
+
+            var center = new Point3d((minX + maxX) / 2d, (minY + maxY) / 2d, 0);
+            AddBoldLabel(tr, owner, layerId, color, center, (i + 1).ToString(), textHeight);
         }
 
         tr.Commit();
@@ -138,23 +140,6 @@ public sealed class TemporarySequenceOverlay
         var id = owner.AppendEntity(entity);
         tr.AddNewlyCreatedDBObject(entity, true);
         _entityIds.Add(id);
-    }
-
-    private static IEnumerable<ObjectId> GetOwnerIds(Transaction tr, Database db, PlotJob job, ObjectId currentSpaceId)
-    {
-        var ownerIds = new HashSet<ObjectId>();
-        if (!currentSpaceId.IsNull)
-        {
-            ownerIds.Add(currentSpaceId);
-        }
-
-        var targetId = GetJobOwnerId(tr, db, job);
-        if (!targetId.IsNull)
-        {
-            ownerIds.Add(targetId);
-        }
-
-        return ownerIds;
     }
 
     private static ObjectId GetJobOwnerId(Transaction tr, Database db, PlotJob job)

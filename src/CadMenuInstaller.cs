@@ -6,8 +6,8 @@ namespace ZwcadBatchPlot;
 
 public static class CadMenuInstaller
 {
-    private const string MenuName = "ZW批量打印";
-    private const string LegacyMenuName = "批量打印";
+    private const string MenuName = "批量打印";
+    private const string LegacyMenuName = "ZW批量打印";
 
     public static void Install(bool force = false)
     {
@@ -19,14 +19,14 @@ public static class CadMenuInstaller
             var menuGroups = CadApp.MenuGroups;
             if (menuBar == null || menuGroups == null)
             {
-                WriteMessage("\nZW批量打印插件已加载，但当前 CAD 未暴露菜单栏接口。");
+                WriteMessage("\n批量打印插件已加载，但当前 CAD 未暴露菜单栏接口。");
                 return;
             }
 
             var menuGroup = InvokeItem(menuGroups, 0);
             if (menuGroup == null)
             {
-                WriteMessage("\nZW批量打印插件已加载，但未取得默认菜单组。");
+                WriteMessage("\n批量打印插件已加载，但未取得默认菜单组。");
                 return;
             }
 
@@ -49,14 +49,14 @@ public static class CadMenuInstaller
             var menus = GetProperty(menuGroup, "Menus");
             if (menus == null)
             {
-                WriteMessage("\nZW批量打印插件已加载，但未取得菜单集合。");
+                WriteMessage("\n批量打印插件已加载，但未取得菜单集合。");
                 return;
             }
 
             var menu = TryInvoke(menus, "Add", MenuName);
             if (menu == null)
             {
-                WriteMessage("\nZW批量打印插件已加载，但菜单创建失败。");
+                WriteMessage("\n批量打印插件已加载，但菜单创建失败。");
                 return;
             }
 
@@ -74,11 +74,11 @@ public static class CadMenuInstaller
             var menuCount = Convert.ToInt32(GetProperty(menuBar, "Count") ?? 0);
             TryInvoke(menu, "InsertInMenuBar", menuCount);
 
-            WriteMessage("\nZW批量打印菜单已加载。");
+            WriteMessage("\n批量打印菜单已加载。");
         }
         catch (Exception ex)
         {
-            WriteMessage("\nZW批量打印菜单加载失败: " + ex.Message);
+            WriteMessage("\n批量打印菜单加载失败: " + ex.Message);
         }
     }
 

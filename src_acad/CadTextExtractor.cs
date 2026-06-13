@@ -10,13 +10,53 @@ namespace ZwcadBatchPlot;
 
 public static class CadTextExtractor
 {
+    public sealed class OwnerTextCache
+    {
+        internal OwnerTextCache(IReadOnlyList<TextCandidate> candidates)
+        {
+            Candidates = candidates;
+        }
+
+        internal IReadOnlyList<TextCandidate> Candidates { get; }
+    }
+
     public static string GetBlockName(BlockReference blockRef, Transaction tr)
     {
         var btr = (BlockTableRecord)tr.GetObject(blockRef.BlockTableRecord, OpenMode.ForRead);
         return btr.Name;
     }
 
+    public static OwnerTextCache BuildOwnerTextCache(Transaction tr, BlockTableRecord owner)
+    {
+        var values = new List<TextCandidate>();
+        foreach (ObjectId id in owner)
+        {
+            if (tr.GetObject(id, OpenMode.ForRead, false) is not Entity entity)
+            {
+                continue;
+            }
+
+            if (entity is BlockReference ownerBlock)
+            {
+                CollectOwnerBlockTextForCache(tr, ownerBlock, values);
+                continue;
+            }
+
+            if (TryGetText(entity, out var text, out var worldPoint))
+            {
+                AddText(values, text, worldPoint, TextSourcePriority.OwnerSpace);
+            }
+        }
+
+        return new OwnerTextCache(values);
+    }
+
     public static string ExtractRegionText(Transaction tr, BlockReference blockRef, BlockTableRecord owner, LocalRectangle region)
+    {
+        return ExtractRegionText(tr, blockRef, owner, region, null);
+    }
+
+    public static string ExtractRegionText(Transaction tr, BlockReference blockRef, BlockTableRecord owner, LocalRectangle region, OwnerTextCache? ownerTextCache)
     {
         var values = new List<TextCandidate>();
         var inverse = blockRef.BlockTransform.Inverse();
@@ -41,31 +81,17 @@ public static class CadTextExtractor
             }
         }
 
-        foreach (ObjectId id in owner)
+        if (ownerTextCache == null)
         {
-            if (id == blockRef.ObjectId)
-            {
-                continue;
-            }
+            ownerTextCache = BuildOwnerTextCache(tr, owner);
+        }
 
-            if (tr.GetObject(id, OpenMode.ForRead, false) is not Entity entity)
+        foreach (var candidate in ownerTextCache.Candidates)
+        {
+            var local = candidate.Point.TransformBy(inverse);
+            if (region.Contains(local.X, local.Y))
             {
-                continue;
-            }
-
-            if (entity is BlockReference ownerBlock)
-            {
-                CollectOwnerBlockText(tr, ownerBlock, inverse, region, values);
-                continue;
-            }
-
-            if (TryGetText(entity, out var text, out var worldPoint))
-            {
-                var local = worldPoint.TransformBy(inverse);
-                if (IsInRegion(entity, inverse, region, local))
-                {
-                    AddText(values, text, local, TextSourcePriority.OwnerSpace);
-                }
+                values.Add(new TextCandidate(candidate.Text, local, TextSourcePriority.OwnerSpace));
             }
         }
 
@@ -155,6 +181,48 @@ public static class CadTextExtractor
         {
             var point = ownerBlock.Position.TransformBy(ownerToFrameLocal);
             AddText(values, blockName, point, TextSourcePriority.OwnerSpace);
+        }
+    }
+
+    private static void CollectOwnerBlockTextForCache(
+        Transaction tr,
+        BlockReference ownerBlock,
+        ICollection<TextCandidate> values)
+    {
+        foreach (ObjectId attributeId in ownerBlock.AttributeCollection)
+        {
+            if (!attributeId.IsValid || attributeId.IsErased)
+            {
+                continue;
+            }
+
+            if (tr.GetObject(attributeId, OpenMode.ForRead, false) is AttributeReference attribute
+                && TryGetText(attribute, out var attributeText, out var attributePoint))
+            {
+                AddText(values, attributeText, attributePoint, TextSourcePriority.OwnerSpace);
+            }
+        }
+
+        try
+        {
+            var definition = (BlockTableRecord)tr.GetObject(ownerBlock.BlockTableRecord, OpenMode.ForRead);
+            CollectDefinitionText(
+                tr,
+                definition,
+                ownerBlock.BlockTransform,
+                LocalRectangle.FromPoints(double.MinValue / 2, double.MinValue / 2, double.MaxValue / 2, double.MaxValue / 2),
+                values,
+                TextSourcePriority.OwnerSpace,
+                new HashSet<ObjectId>(),
+                0);
+        }
+        catch
+        {
+        }
+
+        if (TryGetOwnerBlockName(ownerBlock, tr, out var blockName))
+        {
+            AddText(values, blockName, ownerBlock.Position, TextSourcePriority.OwnerSpace);
         }
     }
 
@@ -399,7 +467,7 @@ public static class CadTextExtractor
         return value;
     }
 
-    private sealed class TextCandidate
+    internal sealed class TextCandidate
     {
         public TextCandidate(string text, Point3d point, TextSourcePriority priority)
         {
@@ -413,7 +481,7 @@ public static class CadTextExtractor
         public TextSourcePriority Priority { get; }
     }
 
-    private enum TextSourcePriority
+    internal enum TextSourcePriority
     {
         Attribute = 0,
         OwnerSpace = 1,

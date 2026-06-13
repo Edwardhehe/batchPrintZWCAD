@@ -77,6 +77,14 @@ public sealed class PlotJob
     public string OutputPath { get; set; } = "";
 }
 
+public enum TitleBlockScanScope
+{
+    PaperLayouts,
+    CurrentSpace,
+    ModelSpace,
+    AllSpaces
+}
+
 public sealed class PaperDetection
 {
     public string PaperName { get; set; } = "未知";
