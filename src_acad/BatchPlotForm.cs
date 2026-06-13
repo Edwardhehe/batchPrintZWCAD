@@ -30,7 +30,9 @@ public sealed class BatchPlotForm : Form
     private readonly Label _statusLabel = new();
     private readonly List<string> _logLines = new();
     private readonly List<string> _selectedDwgFiles = new();
+    private readonly TemporarySequenceOverlay _sequenceOverlay = new();
     private readonly AppSettings _settings;
+    private bool _sequenceOverlayFollowsCurrentJobs;
     private string _lastLogPath = "";
     public bool HasPendingPrint { get; private set; }
 
@@ -40,14 +42,7 @@ public sealed class BatchPlotForm : Form
         _settings = AppSettingsStore.Load();
         InitializeComponents();
         LoadPlotOptions();
-        if (_settings.AutoScanCurrentDrawing)
-        {
-            ScanCurrentDrawing();
-        }
-        else
-        {
-            RefreshStatus();
-        }
+        RefreshStatus();
     }
 
     private void InitializeComponents()
@@ -449,6 +444,7 @@ public sealed class BatchPlotForm : Form
         if (library.Blocks.Count == 0)
         {
             MessageBox.Show("图框库为空。请先从“批量打印”菜单点击“新增图框”。", "批量打印", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            ClearSequenceOverlay();
             RefreshStatus();
             return;
         }
@@ -460,6 +456,7 @@ public sealed class BatchPlotForm : Form
         }
 
         SortAndRefreshOutputPaths();
+        ShowSequenceOverlayForCurrentJobs();
         AppendLog("INFO", $"扫描当前图完成，识别 {_jobs.Count} 张。");
     }
 
@@ -469,6 +466,7 @@ public sealed class BatchPlotForm : Form
         if (library.Blocks.Count == 0)
         {
             MessageBox.Show("图框库为空，请先新增图框。", "批量打印", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            ClearSequenceOverlay();
             return;
         }
 
@@ -500,6 +498,7 @@ public sealed class BatchPlotForm : Form
             }
 
             SortAndRefreshOutputPaths();
+            ShowSequenceOverlayForCurrentJobs();
             AppendLog("INFO", $"框选扫描当前图完成，识别 {_jobs.Count} 张。");
         }
         finally
@@ -558,6 +557,15 @@ public sealed class BatchPlotForm : Form
         }
 
         SortAndRefreshOutputPaths();
+        if (_jobs.Count > 0 && _jobs.All(IsCurrentDocumentJob))
+        {
+            ShowSequenceOverlayForCurrentJobs();
+        }
+        else
+        {
+            ClearSequenceOverlay();
+        }
+
         if (errors.Count > 0)
         {
             MessageBox.Show("部分 DWG 扫描失败:\n" + string.Join("\n", errors), "批量打印", MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -593,6 +601,49 @@ public sealed class BatchPlotForm : Form
         }
 
         RefreshStatus();
+        if (_sequenceOverlayFollowsCurrentJobs)
+        {
+            ShowSequenceOverlayForCurrentJobs();
+        }
+    }
+
+    private void ShowSequenceOverlayForCurrentJobs()
+    {
+        _sequenceOverlayFollowsCurrentJobs = true;
+        try
+        {
+            _sequenceOverlay.Show(_jobs.ToList());
+        }
+        catch (Exception ex)
+        {
+            _sequenceOverlayFollowsCurrentJobs = false;
+            AppendLog("WARN", "临时序号标注显示失败: " + ex.Message);
+        }
+    }
+
+    private void ClearSequenceOverlay()
+    {
+        _sequenceOverlayFollowsCurrentJobs = false;
+        _sequenceOverlay.Clear();
+    }
+
+    private bool IsCurrentDocumentJob(PlotJob job)
+    {
+        var source = job.SourceFile;
+        var file = _currentDocument.Database.Filename;
+        if (!string.IsNullOrWhiteSpace(source) && !string.IsNullOrWhiteSpace(file))
+        {
+            try
+            {
+                return string.Equals(Path.GetFullPath(source), Path.GetFullPath(file), StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return string.Equals(source, file, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+
+        return string.Equals(source, _currentDocument.Name, StringComparison.OrdinalIgnoreCase);
     }
 
     private void SetAllSelected(bool selected)
@@ -663,6 +714,7 @@ public sealed class BatchPlotForm : Form
 
         _jobs.Clear();
         _selectedDwgFiles.Clear();
+        ClearSequenceOverlay();
         RefreshStatus();
     }
 
@@ -1204,6 +1256,7 @@ public sealed class BatchPlotForm : Form
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
+        ClearSequenceOverlay();
         SaveCurrentSettings();
         base.OnFormClosing(e);
     }
