@@ -19,6 +19,7 @@ public sealed class BatchPlotCommands : IExtensionApplication
 {
     public void Initialize()
     {
+        AcadPlotterInstaller.InstallBundledPlotter();
         CadMenuInstaller.Install(force: true);
     }
 

@@ -1,0 +1,159 @@
+PIAFILEVERSION_3.0,json
+{
+ "data": {
+  "custom": {
+   "0": {
+    "name": "Raster_Limit",
+    "value": 400
+   },
+   "1": {
+    "name": "Create_Bookmarks",
+    "value": true
+   },
+   "10": {
+    "name": "Sheet_Links",
+    "value": true
+   },
+   "11": {
+    "name": "Rasterize_Geometry",
+    "value": false
+   },
+   "12": {
+    "name": "View_New_File",
+    "value": true
+   },
+   "13": {
+    "name": "Custom_Raster_Resolution",
+    "value": false
+   },
+   "14": {
+    "name": "Custom_DWF_Resolution",
+    "value": false
+   },
+   "15": {
+    "name": "Custom_Monochrome_Resolution",
+    "value": false
+   },
+   "16": {
+    "name": "Custom_Gradient_Resolution",
+    "value": false
+   },
+   "17": {
+    "name": "Gradient_Limit",
+    "value": 600
+   },
+   "2": {
+    "name": "Monochrome_Raster_Limit",
+    "value": 400
+   },
+   "3": {
+    "name": "Thumbnail_Title",
+    "value": true
+   },
+   "4": {
+    "name": "All_As_Geometry",
+    "value": false
+   },
+   "5": {
+    "name": "Capture",
+    "value": 2
+   },
+   "6": {
+    "name": "Font_Capture",
+    "value": true
+   },
+   "7": {
+    "name": "Hardcopy_Resolution",
+    "value": 600
+   },
+   "8": {
+    "name": "Include_Layer",
+    "value": true
+   },
+   "9": {
+    "name": "Resolution",
+    "value": 14
+   }
+  },
+  "io": {
+   "allsysvalid": false,
+   "pathname": "",
+   "plot_to_file": true,
+   "type": 2
+  },
+  "media": {
+   "actual_printable_bounds_llx": 0.0,
+   "actual_printable_bounds_lly": 0.0,
+   "actual_printable_bounds_urx": 215.89999389648438,
+   "actual_printable_bounds_ury": 279.3999938964844,
+   "dm_orientation": 1,
+   "number_of_copies": 1,
+   "selection_method": 2,
+   "size": {
+    "group": 0,
+    "landscape_mode": false,
+    "longplot_reduction": 1.0,
+    "media_description": {
+     "dimensional": true,
+     "media_bounds": {
+      "urx": 215.89999389648438,
+      "ury": 279.3999938964844
+     },
+     "printable_area": 60322.46,
+     "printable_bounds_llx": 0.0,
+     "printable_bounds_lly": 0.0,
+     "printable_bounds_urx": 215.89999389648438,
+     "printable_bounds_ury": 279.3999938964844
+    },
+    "name": "ANSI_full_bleed_A_(8.50_x_11.00_Inches)"
+   },
+   "type_name": ""
+  },
+  "meta": {
+   "canonical_family_name": "Autodesk ePlot",
+   "canonical_model_name": "pdf",
+   "config_autospool": false,
+   "config_description": "",
+   "default_system_cfg": false,
+   "dm_driver_version": 0,
+   "driver_pathname": "C:\\Program Files\\Autodesk\\AutoCAD 2024\\drv\\pdfplot16.hdi",
+   "driver_tag_line": "PDF ePlot - by Autodesk",
+   "driver_type": 3,
+   "driver_version": "1.1-16.3.222.0 [v018-1]",
+   "file_only": true,
+   "friendly_net_name": "",
+   "locale": "4B00409",
+   "localized_family_name": "Autodesk ePlot (PDF)",
+   "localized_model_name": "DWG To PDF",
+   "model_abilities": "000550055000",
+   "platform": "2,10,0",
+   "short_net_name": "",
+   "show_custom_first": true,
+   "toolkit_version": 1,
+   "truetype_as_text": true,
+   "udm_description": "",
+   "user_defined_model_basename": "",
+   "user_defined_model_pathname": "C:\\Users\\lihao\\AppData\\Roaming\\Autodesk\\AutoCAD 2024\\R24.3\\chs\\plotters\\PMP Files\\LA_pdf.pmp"
+  },
+  "res_color_mem": {
+   "color_depth": 24,
+   "color_system": 1,
+   "dm_color": 1,
+   "lines_overwrite": true,
+   "name": "RGB",
+   "num_colors": 16777216,
+   "num_undithered_colors": 16777216,
+   "resolution": {
+    "addr_resolution_x": 1.0,
+    "addr_resolution_y": 1.0,
+    "effective_resolution_x": 600.0,
+    "effective_resolution_y": 600.0,
+    "name": "Default",
+    "phys_resolution_x": 600.0,
+    "phys_resolution_y": 600.0
+   }
+  }
+ },
+ "subver": "json",
+ "version": 0.01
+}

@@ -227,16 +227,35 @@ public static class TitleBlockScanner
             ? detected.PaperName
             : definition.PaperName;
 
+        if (detected.IsLong && !IsLongPaperName(name))
+        {
+            return new PaperDetection
+            {
+                PaperName = detected.PaperName,
+                ScaleText = detected.ScaleText,
+                ScaleValue = detected.ScaleValue,
+                IsLong = detected.IsLong,
+                PaperWidthMm = detected.PaperWidthMm,
+                PaperHeightMm = detected.PaperHeightMm,
+                Note = $"图框边界识别为加长图，已优先使用自动图幅；图框库默认纸张 {name} 仅作为新增图框默认值。{detected.Note}"
+            };
+        }
+
         return new PaperDetection
         {
             PaperName = name,
             ScaleText = detected.ScaleText,
             ScaleValue = detected.ScaleValue,
-            IsLong = name.EndsWith("+", StringComparison.OrdinalIgnoreCase),
+            IsLong = IsLongPaperName(name),
             PaperWidthMm = definition.PaperWidthMm,
             PaperHeightMm = definition.PaperHeightMm,
             Note = $"固定纸张来自图框库，输出纸张 {definition.PaperWidthMm:0.##} x {definition.PaperHeightMm:0.##} mm；比例按图框边界自动识别为 {detected.ScaleText}"
         };
+    }
+
+    private static bool IsLongPaperName(string paperName)
+    {
+        return paperName.EndsWith("+", StringComparison.OrdinalIgnoreCase);
     }
 
     private enum RegionCoordinateMode

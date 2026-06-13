@@ -340,22 +340,26 @@ public sealed class BatchPlotForm : Form
     {
         try
         {
+            AcadPlotterInstaller.InstallBundledPlotter();
             var settings = new PlotSettings(true);
             var validator = PlotSettingsValidator.Current;
-            foreach (string device in validator.GetPlotDeviceList())
+            foreach (var deviceItem in validator.GetPlotDeviceList())
             {
-                _deviceCombo.Items.Add(device);
+                if (deviceItem is string device && !string.IsNullOrWhiteSpace(device))
+                {
+                    _deviceCombo.Items.Add(device);
+                }
             }
 
-            foreach (string style in validator.GetPlotStyleSheetList())
+            foreach (var styleItem in validator.GetPlotStyleSheetList())
             {
-                if (style.EndsWith(".ctb", StringComparison.OrdinalIgnoreCase))
+                if (styleItem is string style && style.EndsWith(".ctb", StringComparison.OrdinalIgnoreCase))
                 {
                     _styleCombo.Items.Add(style);
                 }
             }
 
-            SelectExactOrContaining(_deviceCombo, _settings.LastPlotDevice, "PDF");
+            SelectPlotDevice(_deviceCombo, _settings.LastPlotDevice);
             SelectExactOrContaining(_styleCombo, _settings.LastStyleSheet, "monochrome");
             if (_styleCombo.SelectedIndex < 0 && _styleCombo.Items.Count > 0)
             {
@@ -368,33 +372,75 @@ public sealed class BatchPlotForm : Form
         }
     }
 
-    private static void SelectExactOrContaining(ComboBox combo, string exactValue, string fallbackContains)
+    private static void SelectPlotDevice(ComboBox combo, string lastValue)
     {
-        if (!string.IsNullOrWhiteSpace(exactValue))
+        if (TrySelectExactOrContaining(combo, AcadPlotterInstaller.PreferredPdfPlotter))
         {
-            for (var i = 0; i < combo.Items.Count; i++)
-            {
-                if (string.Equals(combo.Items[i]?.ToString(), exactValue, StringComparison.OrdinalIgnoreCase))
-                {
-                    combo.SelectedIndex = i;
-                    return;
-                }
-            }
+            return;
         }
 
-        for (var i = 0; i < combo.Items.Count; i++)
+        if (TrySelectExactOrContaining(combo, lastValue))
         {
-            if (combo.Items[i]?.ToString()?.IndexOf(fallbackContains, StringComparison.OrdinalIgnoreCase) >= 0)
-            {
-                combo.SelectedIndex = i;
-                return;
-            }
+            return;
+        }
+
+        SelectExactOrContaining(combo, "", "PDF");
+    }
+
+    private static void SelectExactOrContaining(ComboBox combo, string exactValue, string fallbackContains)
+    {
+        if (TrySelectExactOrContaining(combo, exactValue))
+        {
+            return;
+        }
+
+        if (TrySelectContaining(combo, fallbackContains))
+        {
+            return;
         }
 
         if (combo.Items.Count > 0)
         {
             combo.SelectedIndex = 0;
         }
+    }
+
+    private static bool TrySelectExactOrContaining(ComboBox combo, string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        for (var i = 0; i < combo.Items.Count; i++)
+        {
+            if (string.Equals(combo.Items[i]?.ToString(), value, StringComparison.OrdinalIgnoreCase))
+            {
+                combo.SelectedIndex = i;
+                return true;
+            }
+        }
+
+        return TrySelectContaining(combo, value);
+    }
+
+    private static bool TrySelectContaining(ComboBox combo, string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        for (var i = 0; i < combo.Items.Count; i++)
+        {
+            if (combo.Items[i]?.ToString()?.IndexOf(value, StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                combo.SelectedIndex = i;
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void ScanCurrentDrawing()
@@ -748,7 +794,7 @@ public sealed class BatchPlotForm : Form
         {
             existingPdfs = Directory
                 .EnumerateFiles(_outputDirectory.Text, "*.pdf", SearchOption.TopDirectoryOnly)
-                .OrderBy(Path.GetFileNameWithoutExtension, NaturalStringComparer.Instance)
+                .OrderBy(x => Path.GetFileNameWithoutExtension(x) ?? "", NaturalStringComparer.Instance)
                 .ToList();
         }
 

@@ -28,6 +28,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Include="resources\acad\Plotters\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>Plotters\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
     <PackageReference Include="AutoCAD.NET" Version="23.0.0">
       <PrivateAssets>all</PrivateAssets>

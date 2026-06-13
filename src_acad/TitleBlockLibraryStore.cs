@@ -12,16 +12,23 @@ public static class TitleBlockLibraryStore
 
     public static string DefaultPath => Path.Combine(DefaultDirectory, "TitleBlockLibrary.json");
 
+    private static string ZwcadLibraryPath =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ZwcadBatchPlot", "TitleBlockLibrary.json");
+
     public static TitleBlockLibrary Load(string? path = null)
     {
         path ??= DefaultPath;
+        var isDefaultPath = string.Equals(Path.GetFullPath(path), Path.GetFullPath(DefaultPath), StringComparison.OrdinalIgnoreCase);
+
         if (!File.Exists(path))
         {
-            return new TitleBlockLibrary();
+            var library = new TitleBlockLibrary();
+            return isDefaultPath ? MergeZwcadLibrary(library) : library;
         }
 
         var json = File.ReadAllText(path);
-        return JsonConvert.DeserializeObject<TitleBlockLibrary>(json) ?? new TitleBlockLibrary();
+        var loaded = JsonConvert.DeserializeObject<TitleBlockLibrary>(json) ?? new TitleBlockLibrary();
+        return isDefaultPath ? MergeZwcadLibrary(loaded) : loaded;
     }
 
     public static void Save(TitleBlockLibrary library, string? path = null)
@@ -59,5 +66,65 @@ public static class TitleBlockLibraryStore
 
         Save(library, path);
         return false;
+    }
+
+    private static TitleBlockLibrary MergeZwcadLibrary(TitleBlockLibrary library)
+    {
+        try
+        {
+            if (!File.Exists(ZwcadLibraryPath))
+            {
+                return library;
+            }
+
+            var zwcadJson = File.ReadAllText(ZwcadLibraryPath);
+            var zwcadLibrary = JsonConvert.DeserializeObject<TitleBlockLibrary>(zwcadJson);
+            if (zwcadLibrary?.Blocks == null || zwcadLibrary.Blocks.Count == 0)
+            {
+                return library;
+            }
+
+            var changed = false;
+            foreach (var block in zwcadLibrary.Blocks)
+            {
+                if (string.IsNullOrWhiteSpace(block.BlockName))
+                {
+                    continue;
+                }
+
+                var existing = library.Blocks.FirstOrDefault(x =>
+                    string.Equals(x.BlockName, block.BlockName, StringComparison.OrdinalIgnoreCase));
+                if (existing == null)
+                {
+                    library.Blocks.Add(block);
+                    changed = true;
+                    continue;
+                }
+
+                if (block.UpdatedAt > existing.UpdatedAt)
+                {
+                    var index = library.Blocks.IndexOf(existing);
+                    library.Blocks[index] = block;
+                    changed = true;
+                }
+            }
+
+            if (changed)
+            {
+                try
+                {
+                    Save(library);
+                }
+                catch
+                {
+                }
+            }
+
+            return library;
+        }
+        catch
+        {
+            return library;
+        }
     }
 }

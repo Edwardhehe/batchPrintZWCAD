@@ -57,15 +57,19 @@ public static class CadTextUpdater
             return false;
         }
 
+        var coordinateMode = GetCoordinateMode(definition);
+        var titleRegion = ResolveLocalRegion(definition.TitleRegion, blockRef.BlockTransform, coordinateMode);
+        var numberRegion = ResolveLocalRegion(definition.DrawingNumberRegion, blockRef.BlockTransform, coordinateMode);
+
         var changed = 0;
         if (newTitle != null)
         {
-            changed += UpdateRegionText(tr, owner, blockRef, definition.TitleRegion, newTitle);
+            changed += UpdateRegionText(tr, owner, blockRef, titleRegion, newTitle);
         }
 
         if (newNumber != null)
         {
-            changed += UpdateRegionText(tr, owner, blockRef, definition.DrawingNumberRegion, newNumber);
+            changed += UpdateRegionText(tr, owner, blockRef, numberRegion, newNumber);
         }
 
         if (changed == 0)
@@ -102,9 +106,14 @@ public static class CadTextUpdater
             .Where(blockRef => string.Equals(CadTextExtractor.GetBlockName(blockRef, tr), job.BlockName, StringComparison.OrdinalIgnoreCase))
             .ToList();
 
+        var coordinateMode = GetCoordinateMode(definition);
         var byOriginalText = matches.FirstOrDefault(blockRef =>
-            string.Equals(CadTextExtractor.ExtractRegionText(tr, blockRef, owner, definition.DrawingNumberRegion), job.CadDrawingNumber, StringComparison.Ordinal)
-            && string.Equals(CadTextExtractor.ExtractRegionText(tr, blockRef, owner, definition.TitleRegion), job.CadTitle, StringComparison.Ordinal));
+        {
+            var titleRegion = ResolveLocalRegion(definition.TitleRegion, blockRef.BlockTransform, coordinateMode);
+            var numberRegion = ResolveLocalRegion(definition.DrawingNumberRegion, blockRef.BlockTransform, coordinateMode);
+            return string.Equals(CadTextExtractor.ExtractRegionText(tr, blockRef, owner, numberRegion), job.CadDrawingNumber, StringComparison.Ordinal)
+                && string.Equals(CadTextExtractor.ExtractRegionText(tr, blockRef, owner, titleRegion), job.CadTitle, StringComparison.Ordinal);
+        });
 
         return byOriginalText ?? matches.ElementAtOrDefault(job.MatchIndex) ?? matches.FirstOrDefault();
     }
@@ -124,7 +133,7 @@ public static class CadTextUpdater
             if (tr.GetObject(attributeId, OpenMode.ForWrite, false) is AttributeReference attribute)
             {
                 var local = attribute.Position.TransformBy(inverse);
-                if (region.Contains(local.X, local.Y))
+                if (IsInRegion(attribute, inverse, region, local))
                 {
                     attribute.TextString = value;
                     changed++;
@@ -139,19 +148,24 @@ public static class CadTextUpdater
                 continue;
             }
 
-            if (tr.GetObject(id, OpenMode.ForWrite, false) is DBText dbText)
+            if (tr.GetObject(id, OpenMode.ForWrite, false) is not Entity entity)
+            {
+                continue;
+            }
+
+            if (entity is DBText dbText)
             {
                 var local = dbText.Position.TransformBy(inverse);
-                if (region.Contains(local.X, local.Y))
+                if (IsInRegion(dbText, inverse, region, local))
                 {
                     dbText.TextString = value;
                     changed++;
                 }
             }
-            else if (tr.GetObject(id, OpenMode.ForWrite, false) is MText mText)
+            else if (entity is MText mText)
             {
                 var local = mText.Location.TransformBy(inverse);
-                if (region.Contains(local.X, local.Y))
+                if (IsInRegion(mText, inverse, region, local))
                 {
                     mText.Contents = value;
                     changed++;
@@ -160,6 +174,81 @@ public static class CadTextUpdater
         }
 
         return changed;
+    }
+
+    private static RegionCoordinateMode GetCoordinateMode(TitleBlockDefinition definition)
+    {
+        return string.Equals(definition.CoordinateMode, "World", StringComparison.OrdinalIgnoreCase)
+            ? RegionCoordinateMode.World
+            : RegionCoordinateMode.Local;
+    }
+
+    private static LocalRectangle ResolveLocalRegion(LocalRectangle region, Matrix3d blockTransform, RegionCoordinateMode mode)
+    {
+        if (mode == RegionCoordinateMode.Local)
+        {
+            return region;
+        }
+
+        var inverse = blockTransform.Inverse();
+        var points = new[]
+        {
+            new Point3d(region.MinX, region.MinY, 0).TransformBy(inverse),
+            new Point3d(region.MinX, region.MaxY, 0).TransformBy(inverse),
+            new Point3d(region.MaxX, region.MinY, 0).TransformBy(inverse),
+            new Point3d(region.MaxX, region.MaxY, 0).TransformBy(inverse)
+        };
+
+        return LocalRectangle.FromPoints(
+            points.Min(p => p.X),
+            points.Min(p => p.Y),
+            points.Max(p => p.X),
+            points.Max(p => p.Y));
+    }
+
+    private static bool IsInRegion(Entity entity, Matrix3d entityToLocal, LocalRectangle region, Point3d fallbackPoint)
+    {
+        if (TryGetTransformedExtents(entity, entityToLocal, out var extents))
+        {
+            return Intersects(region, extents);
+        }
+
+        return region.Contains(fallbackPoint.X, fallbackPoint.Y);
+    }
+
+    private static bool TryGetTransformedExtents(Entity entity, Matrix3d transform, out LocalRectangle rectangle)
+    {
+        rectangle = new LocalRectangle();
+        try
+        {
+            var extents = entity.GeometricExtents;
+            var points = new[]
+            {
+                new Point3d(extents.MinPoint.X, extents.MinPoint.Y, 0).TransformBy(transform),
+                new Point3d(extents.MinPoint.X, extents.MaxPoint.Y, 0).TransformBy(transform),
+                new Point3d(extents.MaxPoint.X, extents.MinPoint.Y, 0).TransformBy(transform),
+                new Point3d(extents.MaxPoint.X, extents.MaxPoint.Y, 0).TransformBy(transform)
+            };
+
+            rectangle = LocalRectangle.FromPoints(
+                points.Min(p => p.X),
+                points.Min(p => p.Y),
+                points.Max(p => p.X),
+                points.Max(p => p.Y));
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool Intersects(LocalRectangle a, LocalRectangle b)
+    {
+        return a.MinX <= b.MaxX
+            && a.MaxX >= b.MinX
+            && a.MinY <= b.MaxY
+            && a.MaxY >= b.MinY;
     }
 
     private static Document? FindTargetDocument(PlotJob job, Document currentDocument)
@@ -189,5 +278,11 @@ public static class CadTextUpdater
         }
 
         return string.Equals(Path.GetFullPath(sourceFile), Path.GetFullPath(docFile), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private enum RegionCoordinateMode
+    {
+        Local,
+        World
     }
 }

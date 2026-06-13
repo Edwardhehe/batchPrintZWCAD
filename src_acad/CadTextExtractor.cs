@@ -30,10 +30,13 @@ public static class CadTextExtractor
 
             if (tr.GetObject(attributeId, OpenMode.ForRead, false) is AttributeReference attribute)
             {
-                var local = attribute.Position.TransformBy(inverse);
-                if (region.Contains(local.X, local.Y))
+                if (TryGetText(attribute, out var text, out var worldPoint))
                 {
-                    AddText(values, attribute.TextString, local, TextSourcePriority.Attribute);
+                    var local = worldPoint.TransformBy(inverse);
+                    if (IsInRegion(attribute, inverse, region, local))
+                    {
+                        AddText(values, text, local, TextSourcePriority.Attribute);
+                    }
                 }
             }
         }
@@ -45,10 +48,10 @@ public static class CadTextExtractor
                 continue;
             }
 
-            if (tr.GetObject(id, OpenMode.ForRead, false) is Entity entity && TryGetWorldText(entity, out var text, out var worldPoint))
+            if (tr.GetObject(id, OpenMode.ForRead, false) is Entity entity && TryGetText(entity, out var text, out var worldPoint))
             {
                 var local = worldPoint.TransformBy(inverse);
-                if (region.Contains(local.X, local.Y))
+                if (IsInRegion(entity, inverse, region, local))
                 {
                     AddText(values, text, local, TextSourcePriority.OwnerSpace);
                 }
@@ -56,16 +59,7 @@ public static class CadTextExtractor
         }
 
         var definition = (BlockTableRecord)tr.GetObject(blockRef.BlockTableRecord, OpenMode.ForRead);
-        foreach (ObjectId id in definition)
-        {
-            if (tr.GetObject(id, OpenMode.ForRead, false) is Entity entity && TryGetLocalText(entity, out var text, out var localPoint))
-            {
-                if (region.Contains(localPoint.X, localPoint.Y))
-                {
-                    AddText(values, text, localPoint, TextSourcePriority.BlockDefinition);
-                }
-            }
-        }
+        CollectDefinitionText(tr, definition, Matrix3d.Identity, region, values);
 
         if (values.Count == 0)
         {
@@ -93,7 +87,7 @@ public static class CadTextExtractor
         }
     }
 
-    private static bool TryGetLocalText(Entity entity, out string text, out Point3d point)
+    private static bool TryGetText(Entity entity, out string text, out Point3d point)
     {
         text = "";
         point = Point3d.Origin;
@@ -102,6 +96,20 @@ public static class CadTextExtractor
         {
             text = dbText.TextString;
             point = dbText.Position;
+            return true;
+        }
+
+        if (entity is AttributeDefinition attributeDefinition)
+        {
+            text = attributeDefinition.TextString;
+            point = attributeDefinition.Position;
+            return true;
+        }
+
+        if (entity is AttributeReference attributeReference)
+        {
+            text = attributeReference.TextString;
+            point = attributeReference.Position;
             return true;
         }
 
@@ -115,9 +123,136 @@ public static class CadTextExtractor
         return false;
     }
 
-    private static bool TryGetWorldText(Entity entity, out string text, out Point3d point)
+    private static void CollectDefinitionText(
+        Transaction tr,
+        BlockTableRecord definition,
+        Matrix3d entityToRoot,
+        LocalRectangle region,
+        ICollection<TextCandidate> values)
     {
-        return TryGetLocalText(entity, out text, out point);
+        foreach (ObjectId id in definition)
+        {
+            if (tr.GetObject(id, OpenMode.ForRead, false) is not Entity entity)
+            {
+                continue;
+            }
+
+            if (TryGetText(entity, out var text, out var entityPoint))
+            {
+                var localPoint = entityPoint.TransformBy(entityToRoot);
+                if (IsInRegion(entity, entityToRoot, region, localPoint))
+                {
+                    AddText(values, text, localPoint, TextSourcePriority.BlockDefinition);
+                }
+            }
+
+            if (entity is BlockReference nestedBlock)
+            {
+                var nestedToRoot = nestedBlock.BlockTransform * entityToRoot;
+                foreach (ObjectId attributeId in nestedBlock.AttributeCollection)
+                {
+                    if (!attributeId.IsValid || attributeId.IsErased)
+                    {
+                        continue;
+                    }
+
+                    if (tr.GetObject(attributeId, OpenMode.ForRead, false) is AttributeReference attribute
+                        && TryGetText(attribute, out var attributeText, out var attributePoint))
+                    {
+                        var localPoint = attributePoint.TransformBy(entityToRoot);
+                        if (IsInRegion(attribute, entityToRoot, region, localPoint))
+                        {
+                            AddText(values, attributeText, localPoint, TextSourcePriority.BlockDefinition);
+                        }
+                    }
+                }
+
+                try
+                {
+                    var nestedDefinition = (BlockTableRecord)tr.GetObject(nestedBlock.BlockTableRecord, OpenMode.ForRead);
+                    CollectDefinitionText(tr, nestedDefinition, nestedToRoot, region, values);
+                }
+                catch
+                {
+                }
+            }
+        }
+    }
+
+    private static bool IsInRegion(Entity entity, Matrix3d entityToLocal, LocalRectangle region, Point3d fallbackPoint)
+    {
+        if (region.Contains(fallbackPoint.X, fallbackPoint.Y))
+        {
+            return true;
+        }
+
+        if (TryGetTransformedExtents(entity, entityToLocal, out var extents))
+        {
+            return HasMeaningfulOverlap(region, extents);
+        }
+
+        return false;
+    }
+
+    private static bool TryGetTransformedExtents(Entity entity, Matrix3d transform, out LocalRectangle rectangle)
+    {
+        rectangle = new LocalRectangle();
+        try
+        {
+            var extents = entity.GeometricExtents;
+            var points = new[]
+            {
+                new Point3d(extents.MinPoint.X, extents.MinPoint.Y, 0).TransformBy(transform),
+                new Point3d(extents.MinPoint.X, extents.MaxPoint.Y, 0).TransformBy(transform),
+                new Point3d(extents.MaxPoint.X, extents.MinPoint.Y, 0).TransformBy(transform),
+                new Point3d(extents.MaxPoint.X, extents.MaxPoint.Y, 0).TransformBy(transform)
+            };
+
+            rectangle = LocalRectangle.FromPoints(
+                points.Min(p => p.X),
+                points.Min(p => p.Y),
+                points.Max(p => p.X),
+                points.Max(p => p.Y));
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool HasMeaningfulOverlap(LocalRectangle region, LocalRectangle textBounds)
+    {
+        var overlapWidth = Math.Max(0, Math.Min(region.MaxX, textBounds.MaxX) - Math.Max(region.MinX, textBounds.MinX));
+        var overlapHeight = Math.Max(0, Math.Min(region.MaxY, textBounds.MaxY) - Math.Max(region.MinY, textBounds.MinY));
+        var overlapArea = overlapWidth * overlapHeight;
+        if (overlapArea <= 0)
+        {
+            return false;
+        }
+
+        var textArea = RectangleArea(textBounds);
+        var regionArea = RectangleArea(region);
+        if (textArea <= 0 || regionArea <= 0)
+        {
+            return false;
+        }
+
+        var textCenterX = (textBounds.MinX + textBounds.MaxX) / 2d;
+        var textCenterY = (textBounds.MinY + textBounds.MaxY) / 2d;
+        if (region.Contains(textCenterX, textCenterY))
+        {
+            return true;
+        }
+
+        var overlapTextRatio = overlapArea / textArea;
+        return overlapTextRatio >= 0.55;
+    }
+
+    private static double RectangleArea(LocalRectangle rectangle)
+    {
+        return Math.Max(0, rectangle.MaxX - rectangle.MinX)
+            * Math.Max(0, rectangle.MaxY - rectangle.MinY);
     }
 
     private static string GetMTextPlainText(MText mText)
@@ -144,9 +279,19 @@ public static class CadTextExtractor
             .Replace("\\p", " ")
             .Replace("\r", " ")
             .Replace("\n", " ")
+            .Replace("%%U", "")
+            .Replace("%%u", "")
+            .Replace("%%O", "")
+            .Replace("%%o", "")
+            .Replace("%%C", "Φ")
+            .Replace("%%c", "Φ")
+            .Replace("%%D", "°")
+            .Replace("%%d", "°")
+            .Replace("%%P", "±")
+            .Replace("%%p", "±")
             .Trim();
 
-        value = Regex.Replace(value, @"\\[A-Za-z]+\d*(?:\.\d+)?;", "");
+        value = Regex.Replace(value, @"\\[A-Za-z]+[^;{}\\]*;", "");
         value = Regex.Replace(value, @"\\[A-Za-z]+", "");
         value = value.Replace("{", "").Replace("}", "");
         value = Regex.Replace(value, @"\s+", " ").Trim();

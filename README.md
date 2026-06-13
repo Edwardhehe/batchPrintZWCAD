@@ -183,40 +183,40 @@ C:\Program Files\ZWSOFT\ZWCAD Enterprise\
 
 PDF 工具当前使用 WebView2 做内嵌预览、PDFsharp 做 PDF 合并，避免把 x86 PDF 阅读组件加载进中望 CAD x64 进程。
 
-编译：
+编译日常测试 DLL（固定输出目录，不再每次新建文件夹）：
 
 ```powershell
-dotnet build .\BatchPlotter.csproj -c Release
+.\scripts\build-dll.ps1 -Target Zwcad
 ```
 
-输出测试 DLL：
+生成结果固定在 `bin\BatchPlotter.dll`。如果旧 DLL 已经被 CAD 加载，先关闭 CAD 再重新生成；需要清理旧输出时可以加 `-Clean`：
 
 ```powershell
-dotnet build .\BatchPlotter.csproj -c Release -o .\bin-dev
+.\scripts\build-dll.ps1 -Target Zwcad -Clean
 ```
 
-发布测试包：
+一次生成全部 CAD 版本：
 
 ```powershell
-dotnet build .\BatchPlotter.csproj -c Release -o .\release\ZwcadBatchPlot
+.\scripts\build-dll.ps1 -Target All
 ```
 
 AutoCAD 2021 ~ 2024:
 
 ```powershell
-dotnet build .\AcadBatchPlot.csproj -c Release -o .\release\AcadBatchPlot-AutoCAD2021-2024
+.\scripts\build-dll.ps1 -Target AutoCAD2021
 ```
 
 AutoCAD 2019 ~ 2020:
 
 ```powershell
-dotnet build .\AcadBatchPlot.AutoCAD2019.csproj -c Release -o .\release\AcadBatchPlot-AutoCAD2019-2020
+.\scripts\build-dll.ps1 -Target AutoCAD2019
 ```
 
 AutoCAD 2025 及以后:
 
 ```powershell
-dotnet build .\AcadBatchPlot.Core.csproj -c Release -o .\release\AcadBatchPlot-AutoCAD2025Plus
+.\scripts\build-dll.ps1 -Target AutoCAD2025
 ```
 
 ## 说明

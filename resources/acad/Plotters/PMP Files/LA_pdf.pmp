@@ -1,0 +1,952 @@
+PIAFILEVERSION_3.0,json
+{
+ "data": {
+  "meta": {
+   "canonical_family_name": "Autodesk ePlot",
+   "canonical_model_name": "pdf",
+   "default_system_cfg": false,
+   "dm_driver_version": 0,
+   "driver_pathname": "C:\\Program Files\\Autodesk\\AutoCAD 2024\\drv\\pdfplot16.hdi",
+   "driver_tag_line": "PDF ePlot - by Autodesk",
+   "driver_type": 3,
+   "driver_version": "1.1-16.3.222.0 [v018-1]",
+   "file_only": true,
+   "friendly_net_name": "",
+   "locale": "4B00409",
+   "localized_family_name": "Autodesk ePlot (PDF)",
+   "localized_model_name": "DWG To PDF",
+   "model_abilities": "000550055000",
+   "platform": "2,10,0",
+   "short_net_name": "",
+   "show_custom_first": true,
+   "toolkit_version": 1,
+   "truetype_as_text": true,
+   "udm_description": "",
+   "user_defined_model_basename": "",
+   "user_defined_model_pathname": "C:\\Users\\lihao\\AppData\\Roaming\\Autodesk\\AutoCAD 2024\\R24.3\\chs\\plotters\\PMP Files\\LA_pdf.pmp"
+  },
+  "mod": {
+   "media": {
+    "abilities": "500005500500505555000005550000000550000500000500000",
+    "caps_state": "000000000000000000000000000000000000000000000000000",
+    "size_max_x": 5080.0,
+    "size_max_y": 5080.0,
+    "ui_owner": "11111111111111111111000"
+   }
+  },
+  "udm": {
+   "calibration": {
+    "_x": 1.0,
+    "_y": 1.0
+   },
+   "media": {
+    "description": {
+     "0": {
+      "caps_type": 2,
+      "dimensional": true,
+      "media_bounds_urx": 297.0,
+      "media_bounds_ury": 210.0,
+      "name": "UserDefinedMetric A4 横向 297.00W x 210.00H - (0, 0) x (297, 210) =62370 毫米",
+      "printable_area": 62370.0,
+      "printable_bounds_llx": 0.0,
+      "printable_bounds_lly": 0.0,
+      "printable_bounds_urx": 297.0,
+      "printable_bounds_ury": 210.0
+     },
+     "1": {
+      "caps_type": 2,
+      "dimensional": true,
+      "media_bounds_urx": 371.0,
+      "media_bounds_ury": 210.0,
+      "name": "UserDefinedMetric A4_1.25L 横向 371.00W x 210.00H - (0, 0) x (371, 210) =77910 毫米",
+      "printable_area": 77910.0,
+      "printable_bounds_llx": 0.0,
+      "printable_bounds_lly": 0.0,
+      "printable_bounds_urx": 371.0,
+      "printable_bounds_ury": 210.0
+     },
+     "2": {
+      "caps_type": 2,
+      "dimensional": true,
+      "media_bounds_urx": 446.0,
+      "media_bounds_ury": 210.0,
+      "name": "UserDefinedMetric A4_1.50L 横向 446.00W x 210.00H - (0, 0) x (446, 210) =93660 毫米",
+      "printable_area": 93660.0,
+      "printable_bounds_llx": 0.0,
+      "printable_bounds_lly": 0.0,
+      "printable_bounds_urx": 446.0,
+      "printable_bounds_ury": 210.0
+     },
+     "3": {
+      "caps_type": 2,
+      "dimensional": true,
+      "media_bounds_urx": 520.0,
+      "media_bounds_ury": 210.0,
+      "name": "UserDefinedMetric A4_1.75L 横向 520.00W x 210.00H - (0, 0) x (520, 210) =109200 毫米",
+      "printable_area": 109200.0,
+      "printable_bounds_llx": 0.0,
+      "printable_bounds_lly": 0.0,
+      "printable_bounds_urx": 520.0,
+      "printable_bounds_ury": 210.0
+     },
+     "4": {
+      "caps_type": 2,
+      "dimensional": true,
+      "media_bounds_urx": 594.0,
+      "media_bounds_ury": 210.0,
+      "name": "UserDefinedMetric A4_2L 横向 594.00W x 210.00H - (0, 0) x (594, 210) =124740 毫米",
+      "printable_area": 124740.0,
+      "printable_bounds_llx": 0.0,
+      "printable_bounds_lly": 0.0,
+      "printable_bounds_urx": 594.0,
+      "printable_bounds_ury": 210.0
+     },
+     "5": {
+      "caps_type": 2,
+      "dimensional": true,
+      "media_bounds_urx": 668.0,
+      "media_bounds_ury": 210.0,
+      "name": "UserDefinedMetric A4_2.25L 横向 668.00W x 210.00H - (0, 0) x (668, 210) =140280 毫米",
+      "printable_area": 140280.0,
+      "printable_bounds_llx": 0.0,
+      "printable_bounds_lly": 0.0,
+      "printable_bounds_urx": 668.0,
+      "printable_bounds_ury": 210.0
+     },
+     "6": {
+      "caps_type": 2,
+      "dimensional": true,
+      "media_bounds_urx": 743.0,
+      "media_bounds_ury": 210.0,
+      "name": "UserDefinedMetric A4_2.50L 横向 743.00W x 210.00H - (0, 0) x (743, 210) =156030 毫米",
+      "printable_area": 156030.0,
+      "printable_bounds_llx": 0.0,
+      "printable_bounds_lly": 0.0,
+      "printable_bounds_urx": 743.0,
+      "printable_bounds_ury": 210.0
+     },
+     "7": {
+      "caps_type": 2,
+      "dimensional": true,
+      "media_bounds_urx": 817.0,
+      "media_bounds_ury": 210.0,
+      "name": "UserDefinedMetric A4_2.75L 横向 817.00W x 210.00H - (0, 0) x (817, 210) =171570 毫米",
+      "printable_area": 171570.0,
+      "printable_bounds_llx": 0.0,
+      "printable_bounds_lly": 0.0,
+      "printable_bounds_urx": 817.0,
+      "printable_bounds_ury": 210.0
+     },
+     "8": {
+      "caps_type": 2,
+      "dimensional": true,
+      "media_bounds_urx": 891.0,
+      "media_bounds_ury": 210.0,
+      "name": "UserDefinedMetric A4_3L 横向 891.00W x 210.00H - (0, 0) x (891, 210) =187110 毫米",
+      "printable_area": 187110.0,
+      "printable_bounds_llx": 0.0,
+      "printable_bounds_lly": 0.0,
+      "printable_bounds_urx": 891.0,
+      "printable_bounds_ury": 210.0
+     },
+     "9": {
+      "caps_type": 2,
+      "dimensional": true,
+      "media_bounds_urx": 420.0,
+      "media_bounds_ury": 297.0,
+      "name": "UserDefinedMetric A3 横向 420.00W x 297.00H - (0, 0) x (420, 297) =124740 毫米",
+      "printable_area": 124740.0,
+      "printable_bounds_llx": 0.0,
+      "printable_bounds_lly": 0.0,
+      "printable_bounds_urx": 420.0,
+      "printable_bounds_ury": 297.0
+     },
+     "10": {
+      "caps_type": 2,
+      "dimensional": true,
+      "media_bounds_urx": 525.0,
+      "media_bounds_ury": 297.0,
+      "name": "UserDefinedMetric A3_1.25L 横向 525.00W x 297.00H - (0, 0) x (525, 297) =155925 毫米",
+      "printable_area": 155925.0,
+      "printable_bounds_llx": 0.0,
+      "printable_bounds_lly": 0.0,
+      "printable_bounds_urx": 525.0,
+      "printable_bounds_ury": 297.0
+     },
+     "11": {
+      "caps_type": 2,
+      "dimensional": true,
+      "media_bounds_urx": 630.0,
+      "media_bounds_ury": 297.0,
+      "name": "UserDefinedMetric A3_1.50L 横向 630.00W x 297.00H - (0, 0) x (630, 297) =187110 毫米",
+      "printable_area": 187110.0,
+      "printable_bounds_llx": 0.0,
+      "printable_bounds_lly": 0.0,
+      "printable_bounds_urx": 630.0,
+      "printable_bounds_ury": 297.0
+     },
+     "12": {
+      "caps_type": 2,
+      "dimensional": true,
+      "media_bounds_urx": 735.0,
+      "media_bounds_ury": 297.0,
+      "name": "UserDefinedMetric A3_1.75L 横向 735.00W x 297.00H - (0, 0) x (735, 297) =218295 毫米",
+      "printable_area": 218295.0,
+      "printable_bounds_llx": 0.0,
+      "printable_bounds_lly": 0.0,
+      "printable_bounds_urx": 735.0,
+      "printable_bounds_ury": 297.0
+     },
+     "13": {
+      "caps_type": 2,
+      "dimensional": true,
+      "media_bounds_urx": 840.0,
+      "media_bounds_ury": 297.0,
+      "name": "UserDefinedMetric A3_2L 横向 840.00W x 297.00H - (0, 0) x (840, 297) =249480 毫米",
+      "printable_area": 249480.0,
+      "printable_bounds_llx": 0.0,
+      "printable_bounds_lly": 0.0,
+      "printable_bounds_urx": 840.0,
+      "printable_bounds_ury": 297.0
+     },
+     "14": {
+      "caps_type": 2,
+      "dimensional": true,
+      "media_bounds_urx": 945.0,
+      "media_bounds_ury": 297.0,
+      "name": "UserDefinedMetric A3_2.25L 横向 945.00W x 297.00H - (0, 0) x (945, 297) =280665 毫米",
+      "printable_area": 280665.0,
+      "printable_bounds_llx": 0.0,
+      "printable_bounds_lly": 0.0,
+      "printable_bounds_urx": 945.0,
+      "printable_bounds_ury": 297.0
+     },
+     "15": {
+      "caps_type": 2,
+      "dimensional": true,
+      "media_bounds_urx": 1050.0,
+      "media_bounds_ury": 297.0,
+      "name": "UserDefinedMetric A3_2.50L 横向 1050.00W x 297.00H - (0, 0) x (1050, 297) =311850 毫米",
+      "printable_area": 311850.0,
+      "printable_bounds_llx": 0.0,
+      "printable_bounds_lly": 0.0,
+      "printable_bounds_urx": 1050.0,
+      "printable_bounds_ury": 297.0
+     },
+     "16": {
+      "caps_type": 2,
+      "dimensional": true,
+      "media_bounds_urx": 1155.0,
+      "media_bounds_ury": 297.0,
+      "name": "UserDefinedMetric A3_2.75L 横向 1155.00W x 297.00H - (0, 0) x (1155, 297) =343035 毫米",
+      "printable_area": 343035.0,
+      "printable_bounds_llx": 0.0,
+      "printable_bounds_lly": 0.0,
+      "printable_bounds_urx": 1155.0,
+      "printable_bounds_ury": 297.0
+     },
+     "17": {
+      "caps_type": 2,
+      "dimensional": true,
+      "media_bounds_urx": 1260.0,
+      "media_bounds_ury": 297.0,
+      "name": "UserDefinedMetric A3_3L 横向 1260.00W x 297.00H - (0, 0) x (1260, 297) =374220 毫米",
+      "printable_area": 374220.0,
+      "printable_bounds_llx": 0.0,
+      "printable_bounds_lly": 0.0,
+      "printable_bounds_urx": 1260.0,
+      "printable_bounds_ury": 297.0
+     },
+     "18": {
+      "caps_type": 2,
+      "dimensional": true,
+      "media_bounds_urx": 594.0,
+      "media_bounds_ury": 420.0,
+      "name": "UserDefinedMetric A2 横向 594.00W x 420.00H - (0, 0) x (594, 420) =249480 毫米",
+      "printable_area": 249480.0,
+      "printable_bounds_llx": 0.0,
+      "printable_bounds_lly": 0.0,
+      "printable_bounds_urx": 594.0,
+      "printable_bounds_ury": 420.0
+     },
+     "19": {
+      "caps_type": 2,
+      "dimensional": true,
+      "media_bounds_urx": 743.0,
+      "media_bounds_ury": 420.0,
+      "name": "UserDefinedMetric A2_1.25L 横向 743.00W x 420.00H - (0, 0) x (743, 420) =312060 毫米",
+      "printable_area": 312060.0,
+      "printable_bounds_llx": 0.0,
+      "printable_bounds_lly": 0.0,
+      "printable_bounds_urx": 743.0,
+      "printable_bounds_ury": 420.0
+     },
+     "20": {
+      "caps_type": 2,
+      "dimensional": true,
+      "media_bounds_urx": 891.0,
+      "media_bounds_ury": 420.0,
+      "name": "UserDefinedMetric A2_1.50L 横向 891.00W x 420.00H - (0, 0) x (891, 420) =374220 毫米",
+      "printable_area": 374220.0,
+      "printable_bounds_llx": 0.0,
+      "printable_bounds_lly": 0.0,
+      "printable_bounds_urx": 891.0,
+      "printable_bounds_ury": 420.0
+     },
+     "21": {
+      "caps_type": 2,
+      "dimensional": true,
+      "media_bounds_urx": 1040.0,
+      "media_bounds_ury": 420.0,
+      "name": "UserDefinedMetric A2_1.75L 横向 1040.00W x 420.00H - (0, 0) x (1040, 420) =436800 毫米",
+      "printable_area": 436800.0,
+      "printable_bounds_llx": 0.0,
+      "printable_bounds_lly": 0.0,
+      "printable_bounds_urx": 1040.0,
+      "printable_bounds_ury": 420.0
+     },
+     "22": {
+      "caps_type": 2,
+      "dimensional": true,
+      "media_bounds_urx": 1188.0,
+      "media_bounds_ury": 420.0,
+      "name": "UserDefinedMetric A2_2L 横向 1188.00W x 420.00H - (0, 0) x (1188, 420) =498960 毫米",
+      "printable_area": 498960.0,
+      "printable_bounds_llx": 0.0,
+      "printable_bounds_lly": 0.0,
+      "printable_bounds_urx": 1188.0,
+      "printable_bounds_ury": 420.0
+     },
+     "23": {
+      "caps_type": 2,
+      "dimensional": true,
+      "media_bounds_urx": 1337.0,
+      "media_bounds_ury": 420.0,
+      "name": "UserDefinedMetric A2_2.25L 横向 1337.00W x 420.00H - (0, 0) x (1337, 420) =561540 毫米",
+      "printable_area": 561540.0,
+      "printable_bounds_llx": 0.0,
+      "printable_bounds_lly": 0.0,
+      "printable_bounds_urx": 1337.0,
+      "printable_bounds_ury": 420.0
+     },
+     "24": {
+      "caps_type": 2,
+      "dimensional": true,
+      "media_bounds_urx": 1485.0,
+      "media_bounds_ury": 420.0,
+      "name": "UserDefinedMetric A2_2.50L 横向 1485.00W x 420.00H - (0, 0) x (1485, 420) =623700 毫米",
+      "printable_area": 623700.0,
+      "printable_bounds_llx": 0.0,
+      "printable_bounds_lly": 0.0,
+      "printable_bounds_urx": 1485.0,
+      "printable_bounds_ury": 420.0
+     },
+     "25": {
+      "caps_type": 2,
+      "dimensional": true,
+      "media_bounds_urx": 1634.0,
+      "media_bounds_ury": 420.0,
+      "name": "UserDefinedMetric A2_2.75L 横向 1634.00W x 420.00H - (0, 0) x (1634, 420) =686280 毫米",
+      "printable_area": 686280.0,
+      "printable_bounds_llx": 0.0,
+      "printable_bounds_lly": 0.0,
+      "printable_bounds_urx": 1634.0,
+      "printable_bounds_ury": 420.0
+     },
+     "26": {
+      "caps_type": 2,
+      "dimensional": true,
+      "media_bounds_urx": 1782.0,
+      "media_bounds_ury": 420.0,
+      "name": "UserDefinedMetric A2_3L 横向 1782.00W x 420.00H - (0, 0) x (1782, 420) =748440 毫米",
+      "printable_area": 748440.0,
+      "printable_bounds_llx": 0.0,
+      "printable_bounds_lly": 0.0,
+      "printable_bounds_urx": 1782.0,
+      "printable_bounds_ury": 420.0
+     },
+     "27": {
+      "caps_type": 2,
+      "dimensional": true,
+      "media_bounds_urx": 841.0,
+      "media_bounds_ury": 594.0,
+      "name": "UserDefinedMetric A1 横向 841.00W x 594.00H - (0, 0) x (841, 594) =499554 毫米",
+      "printable_area": 499554.0,
+      "printable_bounds_llx": 0.0,
+      "printable_bounds_lly": 0.0,
+      "printable_bounds_urx": 841.0,
+      "printable_bounds_ury": 594.0
+     },
+     "28": {
+      "caps_type": 2,
+      "dimensional": true,
+      "media_bounds_urx": 1051.0,
+      "media_bounds_ury": 594.0,
+      "name": "UserDefinedMetric A1_1.25L 横向 1051.00W x 594.00H - (0, 0) x (1051, 594) =624294 毫米",
+      "printable_area": 624294.0,
+      "printable_bounds_llx": 0.0,
+      "printable_bounds_lly": 0.0,
+      "printable_bounds_urx": 1051.0,
+      "printable_bounds_ury": 594.0
+     },
+     "29": {
+      "caps_type": 2,
+      "dimensional": true,
+      "media_bounds_urx": 1262.0,
+      "media_bounds_ury": 594.0,
+      "name": "UserDefinedMetric A1_1.50L 横向 1262.00W x 594.00H - (0, 0) x (1262, 594) =749628 毫米",
+      "printable_area": 749628.0,
+      "printable_bounds_llx": 0.0,
+      "printable_bounds_lly": 0.0,
+      "printable_bounds_urx": 1262.0,
+      "printable_bounds_ury": 594.0
+     },
+     "30": {
+      "caps_type": 2,
+      "dimensional": true,
+      "media_bounds_urx": 1472.0,
+      "media_bounds_ury": 594.0,
+      "name": "UserDefinedMetric A1_1.75L 横向 1472.00W x 594.00H - (0, 0) x (1472, 594) =874368 毫米",
+      "printable_area": 874368.0,
+      "printable_bounds_llx": 0.0,
+      "printable_bounds_lly": 0.0,
+      "printable_bounds_urx": 1472.0,
+      "printable_bounds_ury": 594.0
+     },
+     "31": {
+      "caps_type": 2,
+      "dimensional": true,
+      "media_bounds_urx": 1682.0,
+      "media_bounds_ury": 594.0,
+      "name": "UserDefinedMetric A1_2L 横向 1682.00W x 594.00H - (0, 0) x (1682, 594) =999108 毫米",
+      "printable_area": 999108.0,
+      "printable_bounds_llx": 0.0,
+      "printable_bounds_lly": 0.0,
+      "printable_bounds_urx": 1682.0,
+      "printable_bounds_ury": 594.0
+     },
+     "32": {
+      "caps_type": 2,
+      "dimensional": true,
+      "media_bounds_urx": 1892.0,
+      "media_bounds_ury": 594.0,
+      "name": "UserDefinedMetric A1_2.25L 横向 1892.00W x 594.00H - (0, 0) x (1892, 594) =1123848 毫米",
+      "printable_area": 1123848.0,
+      "printable_bounds_llx": 0.0,
+      "printable_bounds_lly": 0.0,
+      "printable_bounds_urx": 1892.0,
+      "printable_bounds_ury": 594.0
+     },
+     "33": {
+      "caps_type": 2,
+      "dimensional": true,
+      "media_bounds_urx": 2103.0,
+      "media_bounds_ury": 594.0,
+      "name": "UserDefinedMetric A1_2.50L 横向 2103.00W x 594.00H - (0, 0) x (2103, 594) =1249182 毫米",
+      "printable_area": 1249182.0,
+      "printable_bounds_llx": 0.0,
+      "printable_bounds_lly": 0.0,
+      "printable_bounds_urx": 2103.0,
+      "printable_bounds_ury": 594.0
+     },
+     "34": {
+      "caps_type": 2,
+      "dimensional": true,
+      "media_bounds_urx": 2313.0,
+      "media_bounds_ury": 594.0,
+      "name": "UserDefinedMetric A1_2.75L 横向 2313.00W x 594.00H - (0, 0) x (2313, 594) =1373922 毫米",
+      "printable_area": 1373922.0,
+      "printable_bounds_llx": 0.0,
+      "printable_bounds_lly": 0.0,
+      "printable_bounds_urx": 2313.0,
+      "printable_bounds_ury": 594.0
+     },
+     "35": {
+      "caps_type": 2,
+      "dimensional": true,
+      "media_bounds_urx": 2523.0,
+      "media_bounds_ury": 594.0,
+      "name": "UserDefinedMetric A1_3L 横向 2523.00W x 594.00H - (0, 0) x (2523, 594) =1498662 毫米",
+      "printable_area": 1498662.0,
+      "printable_bounds_llx": 0.0,
+      "printable_bounds_lly": 0.0,
+      "printable_bounds_urx": 2523.0,
+      "printable_bounds_ury": 594.0
+     },
+     "36": {
+      "caps_type": 2,
+      "dimensional": true,
+      "media_bounds_urx": 1189.0,
+      "media_bounds_ury": 841.0,
+      "name": "UserDefinedMetric A0 横向 1189.00W x 841.00H - (0, 0) x (1189, 841) =999949 毫米",
+      "printable_area": 999949.0,
+      "printable_bounds_llx": 0.0,
+      "printable_bounds_lly": 0.0,
+      "printable_bounds_urx": 1189.0,
+      "printable_bounds_ury": 841.0
+     },
+     "37": {
+      "caps_type": 2,
+      "dimensional": true,
+      "media_bounds_urx": 1486.0,
+      "media_bounds_ury": 841.0,
+      "name": "UserDefinedMetric A0_1.25L 横向 1486.00W x 841.00H - (0, 0) x (1486, 841) =1249726 毫米",
+      "printable_area": 1249726.0,
+      "printable_bounds_llx": 0.0,
+      "printable_bounds_lly": 0.0,
+      "printable_bounds_urx": 1486.0,
+      "printable_bounds_ury": 841.0
+     },
+     "38": {
+      "caps_type": 2,
+      "dimensional": true,
+      "media_bounds_urx": 1784.0,
+      "media_bounds_ury": 841.0,
+      "name": "UserDefinedMetric A0_1.50L 横向 1784.00W x 841.00H - (0, 0) x (1784, 841) =1500344 毫米",
+      "printable_area": 1500344.0,
+      "printable_bounds_llx": 0.0,
+      "printable_bounds_lly": 0.0,
+      "printable_bounds_urx": 1784.0,
+      "printable_bounds_ury": 841.0
+     },
+     "39": {
+      "caps_type": 2,
+      "dimensional": true,
+      "media_bounds_urx": 2081.0,
+      "media_bounds_ury": 841.0,
+      "name": "UserDefinedMetric A0_1.75L 横向 2081.00W x 841.00H - (0, 0) x (2081, 841) =1750121 毫米",
+      "printable_area": 1750121.0,
+      "printable_bounds_llx": 0.0,
+      "printable_bounds_lly": 0.0,
+      "printable_bounds_urx": 2081.0,
+      "printable_bounds_ury": 841.0
+     },
+     "40": {
+      "caps_type": 2,
+      "dimensional": true,
+      "media_bounds_urx": 2378.0,
+      "media_bounds_ury": 841.0,
+      "name": "UserDefinedMetric A0_2L 横向 2378.00W x 841.00H - (0, 0) x (2378, 841) =1999898 毫米",
+      "printable_area": 1999898.0,
+      "printable_bounds_llx": 0.0,
+      "printable_bounds_lly": 0.0,
+      "printable_bounds_urx": 2378.0,
+      "printable_bounds_ury": 841.0
+     },
+     "41": {
+      "caps_type": 2,
+      "dimensional": true,
+      "media_bounds_urx": 2675.0,
+      "media_bounds_ury": 841.0,
+      "name": "UserDefinedMetric A0_2.25L 横向 2675.00W x 841.00H - (0, 0) x (2675, 841) =2249675 毫米",
+      "printable_area": 2249675.0,
+      "printable_bounds_llx": 0.0,
+      "printable_bounds_lly": 0.0,
+      "printable_bounds_urx": 2675.0,
+      "printable_bounds_ury": 841.0
+     },
+     "42": {
+      "caps_type": 2,
+      "dimensional": true,
+      "media_bounds_urx": 2973.0,
+      "media_bounds_ury": 841.0,
+      "name": "UserDefinedMetric A0_2.50L 横向 2973.00W x 841.00H - (0, 0) x (2973, 841) =2500293 毫米",
+      "printable_area": 2500293.0,
+      "printable_bounds_llx": 0.0,
+      "printable_bounds_lly": 0.0,
+      "printable_bounds_urx": 2973.0,
+      "printable_bounds_ury": 841.0
+     },
+     "43": {
+      "caps_type": 2,
+      "dimensional": true,
+      "media_bounds_urx": 3270.0,
+      "media_bounds_ury": 841.0,
+      "name": "UserDefinedMetric A0_2.75L 横向 3270.00W x 841.00H - (0, 0) x (3270, 841) =2750070 毫米",
+      "printable_area": 2750070.0,
+      "printable_bounds_llx": 0.0,
+      "printable_bounds_lly": 0.0,
+      "printable_bounds_urx": 3270.0,
+      "printable_bounds_ury": 841.0
+     },
+     "44": {
+      "caps_type": 2,
+      "dimensional": true,
+      "media_bounds_urx": 3567.0,
+      "media_bounds_ury": 841.0,
+      "name": "UserDefinedMetric A0_3L 横向 3567.00W x 841.00H - (0, 0) x (3567, 841) =2999847 毫米",
+      "printable_area": 2999847.0,
+      "printable_bounds_llx": 0.0,
+      "printable_bounds_lly": 0.0,
+      "printable_bounds_urx": 3567.0,
+      "printable_bounds_ury": 841.0
+     }
+    },
+    "size": {
+     "0": {
+      "caps_type": 2,
+      "landscape_mode": true,
+      "localized_name": "A4 (297.00 x 210.00 毫米)",
+      "media_description_name": "UserDefinedMetric A4 横向 297.00W x 210.00H - (0, 0) x (297, 210) =62370 毫米",
+      "media_group": 15,
+      "name": "UserDefinedMetric A4 (297.00 x 210.00毫米)"
+     },
+     "1": {
+      "caps_type": 2,
+      "landscape_mode": true,
+      "localized_name": "A4_1.25L (371.00 x 210.00 毫米)",
+      "media_description_name": "UserDefinedMetric A4_1.25L 横向 371.00W x 210.00H - (0, 0) x (371, 210) =77910 毫米",
+      "media_group": 15,
+      "name": "UserDefinedMetric A4_1.25L (371.00 x 210.00毫米)"
+     },
+     "2": {
+      "caps_type": 2,
+      "landscape_mode": true,
+      "localized_name": "A4_1.50L (446.00 x 210.00 毫米)",
+      "media_description_name": "UserDefinedMetric A4_1.50L 横向 446.00W x 210.00H - (0, 0) x (446, 210) =93660 毫米",
+      "media_group": 15,
+      "name": "UserDefinedMetric A4_1.50L (446.00 x 210.00毫米)"
+     },
+     "3": {
+      "caps_type": 2,
+      "landscape_mode": true,
+      "localized_name": "A4_1.75L (520.00 x 210.00 毫米)",
+      "media_description_name": "UserDefinedMetric A4_1.75L 横向 520.00W x 210.00H - (0, 0) x (520, 210) =109200 毫米",
+      "media_group": 15,
+      "name": "UserDefinedMetric A4_1.75L (520.00 x 210.00毫米)"
+     },
+     "4": {
+      "caps_type": 2,
+      "landscape_mode": true,
+      "localized_name": "A4_2L (594.00 x 210.00 毫米)",
+      "media_description_name": "UserDefinedMetric A4_2L 横向 594.00W x 210.00H - (0, 0) x (594, 210) =124740 毫米",
+      "media_group": 15,
+      "name": "UserDefinedMetric A4_2L (594.00 x 210.00毫米)"
+     },
+     "5": {
+      "caps_type": 2,
+      "landscape_mode": true,
+      "localized_name": "A4_2.25L (668.00 x 210.00 毫米)",
+      "media_description_name": "UserDefinedMetric A4_2.25L 横向 668.00W x 210.00H - (0, 0) x (668, 210) =140280 毫米",
+      "media_group": 15,
+      "name": "UserDefinedMetric A4_2.25L (668.00 x 210.00毫米)"
+     },
+     "6": {
+      "caps_type": 2,
+      "landscape_mode": true,
+      "localized_name": "A4_2.50L (743.00 x 210.00 毫米)",
+      "media_description_name": "UserDefinedMetric A4_2.50L 横向 743.00W x 210.00H - (0, 0) x (743, 210) =156030 毫米",
+      "media_group": 15,
+      "name": "UserDefinedMetric A4_2.50L (743.00 x 210.00毫米)"
+     },
+     "7": {
+      "caps_type": 2,
+      "landscape_mode": true,
+      "localized_name": "A4_2.75L (817.00 x 210.00 毫米)",
+      "media_description_name": "UserDefinedMetric A4_2.75L 横向 817.00W x 210.00H - (0, 0) x (817, 210) =171570 毫米",
+      "media_group": 15,
+      "name": "UserDefinedMetric A4_2.75L (817.00 x 210.00毫米)"
+     },
+     "8": {
+      "caps_type": 2,
+      "landscape_mode": true,
+      "localized_name": "A4_3L (891.00 x 210.00 毫米)",
+      "media_description_name": "UserDefinedMetric A4_3L 横向 891.00W x 210.00H - (0, 0) x (891, 210) =187110 毫米",
+      "media_group": 15,
+      "name": "UserDefinedMetric A4_3L (891.00 x 210.00毫米)"
+     },
+     "9": {
+      "caps_type": 2,
+      "landscape_mode": true,
+      "localized_name": "A3 (420.00 x 297.00 毫米)",
+      "media_description_name": "UserDefinedMetric A3 横向 420.00W x 297.00H - (0, 0) x (420, 297) =124740 毫米",
+      "media_group": 15,
+      "name": "UserDefinedMetric A3 (420.00 x 297.00毫米)"
+     },
+     "10": {
+      "caps_type": 2,
+      "landscape_mode": true,
+      "localized_name": "A3_1.25L (525.00 x 297.00 毫米)",
+      "media_description_name": "UserDefinedMetric A3_1.25L 横向 525.00W x 297.00H - (0, 0) x (525, 297) =155925 毫米",
+      "media_group": 15,
+      "name": "UserDefinedMetric A3_1.25L (525.00 x 297.00毫米)"
+     },
+     "11": {
+      "caps_type": 2,
+      "landscape_mode": true,
+      "localized_name": "A3_1.50L (630.00 x 297.00 毫米)",
+      "media_description_name": "UserDefinedMetric A3_1.50L 横向 630.00W x 297.00H - (0, 0) x (630, 297) =187110 毫米",
+      "media_group": 15,
+      "name": "UserDefinedMetric A3_1.50L (630.00 x 297.00毫米)"
+     },
+     "12": {
+      "caps_type": 2,
+      "landscape_mode": true,
+      "localized_name": "A3_1.75L (735.00 x 297.00 毫米)",
+      "media_description_name": "UserDefinedMetric A3_1.75L 横向 735.00W x 297.00H - (0, 0) x (735, 297) =218295 毫米",
+      "media_group": 15,
+      "name": "UserDefinedMetric A3_1.75L (735.00 x 297.00毫米)"
+     },
+     "13": {
+      "caps_type": 2,
+      "landscape_mode": true,
+      "localized_name": "A3_2L (840.00 x 297.00 毫米)",
+      "media_description_name": "UserDefinedMetric A3_2L 横向 840.00W x 297.00H - (0, 0) x (840, 297) =249480 毫米",
+      "media_group": 15,
+      "name": "UserDefinedMetric A3_2L (840.00 x 297.00毫米)"
+     },
+     "14": {
+      "caps_type": 2,
+      "landscape_mode": true,
+      "localized_name": "A3_2.25L (945.00 x 297.00 毫米)",
+      "media_description_name": "UserDefinedMetric A3_2.25L 横向 945.00W x 297.00H - (0, 0) x (945, 297) =280665 毫米",
+      "media_group": 15,
+      "name": "UserDefinedMetric A3_2.25L (945.00 x 297.00毫米)"
+     },
+     "15": {
+      "caps_type": 2,
+      "landscape_mode": true,
+      "localized_name": "A3_2.50L (1050.00 x 297.00 毫米)",
+      "media_description_name": "UserDefinedMetric A3_2.50L 横向 1050.00W x 297.00H - (0, 0) x (1050, 297) =311850 毫米",
+      "media_group": 15,
+      "name": "UserDefinedMetric A3_2.50L (1050.00 x 297.00毫米)"
+     },
+     "16": {
+      "caps_type": 2,
+      "landscape_mode": true,
+      "localized_name": "A3_2.75L (1155.00 x 297.00 毫米)",
+      "media_description_name": "UserDefinedMetric A3_2.75L 横向 1155.00W x 297.00H - (0, 0) x (1155, 297) =343035 毫米",
+      "media_group": 15,
+      "name": "UserDefinedMetric A3_2.75L (1155.00 x 297.00毫米)"
+     },
+     "17": {
+      "caps_type": 2,
+      "landscape_mode": true,
+      "localized_name": "A3_3L (1260.00 x 297.00 毫米)",
+      "media_description_name": "UserDefinedMetric A3_3L 横向 1260.00W x 297.00H - (0, 0) x (1260, 297) =374220 毫米",
+      "media_group": 15,
+      "name": "UserDefinedMetric A3_3L (1260.00 x 297.00毫米)"
+     },
+     "18": {
+      "caps_type": 2,
+      "landscape_mode": true,
+      "localized_name": "A2 (594.00 x 420.00 毫米)",
+      "media_description_name": "UserDefinedMetric A2 横向 594.00W x 420.00H - (0, 0) x (594, 420) =249480 毫米",
+      "media_group": 15,
+      "name": "UserDefinedMetric A2 (594.00 x 420.00毫米)"
+     },
+     "19": {
+      "caps_type": 2,
+      "landscape_mode": true,
+      "localized_name": "A2_1.25L (743.00 x 420.00 毫米)",
+      "media_description_name": "UserDefinedMetric A2_1.25L 横向 743.00W x 420.00H - (0, 0) x (743, 420) =312060 毫米",
+      "media_group": 15,
+      "name": "UserDefinedMetric A2_1.25L (743.00 x 420.00毫米)"
+     },
+     "20": {
+      "caps_type": 2,
+      "landscape_mode": true,
+      "localized_name": "A2_1.50L (891.00 x 420.00 毫米)",
+      "media_description_name": "UserDefinedMetric A2_1.50L 横向 891.00W x 420.00H - (0, 0) x (891, 420) =374220 毫米",
+      "media_group": 15,
+      "name": "UserDefinedMetric A2_1.50L (891.00 x 420.00毫米)"
+     },
+     "21": {
+      "caps_type": 2,
+      "landscape_mode": true,
+      "localized_name": "A2_1.75L (1040.00 x 420.00 毫米)",
+      "media_description_name": "UserDefinedMetric A2_1.75L 横向 1040.00W x 420.00H - (0, 0) x (1040, 420) =436800 毫米",
+      "media_group": 15,
+      "name": "UserDefinedMetric A2_1.75L (1040.00 x 420.00毫米)"
+     },
+     "22": {
+      "caps_type": 2,
+      "landscape_mode": true,
+      "localized_name": "A2_2L (1188.00 x 420.00 毫米)",
+      "media_description_name": "UserDefinedMetric A2_2L 横向 1188.00W x 420.00H - (0, 0) x (1188, 420) =498960 毫米",
+      "media_group": 15,
+      "name": "UserDefinedMetric A2_2L (1188.00 x 420.00毫米)"
+     },
+     "23": {
+      "caps_type": 2,
+      "landscape_mode": true,
+      "localized_name": "A2_2.25L (1337.00 x 420.00 毫米)",
+      "media_description_name": "UserDefinedMetric A2_2.25L 横向 1337.00W x 420.00H - (0, 0) x (1337, 420) =561540 毫米",
+      "media_group": 15,
+      "name": "UserDefinedMetric A2_2.25L (1337.00 x 420.00毫米)"
+     },
+     "24": {
+      "caps_type": 2,
+      "landscape_mode": true,
+      "localized_name": "A2_2.50L (1485.00 x 420.00 毫米)",
+      "media_description_name": "UserDefinedMetric A2_2.50L 横向 1485.00W x 420.00H - (0, 0) x (1485, 420) =623700 毫米",
+      "media_group": 15,
+      "name": "UserDefinedMetric A2_2.50L (1485.00 x 420.00毫米)"
+     },
+     "25": {
+      "caps_type": 2,
+      "landscape_mode": true,
+      "localized_name": "A2_2.75L (1634.00 x 420.00 毫米)",
+      "media_description_name": "UserDefinedMetric A2_2.75L 横向 1634.00W x 420.00H - (0, 0) x (1634, 420) =686280 毫米",
+      "media_group": 15,
+      "name": "UserDefinedMetric A2_2.75L (1634.00 x 420.00毫米)"
+     },
+     "26": {
+      "caps_type": 2,
+      "landscape_mode": true,
+      "localized_name": "A2_3L (1782.00 x 420.00 毫米)",
+      "media_description_name": "UserDefinedMetric A2_3L 横向 1782.00W x 420.00H - (0, 0) x (1782, 420) =748440 毫米",
+      "media_group": 15,
+      "name": "UserDefinedMetric A2_3L (1782.00 x 420.00毫米)"
+     },
+     "27": {
+      "caps_type": 2,
+      "landscape_mode": true,
+      "localized_name": "A1 (841.00 x 594.00 毫米)",
+      "media_description_name": "UserDefinedMetric A1 横向 841.00W x 594.00H - (0, 0) x (841, 594) =499554 毫米",
+      "media_group": 15,
+      "name": "UserDefinedMetric A1 (841.00 x 594.00毫米)"
+     },
+     "28": {
+      "caps_type": 2,
+      "landscape_mode": true,
+      "localized_name": "A1_1.25L (1051.00 x 594.00 毫米)",
+      "media_description_name": "UserDefinedMetric A1_1.25L 横向 1051.00W x 594.00H - (0, 0) x (1051, 594) =624294 毫米",
+      "media_group": 15,
+      "name": "UserDefinedMetric A1_1.25L (1051.00 x 594.00毫米)"
+     },
+     "29": {
+      "caps_type": 2,
+      "landscape_mode": true,
+      "localized_name": "A1_1.50L (1262.00 x 594.00 毫米)",
+      "media_description_name": "UserDefinedMetric A1_1.50L 横向 1262.00W x 594.00H - (0, 0) x (1262, 594) =749628 毫米",
+      "media_group": 15,
+      "name": "UserDefinedMetric A1_1.50L (1262.00 x 594.00毫米)"
+     },
+     "30": {
+      "caps_type": 2,
+      "landscape_mode": true,
+      "localized_name": "A1_1.75L (1472.00 x 594.00 毫米)",
+      "media_description_name": "UserDefinedMetric A1_1.75L 横向 1472.00W x 594.00H - (0, 0) x (1472, 594) =874368 毫米",
+      "media_group": 15,
+      "name": "UserDefinedMetric A1_1.75L (1472.00 x 594.00毫米)"
+     },
+     "31": {
+      "caps_type": 2,
+      "landscape_mode": true,
+      "localized_name": "A1_2L (1682.00 x 594.00 毫米)",
+      "media_description_name": "UserDefinedMetric A1_2L 横向 1682.00W x 594.00H - (0, 0) x (1682, 594) =999108 毫米",
+      "media_group": 15,
+      "name": "UserDefinedMetric A1_2L (1682.00 x 594.00毫米)"
+     },
+     "32": {
+      "caps_type": 2,
+      "landscape_mode": true,
+      "localized_name": "A1_2.25L (1892.00 x 594.00 毫米)",
+      "media_description_name": "UserDefinedMetric A1_2.25L 横向 1892.00W x 594.00H - (0, 0) x (1892, 594) =1123848 毫米",
+      "media_group": 15,
+      "name": "UserDefinedMetric A1_2.25L (1892.00 x 594.00毫米)"
+     },
+     "33": {
+      "caps_type": 2,
+      "landscape_mode": true,
+      "localized_name": "A1_2.50L (2103.00 x 594.00 毫米)",
+      "media_description_name": "UserDefinedMetric A1_2.50L 横向 2103.00W x 594.00H - (0, 0) x (2103, 594) =1249182 毫米",
+      "media_group": 15,
+      "name": "UserDefinedMetric A1_2.50L (2103.00 x 594.00毫米)"
+     },
+     "34": {
+      "caps_type": 2,
+      "landscape_mode": true,
+      "localized_name": "A1_2.75L (2313.00 x 594.00 毫米)",
+      "media_description_name": "UserDefinedMetric A1_2.75L 横向 2313.00W x 594.00H - (0, 0) x (2313, 594) =1373922 毫米",
+      "media_group": 15,
+      "name": "UserDefinedMetric A1_2.75L (2313.00 x 594.00毫米)"
+     },
+     "35": {
+      "caps_type": 2,
+      "landscape_mode": true,
+      "localized_name": "A1_3L (2523.00 x 594.00 毫米)",
+      "media_description_name": "UserDefinedMetric A1_3L 横向 2523.00W x 594.00H - (0, 0) x (2523, 594) =1498662 毫米",
+      "media_group": 15,
+      "name": "UserDefinedMetric A1_3L (2523.00 x 594.00毫米)"
+     },
+     "36": {
+      "caps_type": 2,
+      "landscape_mode": true,
+      "localized_name": "A0 (1189.00 x 841.00 毫米)",
+      "media_description_name": "UserDefinedMetric A0 横向 1189.00W x 841.00H - (0, 0) x (1189, 841) =999949 毫米",
+      "media_group": 15,
+      "name": "UserDefinedMetric A0 (1189.00 x 841.00毫米)"
+     },
+     "37": {
+      "caps_type": 2,
+      "landscape_mode": true,
+      "localized_name": "A0_1.25L (1486.00 x 841.00 毫米)",
+      "media_description_name": "UserDefinedMetric A0_1.25L 横向 1486.00W x 841.00H - (0, 0) x (1486, 841) =1249726 毫米",
+      "media_group": 15,
+      "name": "UserDefinedMetric A0_1.25L (1486.00 x 841.00毫米)"
+     },
+     "38": {
+      "caps_type": 2,
+      "landscape_mode": true,
+      "localized_name": "A0_1.50L (1784.00 x 841.00 毫米)",
+      "media_description_name": "UserDefinedMetric A0_1.50L 横向 1784.00W x 841.00H - (0, 0) x (1784, 841) =1500344 毫米",
+      "media_group": 15,
+      "name": "UserDefinedMetric A0_1.50L (1784.00 x 841.00毫米)"
+     },
+     "39": {
+      "caps_type": 2,
+      "landscape_mode": true,
+      "localized_name": "A0_1.75L (2081.00 x 841.00 毫米)",
+      "media_description_name": "UserDefinedMetric A0_1.75L 横向 2081.00W x 841.00H - (0, 0) x (2081, 841) =1750121 毫米",
+      "media_group": 15,
+      "name": "UserDefinedMetric A0_1.75L (2081.00 x 841.00毫米)"
+     },
+     "40": {
+      "caps_type": 2,
+      "landscape_mode": true,
+      "localized_name": "A0_2L (2378.00 x 841.00 毫米)",
+      "media_description_name": "UserDefinedMetric A0_2L 横向 2378.00W x 841.00H - (0, 0) x (2378, 841) =1999898 毫米",
+      "media_group": 15,
+      "name": "UserDefinedMetric A0_2L (2378.00 x 841.00毫米)"
+     },
+     "41": {
+      "caps_type": 2,
+      "landscape_mode": true,
+      "localized_name": "A0_2.25L (2675.00 x 841.00 毫米)",
+      "media_description_name": "UserDefinedMetric A0_2.25L 横向 2675.00W x 841.00H - (0, 0) x (2675, 841) =2249675 毫米",
+      "media_group": 15,
+      "name": "UserDefinedMetric A0_2.25L (2675.00 x 841.00毫米)"
+     },
+     "42": {
+      "caps_type": 2,
+      "landscape_mode": true,
+      "localized_name": "A0_2.50L (2973.00 x 841.00 毫米)",
+      "media_description_name": "UserDefinedMetric A0_2.50L 横向 2973.00W x 841.00H - (0, 0) x (2973, 841) =2500293 毫米",
+      "media_group": 15,
+      "name": "UserDefinedMetric A0_2.50L (2973.00 x 841.00毫米)"
+     },
+     "43": {
+      "caps_type": 2,
+      "landscape_mode": true,
+      "localized_name": "A0_2.75L (3270.00 x 841.00 毫米)",
+      "media_description_name": "UserDefinedMetric A0_2.75L 横向 3270.00W x 841.00H - (0, 0) x (3270, 841) =2750070 毫米",
+      "media_group": 15,
+      "name": "UserDefinedMetric A0_2.75L (3270.00 x 841.00毫米)"
+     },
+     "44": {
+      "caps_type": 2,
+      "landscape_mode": true,
+      "localized_name": "A0_3L (3567.00 x 841.00 毫米)",
+      "media_description_name": "UserDefinedMetric A0_3L 横向 3567.00W x 841.00H - (0, 0) x (3567, 841) =2999847 毫米",
+      "media_group": 15,
+      "name": "UserDefinedMetric A0_3L (3567.00 x 841.00毫米)"
+     }
+    }
+   }
+  }
+ },
+ "subver": "json",
+ "version": 0.01
+}

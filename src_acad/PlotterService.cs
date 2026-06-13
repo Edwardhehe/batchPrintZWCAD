@@ -17,6 +17,8 @@ namespace ZwcadBatchPlot;
 
 public static class PlotterService
 {
+    private const double MediaMatchToleranceMm = 3d;
+
     public sealed class PlotJobResult
     {
         public PlotJob Job { get; set; } = new();
@@ -24,10 +26,29 @@ public static class PlotterService
         public bool Succeeded => Error == null;
     }
 
-    private sealed class MediaSelection
+    private sealed class MediaChoice
     {
         public string Name { get; set; } = "";
-        public bool NeedsRotation { get; set; }
+        public double WidthMm { get; set; }
+        public double HeightMm { get; set; }
+        public double Error { get; set; }
+        public bool IsFullBleed { get; set; }
+        public bool UseClosestBySize { get; set; }
+        public bool RequiresExactSize { get; set; }
+        public PlotRotation PreferredRotation { get; set; }
+    }
+
+    private sealed class ValidatedPlot : IDisposable
+    {
+        public PlotInfo Info { get; set; } = new();
+        public PlotSettings Settings { get; set; } = null!;
+        public MediaChoice Media { get; set; } = new();
+        public PlotRotation Rotation { get; set; }
+
+        public void Dispose()
+        {
+            Settings.Dispose();
+        }
     }
 
     public static List<PlotJobResult> PlotMany(
@@ -41,37 +62,42 @@ public static class PlotterService
         var results = new List<PlotJobResult>();
         var oldActive = CadApp.DocumentManager.MdiActiveDocument;
 
-        foreach (var group in jobs.GroupBy(job => GetPlotGroupKey(job, currentDocument, settings)))
+        using var variables = PlotSystemVariables.Apply();
+        try
         {
-            var groupJobs = group.ToList();
-            try
+            foreach (var group in jobs.GroupBy(job => GetGroupKey(job, currentDocument, settings)))
             {
-                if (group.Key == "__CURRENT__")
+                var groupJobs = group.ToList();
+                try
                 {
-                    PlotCurrentDocumentGroup(groupJobs, currentDocument, deviceName, styleSheet, settings, beforeJob, results);
-                    continue;
+                    if (group.Key == "__CURRENT__")
+                    {
+                        PlotDocumentJobs(currentDocument, groupJobs, deviceName, styleSheet, beforeJob, results);
+                    }
+                    else if (group.Key.StartsWith("__DB__:", StringComparison.OrdinalIgnoreCase))
+                    {
+                        PlotSideDatabaseJobs(groupJobs, groupJobs[0].SourceFile, deviceName, styleSheet, beforeJob, results);
+                    }
+                    else
+                    {
+                        PlotOpenedDocumentJobs(groupJobs, groupJobs[0].SourceFile, deviceName, styleSheet, beforeJob, results);
+                    }
                 }
-
-                if (group.Key.StartsWith("__DB__:", StringComparison.OrdinalIgnoreCase))
+                catch (Exception ex)
                 {
-                    PlotSideDatabaseGroup(groupJobs, groupJobs[0].SourceFile, deviceName, styleSheet, settings, beforeJob, results);
-                    continue;
-                }
-
-                PlotOpenedDocumentGroup(groupJobs, groupJobs[0].SourceFile, deviceName, styleSheet, settings, beforeJob, results);
-            }
-            catch (Exception ex)
-            {
-                foreach (var job in groupJobs)
-                {
-                    results.Add(new PlotJobResult { Job = job, Error = ex });
+                    foreach (var job in groupJobs)
+                    {
+                        results.Add(new PlotJobResult { Job = job, Error = ex });
+                    }
                 }
             }
         }
-
-        if (oldActive != null && !oldActive.IsDisposed)
+        finally
         {
-            CadApp.DocumentManager.MdiActiveDocument = oldActive;
+            if (oldActive != null && !oldActive.IsDisposed)
+            {
+                CadApp.DocumentManager.MdiActiveDocument = oldActive;
+            }
         }
 
         return results;
@@ -79,32 +105,14 @@ public static class PlotterService
 
     public static void Plot(PlotJob job, string deviceName, string styleSheet, Document currentDocument, AppSettings settings)
     {
-        if (IsCurrentDocumentJob(job, currentDocument))
+        var result = PlotMany(new[] { job }, deviceName, styleSheet, currentDocument, settings).FirstOrDefault();
+        if (result?.Error != null)
         {
-            using (currentDocument.LockDocument())
-            {
-                ActivateLayout(job);
-                RefreshJobWindowFromOpenedDocument(currentDocument.Database, job);
-                PlotDatabase(currentDocument.Database, currentDocument.Name, job, deviceName, styleSheet, settings, currentDocument);
-            }
-
-            return;
+            throw result.Error;
         }
-
-        if (!settings.OpenExternalDwgForPlot)
-        {
-            using var db = new Database(false, true);
-            db.ReadDwgFile(job.SourceFile, FileOpenMode.OpenForReadAndAllShare, true, "");
-            db.CloseInput(true);
-            db.ResolveXrefs(true, false);
-            PlotDatabase(db, Path.GetFileName(job.SourceFile), job, deviceName, styleSheet, settings);
-            return;
-        }
-
-        PlotOpenedDocument(job, deviceName, styleSheet, settings);
     }
 
-    private static string GetPlotGroupKey(PlotJob job, Document currentDocument, AppSettings settings)
+    private static string GetGroupKey(PlotJob job, Document currentDocument, AppSettings settings)
     {
         if (IsCurrentDocumentJob(job, currentDocument))
         {
@@ -115,43 +123,11 @@ public static class PlotterService
         return settings.OpenExternalDwgForPlot ? file : "__DB__:" + file;
     }
 
-    private static void PlotCurrentDocumentGroup(
-        IReadOnlyList<PlotJob> jobs,
-        Document currentDocument,
-        string deviceName,
-        string styleSheet,
-        AppSettings settings,
-        Action<PlotJob>? beforeJob,
-        List<PlotJobResult> results)
-    {
-        CadApp.DocumentManager.MdiActiveDocument = currentDocument;
-        foreach (var job in jobs)
-        {
-            try
-            {
-                beforeJob?.Invoke(job);
-                using (currentDocument.LockDocument())
-                {
-                    ActivateLayout(job);
-                    RefreshJobWindowFromOpenedDocument(currentDocument.Database, job);
-                    PlotDatabase(currentDocument.Database, currentDocument.Name, job, deviceName, styleSheet, settings, currentDocument);
-                }
-
-                results.Add(new PlotJobResult { Job = job });
-            }
-            catch (Exception ex)
-            {
-                results.Add(new PlotJobResult { Job = job, Error = ex });
-            }
-        }
-    }
-
-    private static void PlotOpenedDocumentGroup(
+    private static void PlotOpenedDocumentJobs(
         IReadOnlyList<PlotJob> jobs,
         string sourceFile,
         string deviceName,
         string styleSheet,
-        AppSettings settings,
         Action<PlotJob>? beforeJob,
         List<PlotJobResult> results)
     {
@@ -161,26 +137,7 @@ public static class PlotterService
 
         try
         {
-            CadApp.DocumentManager.MdiActiveDocument = doc;
-            foreach (var job in jobs)
-            {
-                try
-                {
-                    beforeJob?.Invoke(job);
-                    using (doc.LockDocument())
-                    {
-                        ActivateLayout(job);
-                        RefreshJobWindowFromOpenedDocument(doc.Database, job);
-                        PlotDatabase(doc.Database, doc.Name, job, deviceName, styleSheet, settings, doc);
-                    }
-
-                    results.Add(new PlotJobResult { Job = job });
-                }
-                catch (Exception ex)
-                {
-                    results.Add(new PlotJobResult { Job = job, Error = ex });
-                }
-            }
+            PlotDocumentJobs(doc, jobs, deviceName, styleSheet, beforeJob, results);
         }
         finally
         {
@@ -191,26 +148,33 @@ public static class PlotterService
         }
     }
 
-    private static void PlotSideDatabaseGroup(
+    private static void PlotDocumentJobs(
+        Document doc,
         IReadOnlyList<PlotJob> jobs,
-        string sourceFile,
         string deviceName,
         string styleSheet,
-        AppSettings settings,
         Action<PlotJob>? beforeJob,
         List<PlotJobResult> results)
     {
-        using var db = new Database(false, true);
-        db.ReadDwgFile(sourceFile, FileOpenMode.OpenForReadAndAllShare, true, "");
-        db.CloseInput(true);
-        db.ResolveXrefs(true, false);
+        CadApp.DocumentManager.MdiActiveDocument = doc;
+
+        using (doc.LockDocument())
+        {
+            RefreshJobsFromDatabase(doc.Database, jobs);
+        }
 
         foreach (var job in jobs)
         {
             try
             {
                 beforeJob?.Invoke(job);
-                PlotDatabase(db, Path.GetFileName(sourceFile), job, deviceName, styleSheet, settings);
+                using (doc.LockDocument())
+                {
+                    ActivateLayout(doc.Database, job);
+                    PrepareEditorViewForPlot(doc, job);
+                    PlotDatabase(doc.Database, doc.Name, job, deviceName, styleSheet, doc);
+                }
+
                 results.Add(new PlotJobResult { Job = job });
             }
             catch (Exception ex)
@@ -220,34 +184,651 @@ public static class PlotterService
         }
     }
 
-    private static void PlotOpenedDocument(PlotJob job, string deviceName, string styleSheet, AppSettings settings)
+    private static void PlotSideDatabaseJobs(
+        IReadOnlyList<PlotJob> jobs,
+        string sourceFile,
+        string deviceName,
+        string styleSheet,
+        Action<PlotJob>? beforeJob,
+        List<PlotJobResult> results)
     {
-        var oldActive = CadApp.DocumentManager.MdiActiveDocument;
-        var doc = FindOpenDocument(job.SourceFile);
-        var shouldClose = doc == null;
-        doc ??= OpenDocument(job.SourceFile);
+        using var db = new Database(false, true);
+        db.ReadDwgFile(sourceFile, FileOpenMode.OpenForReadAndAllShare, true, "");
+        db.CloseInput(true);
+        db.ResolveXrefs(true, false);
+        RefreshJobsFromDatabase(db, jobs);
 
+        foreach (var job in jobs)
+        {
+            try
+            {
+                beforeJob?.Invoke(job);
+                PlotDatabase(db, Path.GetFileName(sourceFile), job, deviceName, styleSheet, null);
+                results.Add(new PlotJobResult { Job = job });
+            }
+            catch (Exception ex)
+            {
+                results.Add(new PlotJobResult { Job = job, Error = ex });
+            }
+        }
+    }
+
+    private static void PlotDatabase(Database db, string documentName, PlotJob job, string deviceName, string styleSheet, Document? plotDocument)
+    {
+        if (string.IsNullOrWhiteSpace(deviceName))
+        {
+            throw new InvalidOperationException("请选择 PDF 打印机。");
+        }
+
+        WaitForPlotIdle();
+
+        var oldDatabase = HostApplicationServices.WorkingDatabase;
+        HostApplicationServices.WorkingDatabase = db;
         try
         {
-            CadApp.DocumentManager.MdiActiveDocument = doc;
-            using (doc.LockDocument())
-            {
-                ActivateLayout(job);
-                RefreshJobWindowFromOpenedDocument(doc.Database, job);
-                PlotDatabase(doc.Database, doc.Name, job, deviceName, styleSheet, settings, doc);
-            }
+            using var tr = db.TransactionManager.StartTransaction();
+            var layout = FindLayoutForJob(tr, db, job);
+            var window = GetPlotWindow(job, plotDocument);
+            using var plot = CreateValidatedPlot(layout, job, window, deviceName, styleSheet);
+
+            PrepareOutputFile(job.OutputPath);
+            RunPlot(plot.Info, documentName, job.OutputPath, job.DrawingNumber);
+
+            tr.Commit();
+            WaitForPlotIdle();
         }
         finally
         {
-            if (oldActive != null && !oldActive.IsDisposed)
+            HostApplicationServices.WorkingDatabase = oldDatabase;
+        }
+    }
+
+    private static ValidatedPlot CreateValidatedPlot(
+        Layout layout,
+        PlotJob job,
+        Extents2d window,
+        string deviceName,
+        string styleSheet)
+    {
+        var validator = PlotSettingsValidator.Current;
+        var media = ChooseMedia(validator, layout, deviceName, job);
+        var errors = new List<string>();
+
+        foreach (var rotation in RotationOrder(media.PreferredRotation))
+        {
+            var settings = new PlotSettings(layout.ModelType);
+            try
             {
-                CadApp.DocumentManager.MdiActiveDocument = oldActive;
+                settings.CopyFrom(layout);
+                ConfigurePlotSettings(validator, settings, deviceName, styleSheet, media, rotation, window);
+
+                var info = new PlotInfo
+                {
+                    Layout = layout.ObjectId,
+                    OverrideSettings = settings
+                };
+
+                new PlotInfoValidator
+                {
+                    MediaMatchingPolicy = MatchingPolicy.MatchEnabled
+                }.Validate(info);
+
+                return new ValidatedPlot
+                {
+                    Info = info,
+                    Settings = settings,
+                    Media = media,
+                    Rotation = rotation
+                };
+            }
+            catch (Exception ex)
+            {
+                errors.Add($"{media.Name}/{rotation}: {ex.Message}");
+                settings.Dispose();
+            }
+        }
+
+        throw new InvalidOperationException(
+            "AutoCAD 不接受当前打印设置。"
+            + $" 图纸={job.DrawingNumber}_{job.Title};"
+            + $" 目标纸张={job.PaperWidthMm:0.##}x{job.PaperHeightMm:0.##}mm;"
+            + $" 窗口=({window.MinPoint.X:0.###},{window.MinPoint.Y:0.###})-({window.MaxPoint.X:0.###},{window.MaxPoint.Y:0.###});"
+            + " 尝试结果=" + string.Join(" | ", errors));
+    }
+
+    private static void ConfigurePlotSettings(
+        PlotSettingsValidator validator,
+        PlotSettings settings,
+        string deviceName,
+        string styleSheet,
+        MediaChoice media,
+        PlotRotation rotation,
+        Extents2d window)
+    {
+        try
+        {
+            validator.SetPlotConfigurationName(settings, deviceName, media.UseClosestBySize ? null : media.Name);
+        }
+        catch
+        {
+            validator.SetPlotConfigurationName(settings, deviceName, null);
+        }
+
+        validator.RefreshLists(settings);
+        validator.SetPlotPaperUnits(settings, PlotPaperUnit.Millimeters);
+        if (media.UseClosestBySize)
+        {
+            validator.SetClosestMediaName(settings, media.WidthMm, media.HeightMm, PlotPaperUnit.Millimeters, false);
+        }
+        else
+        {
+            validator.SetCanonicalMediaName(settings, media.Name);
+        }
+
+        EnsureRequiredMediaSize(settings, media);
+        validator.SetPlotType(settings, Autodesk.AutoCAD.DatabaseServices.PlotType.Window);
+        validator.SetPlotWindowArea(settings, window);
+        validator.SetUseStandardScale(settings, true);
+        validator.SetStdScaleType(settings, StdScaleType.ScaleToFit);
+        validator.SetPlotCentered(settings, true);
+        validator.SetPlotRotation(settings, rotation);
+
+        if (!string.IsNullOrWhiteSpace(styleSheet))
+        {
+            validator.SetCurrentStyleSheet(settings, styleSheet);
+        }
+    }
+
+    private static MediaChoice ChooseMedia(PlotSettingsValidator validator, Layout layout, string deviceName, PlotJob job)
+    {
+        using var settings = new PlotSettings(layout.ModelType);
+        settings.CopyFrom(layout);
+        validator.SetPlotConfigurationName(settings, deviceName, null);
+        validator.RefreshLists(settings);
+        validator.SetPlotPaperUnits(settings, PlotPaperUnit.Millimeters);
+
+        var names = validator.GetCanonicalMediaNameList(settings).Cast<string>().ToList();
+        if (names.Count == 0)
+        {
+            throw new InvalidOperationException($"打印机没有可用纸张: {deviceName}");
+        }
+
+        var targetWidth = job.PaperWidthMm > 0 ? job.PaperWidthMm : Math.Abs(job.MaxX - job.MinX);
+        var targetHeight = job.PaperHeightMm > 0 ? job.PaperHeightMm : Math.Abs(job.MaxY - job.MinY);
+        var choices = new List<MediaChoice>();
+
+        foreach (var name in names)
+        {
+            var size = GetMediaSize(validator, settings, name);
+            if (size == null)
+            {
+                continue;
             }
 
-            if (shouldClose)
+            var directError = DirectSizeError(size.Value.Width, size.Value.Height, targetWidth, targetHeight);
+            var rotatedError = DirectSizeError(size.Value.Width, size.Value.Height, targetHeight, targetWidth);
+            choices.Add(new MediaChoice
             {
-                CloseWithoutSave(doc);
+                Name = name,
+                WidthMm = size.Value.Width,
+                HeightMm = size.Value.Height,
+                Error = Math.Min(directError, rotatedError),
+                IsFullBleed = IsFullBleedMedia(name),
+                PreferredRotation = rotatedError < directError ? PlotRotation.Degrees090 : PlotRotation.Degrees000
+            });
+        }
+
+        var exact = choices
+            .Where(x => x.Error <= MediaMatchToleranceMm)
+            .OrderBy(x => x.Error)
+            .ThenBy(x => x.IsFullBleed ? 0 : 1)
+            .ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault();
+        if (exact != null && IsLongPaperName(job.PaperName ?? ""))
+        {
+            exact.RequiresExactSize = true;
+            return exact;
+        }
+
+        var named = BestNamedMedia(choices, job);
+        if (named != null)
+        {
+            named.RequiresExactSize = IsLongPaperName(job.PaperName ?? "");
+            return named;
+        }
+
+        if (exact != null)
+        {
+            return exact;
+        }
+
+        if (IsLongPaperName(job.PaperName ?? "") && targetWidth > 0 && targetHeight > 0)
+        {
+            return new MediaChoice
+            {
+                Name = $"按尺寸匹配 {targetWidth:0.##} x {targetHeight:0.##} mm",
+                WidthMm = targetWidth,
+                HeightMm = targetHeight,
+                Error = 0,
+                UseClosestBySize = true,
+                RequiresExactSize = true,
+                PreferredRotation = targetWidth >= targetHeight ? PlotRotation.Degrees090 : PlotRotation.Degrees000
+            };
+        }
+
+        var closest = choices
+            .OrderBy(x => x.Error)
+            .ThenBy(x => x.IsFullBleed ? 0 : 1)
+            .ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault();
+        if (closest != null)
+        {
+            return closest;
+        }
+
+        var fallbackName = BestMediaNameByText(names, job) ?? names[0];
+        return new MediaChoice
+        {
+            Name = fallbackName,
+            PreferredRotation = job.PaperWidthMm >= job.PaperHeightMm ? PlotRotation.Degrees090 : PlotRotation.Degrees000
+        };
+    }
+
+    private static MediaChoice? BestNamedMedia(IEnumerable<MediaChoice> choices, PlotJob job)
+    {
+        var paper = job.PaperName ?? "";
+        var basePaper = paper.Replace("+", "");
+        return choices
+            .Where(x => MediaNameMatchesPaper(x.Name, paper, basePaper))
+            .OrderBy(x => x.Error)
+            .ThenBy(x => x.IsFullBleed ? 0 : 1)
+            .ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault();
+    }
+
+    private static void EnsureRequiredMediaSize(PlotSettings settings, MediaChoice media)
+    {
+        if (!media.RequiresExactSize)
+        {
+            return;
+        }
+
+        var size = settings.PlotPaperSize;
+        if (size.X <= 0 || size.Y <= 0)
+        {
+            return;
+        }
+
+        var directError = DirectSizeError(size.X, size.Y, media.WidthMm, media.HeightMm);
+        var rotatedError = DirectSizeError(size.X, size.Y, media.HeightMm, media.WidthMm);
+        var error = Math.Min(directError, rotatedError);
+        if (error <= MediaMatchToleranceMm)
+        {
+            return;
+        }
+
+        throw new InvalidOperationException(
+            $"AutoCAD PDF 打印机缺少匹配纸张。需要 {media.WidthMm:0.##} x {media.HeightMm:0.##} mm，"
+            + $"实际匹配到 {size.X:0.##} x {size.Y:0.##} mm。请在所选 PC3 中添加对应加长纸，或选择支持自定义纸张的 PDF 打印机。");
+    }
+
+    private static string? BestMediaNameByText(IEnumerable<string> names, PlotJob job)
+    {
+        var paper = job.PaperName ?? "";
+        var basePaper = paper.Replace("+", "");
+        return names
+            .Where(x => MediaNameMatchesPaper(x, paper, basePaper))
+            .OrderBy(x => IsFullBleedMedia(x) ? 0 : 1)
+            .ThenBy(x => x, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault();
+    }
+
+    private static bool MediaNameMatchesPaper(string mediaName, string paper, string basePaper)
+    {
+        if (IsLongPaperName(paper))
+        {
+            return (!string.IsNullOrWhiteSpace(paper)
+                    && mediaName.IndexOf(paper, StringComparison.OrdinalIgnoreCase) >= 0)
+                || (!string.IsNullOrWhiteSpace(basePaper)
+                    && mediaName.IndexOf(basePaper, StringComparison.OrdinalIgnoreCase) >= 0
+                    && IsLongMediaName(mediaName))
+                || (!string.IsNullOrWhiteSpace(basePaper)
+                    && mediaName.IndexOf(basePaper.Replace("A", "ISO_A"), StringComparison.OrdinalIgnoreCase) >= 0
+                    && IsLongMediaName(mediaName));
+        }
+
+        return (!string.IsNullOrWhiteSpace(paper)
+                && mediaName.IndexOf(paper, StringComparison.OrdinalIgnoreCase) >= 0)
+            || (!string.IsNullOrWhiteSpace(basePaper)
+                && mediaName.IndexOf(basePaper, StringComparison.OrdinalIgnoreCase) >= 0)
+            || (!string.IsNullOrWhiteSpace(basePaper)
+                && mediaName.IndexOf(basePaper.Replace("A", "ISO_A"), StringComparison.OrdinalIgnoreCase) >= 0);
+    }
+
+    private static bool IsLongPaperName(string paperName)
+    {
+        return paperName.EndsWith("+", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsLongMediaName(string mediaName)
+    {
+        return mediaName.IndexOf("+", StringComparison.OrdinalIgnoreCase) >= 0
+            || mediaName.IndexOf("long", StringComparison.OrdinalIgnoreCase) >= 0
+            || mediaName.IndexOf("extend", StringComparison.OrdinalIgnoreCase) >= 0
+            || mediaName.IndexOf("extended", StringComparison.OrdinalIgnoreCase) >= 0
+            || mediaName.IndexOf("加长", StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    private static bool IsFullBleedMedia(string mediaName)
+    {
+        return mediaName.IndexOf("full_bleed", StringComparison.OrdinalIgnoreCase) >= 0
+            || mediaName.IndexOf("full bleed", StringComparison.OrdinalIgnoreCase) >= 0
+            || mediaName.IndexOf("无边距", StringComparison.OrdinalIgnoreCase) >= 0
+            || mediaName.IndexOf("满幅", StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    private static IEnumerable<PlotRotation> RotationOrder(PlotRotation preferred)
+    {
+        yield return preferred;
+
+        foreach (var rotation in new[]
+        {
+            PlotRotation.Degrees000,
+            PlotRotation.Degrees090,
+            PlotRotation.Degrees270,
+            PlotRotation.Degrees180
+        })
+        {
+            if (rotation != preferred)
+            {
+                yield return rotation;
             }
+        }
+    }
+
+    private static (double Width, double Height)? GetMediaSize(PlotSettingsValidator validator, PlotSettings settings, string mediaName)
+    {
+        try
+        {
+            validator.SetCanonicalMediaName(settings, mediaName);
+            validator.SetPlotPaperUnits(settings, PlotPaperUnit.Millimeters);
+            var size = settings.PlotPaperSize;
+            if (size.X > 0 && size.Y > 0)
+            {
+                return (size.X, size.Y);
+            }
+        }
+        catch
+        {
+        }
+
+        return TryParseMediaSize(mediaName);
+    }
+
+    private static void RunPlot(PlotInfo info, string documentName, string outputPath, string sheetName)
+    {
+        using var engine = PlotFactory.CreatePublishEngine();
+        using var progress = new PlotProgressDialog(false, 1, true);
+
+        var plotStarted = false;
+        var documentStarted = false;
+        var sheetStarted = false;
+        var pageStarted = false;
+        var graphicsStarted = false;
+
+        try
+        {
+            progress.set_PlotMsgString(PlotMessageIndex.DialogTitle, "批量打印");
+            progress.set_PlotMsgString(PlotMessageIndex.SheetProgressCaption, sheetName);
+            progress.LowerPlotProgressRange = 0;
+            progress.UpperPlotProgressRange = 100;
+            progress.PlotProgressPos = 0;
+            progress.OnBeginPlot();
+            progress.IsVisible = false;
+
+            engine.BeginPlot(progress, null);
+            plotStarted = true;
+            engine.BeginDocument(info, documentName, null, 1, true, outputPath);
+            documentStarted = true;
+            progress.OnBeginSheet();
+            sheetStarted = true;
+
+            using var pageInfo = new PlotPageInfo();
+            engine.BeginPage(pageInfo, info, true, null);
+            pageStarted = true;
+            engine.BeginGenerateGraphics(null);
+            graphicsStarted = true;
+            engine.EndGenerateGraphics(null);
+            graphicsStarted = false;
+            engine.EndPage(null);
+            pageStarted = false;
+
+            progress.OnEndSheet();
+            sheetStarted = false;
+            engine.EndDocument(null);
+            documentStarted = false;
+            progress.PlotProgressPos = 100;
+            progress.OnEndPlot();
+            engine.EndPlot(null);
+            plotStarted = false;
+        }
+        finally
+        {
+            if (graphicsStarted)
+            {
+                TryPlotCleanup(() => engine.EndGenerateGraphics(null));
+            }
+
+            if (pageStarted)
+            {
+                TryPlotCleanup(() => engine.EndPage(null));
+            }
+
+            if (sheetStarted)
+            {
+                TryPlotCleanup(progress.OnEndSheet);
+            }
+
+            if (documentStarted)
+            {
+                TryPlotCleanup(() => engine.EndDocument(null));
+            }
+
+            if (plotStarted)
+            {
+                TryPlotCleanup(progress.OnEndPlot);
+                TryPlotCleanup(() => engine.EndPlot(null));
+            }
+        }
+    }
+
+    private static Layout FindLayoutForJob(Transaction tr, Database db, PlotJob job)
+    {
+        var blockTable = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+        Layout? first = null;
+        Layout? model = null;
+        Layout? firstPaper = null;
+
+        foreach (ObjectId id in blockTable)
+        {
+            var record = (BlockTableRecord)tr.GetObject(id, OpenMode.ForRead);
+            if (!record.IsLayout)
+            {
+                continue;
+            }
+
+            var layout = (Layout)tr.GetObject(record.LayoutId, OpenMode.ForRead);
+            first ??= layout;
+            if (layout.ModelType)
+            {
+                model ??= layout;
+            }
+            else
+            {
+                firstPaper ??= layout;
+            }
+
+            if (string.Equals(record.Name, job.SpaceName, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(layout.LayoutName, job.SpaceName, StringComparison.OrdinalIgnoreCase))
+            {
+                return layout;
+            }
+        }
+
+        if (!job.IsPaperSpace && model != null)
+        {
+            return model;
+        }
+
+        if (job.IsPaperSpace && firstPaper != null)
+        {
+            return firstPaper;
+        }
+
+        return first ?? throw new InvalidOperationException("未找到可打印布局。");
+    }
+
+    private static void ActivateLayout(Database db, PlotJob job)
+    {
+        try
+        {
+            using var tr = db.TransactionManager.StartTransaction();
+            var layout = FindLayoutForJob(tr, db, job);
+            LayoutManager.Current.CurrentLayout = layout.LayoutName;
+            tr.Commit();
+        }
+        catch
+        {
+        }
+    }
+
+    private static void RefreshJobsFromDatabase(Database db, IReadOnlyList<PlotJob> jobs)
+    {
+        if (jobs.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            var library = TitleBlockLibraryStore.Load();
+            var scanned = TitleBlockScanner.Scan(db, library, jobs[0].SourceFile);
+
+            foreach (var job in jobs)
+            {
+                var refreshed = scanned
+                    .Where(x => string.Equals(x.SpaceName, job.SpaceName, StringComparison.OrdinalIgnoreCase)
+                        && string.Equals(x.BlockName, job.BlockName, StringComparison.OrdinalIgnoreCase))
+                    .FirstOrDefault(x =>
+                        string.Equals(x.DrawingNumber, job.DrawingNumber, StringComparison.OrdinalIgnoreCase)
+                        && string.Equals(x.Title, job.Title, StringComparison.OrdinalIgnoreCase))
+                    ?? scanned.FirstOrDefault(x =>
+                        string.Equals(x.SpaceName, job.SpaceName, StringComparison.OrdinalIgnoreCase)
+                        && string.Equals(x.BlockName, job.BlockName, StringComparison.OrdinalIgnoreCase)
+                        && x.MatchIndex == job.MatchIndex);
+
+                if (refreshed == null)
+                {
+                    continue;
+                }
+
+                job.MinX = refreshed.MinX;
+                job.MinY = refreshed.MinY;
+                job.MaxX = refreshed.MaxX;
+                job.MaxY = refreshed.MaxY;
+                job.PaperName = refreshed.PaperName;
+                job.PaperWidthMm = refreshed.PaperWidthMm;
+                job.PaperHeightMm = refreshed.PaperHeightMm;
+                job.PaperSizeText = refreshed.PaperSizeText;
+                job.ScaleText = refreshed.ScaleText;
+                job.SizeText = refreshed.SizeText;
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private static void PrepareEditorViewForPlot(Document doc, PlotJob job)
+    {
+        try
+        {
+            var minX = Math.Min(job.MinX, job.MaxX);
+            var minY = Math.Min(job.MinY, job.MaxY);
+            var maxX = Math.Max(job.MinX, job.MaxX);
+            var maxY = Math.Max(job.MinY, job.MaxY);
+            var width = Math.Max(maxX - minX, 1);
+            var height = Math.Max(maxY - minY, 1);
+            var centerX = (minX + maxX) / 2d;
+            var centerY = (minY + maxY) / 2d;
+
+            using var view = doc.Editor.GetCurrentView();
+            view.ViewDirection = Vector3d.ZAxis;
+            view.ViewTwist = 0;
+            view.Target = new Point3d(centerX, centerY, 0);
+            view.CenterPoint = Point2d.Origin;
+            view.Width = width * 1.05;
+            view.Height = height * 1.05;
+            doc.Editor.SetCurrentView(view);
+        }
+        catch
+        {
+        }
+    }
+
+    private static Extents2d GetPlotWindow(PlotJob job, Document? plotDocument)
+    {
+        if (plotDocument != null)
+        {
+            try
+            {
+                var view = plotDocument.Editor.GetCurrentView();
+                var worldToDisplay = GetWorldToDisplayMatrix(view);
+                var points = new[]
+                {
+                    new Point3d(job.MinX, job.MinY, 0).TransformBy(worldToDisplay),
+                    new Point3d(job.MinX, job.MaxY, 0).TransformBy(worldToDisplay),
+                    new Point3d(job.MaxX, job.MinY, 0).TransformBy(worldToDisplay),
+                    new Point3d(job.MaxX, job.MaxY, 0).TransformBy(worldToDisplay)
+                };
+
+                return new Extents2d(
+                    points.Min(p => p.X),
+                    points.Min(p => p.Y),
+                    points.Max(p => p.X),
+                    points.Max(p => p.Y));
+            }
+            catch
+            {
+            }
+        }
+
+        return new Extents2d(
+            Math.Min(job.MinX, job.MaxX),
+            Math.Min(job.MinY, job.MaxY),
+            Math.Max(job.MinX, job.MaxX),
+            Math.Max(job.MinY, job.MaxY));
+    }
+
+    private static Matrix3d GetWorldToDisplayMatrix(ViewTableRecord view)
+    {
+        var matrix = Matrix3d.PlaneToWorld(view.ViewDirection);
+        matrix = Matrix3d.Displacement(view.Target - Point3d.Origin) * matrix;
+        matrix = Matrix3d.Rotation(-view.ViewTwist, view.ViewDirection, view.Target) * matrix;
+        return matrix.Inverse();
+    }
+
+    private static void PrepareOutputFile(string outputPath)
+    {
+        var directory = Path.GetDirectoryName(outputPath);
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        if (File.Exists(outputPath))
+        {
+            File.Delete(outputPath);
         }
     }
 
@@ -288,54 +869,6 @@ public static class PlotterService
 #endif
     }
 
-    private static void ActivateLayout(PlotJob job)
-    {
-        if (string.IsNullOrWhiteSpace(job.SpaceName))
-        {
-            return;
-        }
-
-        try
-        {
-            LayoutManager.Current.CurrentLayout = job.SpaceName;
-        }
-        catch
-        {
-            // Some drawings expose model space/layout names differently; PlotDatabase still targets the layout by name.
-        }
-    }
-
-    private static void RefreshJobWindowFromOpenedDocument(Database db, PlotJob job)
-    {
-        var library = TitleBlockLibraryStore.Load();
-        var candidates = TitleBlockScanner.Scan(db, library, job.SourceFile)
-            .Where(x => string.Equals(x.SpaceName, job.SpaceName, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(x.BlockName, job.BlockName, StringComparison.OrdinalIgnoreCase))
-            .ToList();
-
-        var refreshed = candidates.FirstOrDefault(x =>
-                string.Equals(x.DrawingNumber, job.DrawingNumber, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(x.Title, job.Title, StringComparison.OrdinalIgnoreCase))
-            ?? candidates.ElementAtOrDefault(job.MatchIndex)
-            ?? candidates.FirstOrDefault();
-
-        if (refreshed == null)
-        {
-            return;
-        }
-
-        job.MinX = refreshed.MinX;
-        job.MinY = refreshed.MinY;
-        job.MaxX = refreshed.MaxX;
-        job.MaxY = refreshed.MaxY;
-        job.PaperName = refreshed.PaperName;
-        job.ScaleText = refreshed.ScaleText;
-        job.SizeText = refreshed.SizeText;
-        job.PaperSizeText = refreshed.PaperSizeText;
-        job.PaperWidthMm = refreshed.PaperWidthMm;
-        job.PaperHeightMm = refreshed.PaperHeightMm;
-    }
-
     private static Document? FindOpenDocument(string file)
     {
         if (string.IsNullOrWhiteSpace(file))
@@ -346,9 +879,9 @@ public static class PlotterService
         var fullPath = Path.GetFullPath(file);
         foreach (Document doc in CadApp.DocumentManager)
         {
-            var docFile = doc.Database.Filename;
-            if (!string.IsNullOrWhiteSpace(docFile)
-                && string.Equals(Path.GetFullPath(docFile), fullPath, StringComparison.OrdinalIgnoreCase))
+            var name = doc.Database.Filename;
+            if (!string.IsNullOrWhiteSpace(name)
+                && string.Equals(Path.GetFullPath(name), fullPath, StringComparison.OrdinalIgnoreCase))
             {
                 return doc;
             }
@@ -365,254 +898,50 @@ public static class PlotterService
             return string.Equals(job.SourceFile, currentDocument.Name, StringComparison.OrdinalIgnoreCase);
         }
 
-        if (string.IsNullOrWhiteSpace(job.SourceFile))
-        {
-            return false;
-        }
-
-        return string.Equals(Path.GetFullPath(job.SourceFile), Path.GetFullPath(currentFile), StringComparison.OrdinalIgnoreCase);
+        return !string.IsNullOrWhiteSpace(job.SourceFile)
+            && string.Equals(Path.GetFullPath(job.SourceFile), Path.GetFullPath(currentFile), StringComparison.OrdinalIgnoreCase);
     }
 
-    private static void PlotDatabase(Database db, string documentName, PlotJob job, string deviceName, string styleSheet, AppSettings settings, Document? plotDocument = null)
+    private static void WaitForPlotIdle()
     {
-        if (PlotFactory.ProcessPlotState != ProcessPlotState.NotPlotting)
-        {
-            throw new InvalidOperationException("CAD 当前正在打印，请稍后再试。");
-        }
+        const int timeoutMs = 10 * 60 * 1000;
+        var waited = 0;
 
-        var oldWorkingDatabase = HostApplicationServices.WorkingDatabase;
-        HostApplicationServices.WorkingDatabase = db;
+        while (PlotFactory.ProcessPlotState != ProcessPlotState.NotPlotting)
+        {
+            if (waited >= timeoutMs)
+            {
+                throw new InvalidOperationException("AutoCAD 当前打印任务长时间未结束。");
+            }
+
+            System.Windows.Forms.Application.DoEvents();
+            System.Threading.Thread.Sleep(250);
+            waited += 250;
+        }
+    }
+
+    private static void TryPlotCleanup(Action action)
+    {
         try
         {
-            using var tr = db.TransactionManager.StartTransaction();
-            var layout = FindLayoutForJob(tr, db, job);
-            using var plotSettings = new PlotSettings(layout.ModelType);
-            plotSettings.CopyFrom(layout);
-
-            var validator = PlotSettingsValidator.Current;
-            validator.SetPlotConfigurationName(plotSettings, deviceName, null);
-            validator.SetPlotPaperUnits(plotSettings, PlotPaperUnit.Millimeters);
-            validator.RefreshLists(plotSettings);
-
-            var media = SelectMedia(validator, plotSettings, job, settings);
-            if (media == null)
-            {
-                throw new InvalidOperationException(
-                    $"未找到匹配 {job.PaperSizeText} 的 PDF 纸张。请在 PDF 打印机中添加这个自定义纸张后再打印。");
-            }
-
-            validator.SetCanonicalMediaName(plotSettings, media.Name);
-            if (!string.IsNullOrWhiteSpace(styleSheet))
-            {
-                validator.SetCurrentStyleSheet(plotSettings, styleSheet);
-            }
-
-            var plotWindow = GetPlotWindow(job, plotDocument);
-            validator.SetPlotWindowArea(plotSettings, plotWindow);
-            validator.SetPlotType(plotSettings, Autodesk.AutoCAD.DatabaseServices.PlotType.Window);
-            validator.SetUseStandardScale(plotSettings, true);
-            validator.SetStdScaleType(plotSettings, StdScaleType.ScaleToFit);
-            validator.SetPlotCentered(plotSettings, true);
-            validator.SetPlotRotation(plotSettings, DetectRotation(media));
-
-            var plotInfo = new PlotInfo
-            {
-                Layout = layout.ObjectId,
-                OverrideSettings = plotSettings
-            };
-            var plotInfoValidator = new PlotInfoValidator
-            {
-                MediaMatchingPolicy = MatchingPolicy.MatchEnabled
-            };
-            plotInfoValidator.Validate(plotInfo);
-
-            Directory.CreateDirectory(Path.GetDirectoryName(job.OutputPath)!);
-
-            using var engine = PlotFactory.CreatePublishEngine();
-            using var progress = new PlotProgressDialog(false, 1, true);
-            progress.set_PlotMsgString(PlotMessageIndex.DialogTitle, "批量打印");
-            progress.set_PlotMsgString(PlotMessageIndex.CancelJobButtonMessage, "取消");
-            progress.set_PlotMsgString(PlotMessageIndex.CancelSheetButtonMessage, "取消当前图纸");
-            progress.set_PlotMsgString(PlotMessageIndex.SheetSetProgressCaption, "批量打印进度");
-            progress.set_PlotMsgString(PlotMessageIndex.SheetProgressCaption, job.DrawingNumber);
-            progress.LowerPlotProgressRange = 0;
-            progress.UpperPlotProgressRange = 100;
-            progress.PlotProgressPos = 0;
-            progress.OnBeginPlot();
-            progress.IsVisible = settings.ShowPlotProgress;
-
-            engine.BeginPlot(progress, null);
-            engine.BeginDocument(plotInfo, documentName, null, 1, true, job.OutputPath);
-            progress.OnBeginSheet();
-            progress.LowerSheetProgressRange = 0;
-            progress.UpperSheetProgressRange = 100;
-            progress.SheetProgressPos = 0;
-
-            using var pageInfo = new PlotPageInfo();
-            engine.BeginPage(pageInfo, plotInfo, true, null);
-            engine.BeginGenerateGraphics(null);
-            engine.EndGenerateGraphics(null);
-            engine.EndPage(null);
-
-            progress.SheetProgressPos = 100;
-            progress.OnEndSheet();
-            engine.EndDocument(null);
-            progress.PlotProgressPos = 100;
-            progress.OnEndPlot();
-            engine.EndPlot(null);
-
-            tr.Commit();
+            action();
         }
-        finally
+        catch
         {
-            HostApplicationServices.WorkingDatabase = oldWorkingDatabase;
         }
     }
 
-    private static Layout FindLayoutForJob(Transaction tr, Database db, PlotJob job)
+    private static double DirectSizeError(double mediaWidth, double mediaHeight, double targetWidth, double targetHeight)
     {
-        var blockTable = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
-        Layout? firstLayout = null;
-        foreach (ObjectId recordId in blockTable)
-        {
-            var owner = (BlockTableRecord)tr.GetObject(recordId, OpenMode.ForRead);
-            if (!owner.IsLayout)
-            {
-                continue;
-            }
-
-            var layout = (Layout)tr.GetObject(owner.LayoutId, OpenMode.ForRead);
-            firstLayout ??= layout;
-            if (string.Equals(owner.Name, job.SpaceName, StringComparison.OrdinalIgnoreCase))
-            {
-                return layout;
-            }
-        }
-
-        if (firstLayout != null)
-        {
-            return firstLayout;
-        }
-
-        throw new InvalidOperationException("未找到可打印布局。");
+        return Math.Max(Math.Abs(mediaWidth - targetWidth), Math.Abs(mediaHeight - targetHeight));
     }
 
-    private static Extents2d GetPlotWindow(PlotJob job, Document? plotDocument)
+    private static (double Width, double Height)? TryParseMediaSize(string name)
     {
-        if (plotDocument != null)
-        {
-            try
-            {
-                var view = plotDocument.Editor.GetCurrentView();
-                var worldToDisplay = GetWorldToDisplayMatrix(view);
-                var points = new[]
-                {
-                    new Point3d(job.MinX, job.MinY, 0).TransformBy(worldToDisplay),
-                    new Point3d(job.MinX, job.MaxY, 0).TransformBy(worldToDisplay),
-                    new Point3d(job.MaxX, job.MinY, 0).TransformBy(worldToDisplay),
-                    new Point3d(job.MaxX, job.MaxY, 0).TransformBy(worldToDisplay)
-                };
-
-                return new Extents2d(
-                    points.Min(p => p.X),
-                    points.Min(p => p.Y),
-                    points.Max(p => p.X),
-                    points.Max(p => p.Y));
-            }
-            catch
-            {
-                // Some side databases and layout states cannot expose a reliable editor view.
-                // In that case the plot API falls back to raw layout/model coordinates.
-            }
-        }
-
-        return new Extents2d(
-            Math.Min(job.MinX, job.MaxX),
-            Math.Min(job.MinY, job.MaxY),
-            Math.Max(job.MinX, job.MaxX),
-            Math.Max(job.MinY, job.MaxY));
-    }
-
-    private static Matrix3d GetWorldToDisplayMatrix(ViewTableRecord view)
-    {
-        var matrix = Matrix3d.PlaneToWorld(view.ViewDirection);
-        matrix = Matrix3d.Displacement(view.Target - Point3d.Origin) * matrix;
-        matrix = Matrix3d.Rotation(-view.ViewTwist, view.ViewDirection, view.Target) * matrix;
-        return matrix.Inverse();
-    }
-
-    private static MediaSelection? SelectMedia(PlotSettingsValidator validator, PlotSettings plotSettings, PlotJob job, AppSettings settings)
-    {
-        var media = validator.GetCanonicalMediaNameList(plotSettings).Cast<string>().ToList();
-        if (media.Count == 0)
-        {
-            return null;
-        }
-
-        var exact = FindByPhysicalSize(media, job.PaperWidthMm, job.PaperHeightMm, settings.PaperMatchToleranceMm);
-        if (exact != null)
-        {
-            return exact;
-        }
-
-        if (!settings.AllowStandardPaperNameFallback)
-        {
-            return null;
-        }
-
-        var paperName = job.PaperName ?? "";
-        var basePaper = paperName.Replace("+", "");
-        if (paperName.EndsWith("+", StringComparison.OrdinalIgnoreCase))
-        {
-            var longNamed = media.FirstOrDefault(x => x.IndexOf(paperName, StringComparison.OrdinalIgnoreCase) >= 0)
-                ?? media.FirstOrDefault(x => x.IndexOf(basePaper, StringComparison.OrdinalIgnoreCase) >= 0
-                    && x.IndexOf("加长", StringComparison.OrdinalIgnoreCase) >= 0);
-            return longNamed == null ? null : new MediaSelection { Name = longNamed, NeedsRotation = false };
-        }
-
-        var named = media.FirstOrDefault(x => x.IndexOf(basePaper, StringComparison.OrdinalIgnoreCase) >= 0)
-            ?? media.FirstOrDefault(x => x.IndexOf(basePaper.Replace("A", "ISO_A"), StringComparison.OrdinalIgnoreCase) >= 0);
-        return named == null ? null : new MediaSelection { Name = named, NeedsRotation = false };
-    }
-
-    private static MediaSelection? FindByPhysicalSize(IEnumerable<string> mediaNames, double widthMm, double heightMm, double toleranceMm)
-    {
-        if (widthMm <= 0 || heightMm <= 0)
-        {
-            return null;
-        }
-
-        var parsed = mediaNames
-            .Select(name => new { Name = name, Size = TryParseMediaSize(name) })
-            .Where(x => x.Size != null)
-            .Select(x => new
-            {
-                x.Name,
-                DirectError = DirectSizeError(x.Size!.Value.Width, x.Size.Value.Height, widthMm, heightMm),
-                RotatedError = DirectSizeError(x.Size.Value.Width, x.Size.Value.Height, heightMm, widthMm)
-            })
-            .ToList();
-
-        var direct = parsed
-            .Where(x => x.DirectError <= toleranceMm)
-            .OrderBy(x => x.DirectError)
-            .Select(x => new MediaSelection { Name = x.Name, NeedsRotation = false })
-            .FirstOrDefault();
-        if (direct != null)
-        {
-            return direct;
-        }
-
-        return parsed
-            .Where(x => x.RotatedError <= toleranceMm)
-            .OrderBy(x => x.RotatedError)
-            .Select(x => new MediaSelection { Name = x.Name, NeedsRotation = true })
-            .FirstOrDefault();
-    }
-
-    private static (double Width, double Height)? TryParseMediaSize(string mediaName)
-    {
-        var match = Regex.Match(mediaName, @"(?<w>\d+(?:\.\d+)?)\s*[xX]\s*(?<h>\d+(?:\.\d+)?)\s*(?<unit>MM|毫米|IN|英寸)?", RegexOptions.IgnoreCase);
+        var match = Regex.Match(
+            name,
+            @"(?<w>\d+(?:\.\d+)?)\s*[_-]?\s*(?:x|X|\u00D7)\s*[_-]?\s*(?<h>\d+(?:\.\d+)?)\s*[_-]?\s*(?<unit>MM|MILLIMETERS?|IN|INCH(?:ES)?)?",
+            RegexOptions.IgnoreCase);
         if (!match.Success)
         {
             return null;
@@ -621,7 +950,7 @@ public static class PlotterService
         var width = double.Parse(match.Groups["w"].Value, System.Globalization.CultureInfo.InvariantCulture);
         var height = double.Parse(match.Groups["h"].Value, System.Globalization.CultureInfo.InvariantCulture);
         var unit = match.Groups["unit"].Value.ToUpperInvariant();
-        if (unit is "IN" or "英寸")
+        if (unit is "IN" or "INCH" or "INCHES")
         {
             width *= 25.4;
             height *= 25.4;
@@ -630,13 +959,51 @@ public static class PlotterService
         return (width, height);
     }
 
-    private static double DirectSizeError(double mediaWidth, double mediaHeight, double targetWidth, double targetHeight)
+    private sealed class PlotSystemVariables : IDisposable
     {
-        return Math.Max(Math.Abs(mediaWidth - targetWidth), Math.Abs(mediaHeight - targetHeight));
-    }
+        private readonly List<(string Name, object? Value)> _oldValues = new();
+        private bool _disposed;
 
-    private static PlotRotation DetectRotation(MediaSelection? media)
-    {
-        return media?.NeedsRotation == true ? PlotRotation.Degrees090 : PlotRotation.Degrees000;
+        public static PlotSystemVariables Apply()
+        {
+            var variables = new PlotSystemVariables();
+            variables.Set("BACKGROUNDPLOT", 0);
+            variables.Set("PUBLISHCOLLATE", 0);
+            variables.Set("PDFSHX", 0);
+            return variables;
+        }
+
+        private void Set(string name, object value)
+        {
+            try
+            {
+                var oldValue = CadApp.GetSystemVariable(name);
+                CadApp.SetSystemVariable(name, value);
+                _oldValues.Add((name, oldValue));
+            }
+            catch
+            {
+            }
+        }
+
+        public void Dispose()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            for (var i = _oldValues.Count - 1; i >= 0; i--)
+            {
+                try
+                {
+                    CadApp.SetSystemVariable(_oldValues[i].Name, _oldValues[i].Value);
+                }
+                catch
+                {
+                }
+            }
+        }
     }
 }

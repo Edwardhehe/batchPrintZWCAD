@@ -3,6 +3,7 @@ bin-acad/
 bin-acad2019/
 bin-acad-core/
 bin-acad-core-publish/
+bin-test-acad*/
 bin-addblockfix/
 bin-addblocksavefix/
 bin-addblockcmdfix/
@@ -59,6 +60,8 @@ obj-*/
 _tmp*/
 ._tmp*/
 release/
+dist/
+local-artifacts/
 .vs/
 *.user
 *.suo

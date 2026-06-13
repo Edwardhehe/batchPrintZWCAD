@@ -15,14 +15,23 @@
   <ItemGroup>
     <Compile Remove="FileTools\**\*.cs" />
     <Compile Remove="src_acad\**\*.cs" />
+    <Compile Remove="local-artifacts\**\*.cs" />
+    <Compile Remove="obj\**\*.cs" />
+    <Compile Remove="obj*\**\*.cs" />
     <Compile Remove="_tmp*\**\*.cs" />
     <Compile Remove="._tmp*\**\*.cs" />
     <EmbeddedResource Remove="FileTools\**\*" />
     <EmbeddedResource Remove="src_acad\**\*" />
+    <EmbeddedResource Remove="local-artifacts\**\*" />
+    <EmbeddedResource Remove="obj\**\*" />
+    <EmbeddedResource Remove="obj*\**\*" />
     <EmbeddedResource Remove="_tmp*\**\*" />
     <EmbeddedResource Remove="._tmp*\**\*" />
     <None Remove="FileTools\**\*" />
     <None Remove="src_acad\**\*" />
+    <None Remove="local-artifacts\**\*" />
+    <None Remove="obj\**\*" />
+    <None Remove="obj*\**\*" />
     <None Remove="_tmp*\**\*" />
     <None Remove="._tmp*\**\*" />
   </ItemGroup>
