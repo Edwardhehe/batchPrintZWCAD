@@ -26,13 +26,16 @@ public sealed class BatchPlotForm : Form
     private readonly Label _statusLabel = new();
     private readonly List<string> _logLines = new();
     private readonly List<string> _selectedDwgFiles = new();
+    private readonly TemporarySequenceOverlay _sequenceOverlay;
     private readonly AppSettings _settings;
+    private bool _sequenceOverlayFollowsCurrentJobs;
     private string _lastLogPath = "";
     public bool HasPendingPrint { get; private set; }
 
     public BatchPlotForm(Document currentDocument)
     {
         _currentDocument = currentDocument;
+        _sequenceOverlay = new TemporarySequenceOverlay(currentDocument);
         _settings = AppSettingsStore.Load();
         _settings.AutoScanCurrentDrawing = false;
         InitializeComponents();
@@ -330,22 +333,26 @@ public sealed class BatchPlotForm : Form
     {
         try
         {
+            AcadPlotterInstaller.InstallBundledPlotter();
             var settings = new PlotSettings(true);
             var validator = PlotSettingsValidator.Current;
-            foreach (string device in validator.GetPlotDeviceList())
+            foreach (var deviceItem in validator.GetPlotDeviceList())
             {
-                _deviceCombo.Items.Add(device);
+                if (deviceItem is string device && !string.IsNullOrWhiteSpace(device))
+                {
+                    _deviceCombo.Items.Add(device);
+                }
             }
 
-            foreach (string style in validator.GetPlotStyleSheetList())
+            foreach (var styleItem in validator.GetPlotStyleSheetList())
             {
-                if (style.EndsWith(".ctb", StringComparison.OrdinalIgnoreCase))
+                if (styleItem is string style && style.EndsWith(".ctb", StringComparison.OrdinalIgnoreCase))
                 {
                     _styleCombo.Items.Add(style);
                 }
             }
 
-            SelectExactOrContaining(_deviceCombo, _settings.LastPlotDevice, "PDF");
+            SelectPlotDevice(_deviceCombo, _settings.LastPlotDevice);
             SelectExactOrContaining(_styleCombo, _settings.LastStyleSheet, "monochrome");
             if (_styleCombo.SelectedIndex < 0 && _styleCombo.Items.Count > 0)
             {
@@ -358,27 +365,31 @@ public sealed class BatchPlotForm : Form
         }
     }
 
-    private static void SelectExactOrContaining(ComboBox combo, string exactValue, string fallbackContains)
+    private static void SelectPlotDevice(ComboBox combo, string lastValue)
     {
-        if (!string.IsNullOrWhiteSpace(exactValue))
+        if (TrySelectExactOrContaining(combo, AcadPlotterInstaller.PreferredPdfPlotter))
         {
-            for (var i = 0; i < combo.Items.Count; i++)
-            {
-                if (string.Equals(combo.Items[i]?.ToString(), exactValue, StringComparison.OrdinalIgnoreCase))
-                {
-                    combo.SelectedIndex = i;
-                    return;
-                }
-            }
+            return;
         }
 
-        for (var i = 0; i < combo.Items.Count; i++)
+        if (TrySelectExactOrContaining(combo, lastValue))
         {
-            if (combo.Items[i]?.ToString()?.IndexOf(fallbackContains, StringComparison.OrdinalIgnoreCase) >= 0)
-            {
-                combo.SelectedIndex = i;
-                return;
-            }
+            return;
+        }
+
+        SelectExactOrContaining(combo, "", "PDF");
+    }
+
+    private static void SelectExactOrContaining(ComboBox combo, string exactValue, string fallbackContains)
+    {
+        if (TrySelectExactOrContaining(combo, exactValue))
+        {
+            return;
+        }
+
+        if (TrySelectContaining(combo, fallbackContains))
+        {
+            return;
         }
 
         if (combo.Items.Count > 0)
@@ -387,12 +398,51 @@ public sealed class BatchPlotForm : Form
         }
     }
 
+    private static bool TrySelectExactOrContaining(ComboBox combo, string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        for (var i = 0; i < combo.Items.Count; i++)
+        {
+            if (string.Equals(combo.Items[i]?.ToString(), value, StringComparison.OrdinalIgnoreCase))
+            {
+                combo.SelectedIndex = i;
+                return true;
+            }
+        }
+
+        return TrySelectContaining(combo, value);
+    }
+
+    private static bool TrySelectContaining(ComboBox combo, string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        for (var i = 0; i < combo.Items.Count; i++)
+        {
+            if (combo.Items[i]?.ToString()?.IndexOf(value, StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                combo.SelectedIndex = i;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private void ScanCurrentDrawing()
     {
         var library = TitleBlockLibraryStore.Load();
         if (library.Blocks.Count == 0)
         {
             MessageBox.Show("图框库为空。请先从“批量打印”菜单点击“新增图框”。", "批量打印", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            ClearSequenceOverlay();
             RefreshStatus();
             return;
         }
@@ -404,6 +454,7 @@ public sealed class BatchPlotForm : Form
         }
 
         SortAndRefreshOutputPaths();
+        ShowSequenceOverlayForCurrentJobs();
         AppendLog("INFO", $"扫描当前图完成，识别 {_jobs.Count} 张。");
     }
 
@@ -413,6 +464,7 @@ public sealed class BatchPlotForm : Form
         if (library.Blocks.Count == 0)
         {
             MessageBox.Show("图框库为空，请先新增图框。", "批量打印", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            ClearSequenceOverlay();
             return;
         }
 
@@ -444,6 +496,7 @@ public sealed class BatchPlotForm : Form
             }
 
             SortAndRefreshOutputPaths();
+            ShowSequenceOverlayForCurrentJobs();
             AppendLog("INFO", $"框选扫描当前图完成，识别 {_jobs.Count} 张。");
         }
         finally
@@ -502,6 +555,15 @@ public sealed class BatchPlotForm : Form
         }
 
         SortAndRefreshOutputPaths();
+        if (_jobs.Count > 0 && _jobs.All(IsCurrentDocumentJob))
+        {
+            ShowSequenceOverlayForCurrentJobs();
+        }
+        else
+        {
+            ClearSequenceOverlay();
+        }
+
         if (errors.Count > 0)
         {
             MessageBox.Show("部分 DWG 扫描失败:\n" + string.Join("\n", errors), "批量打印", MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -537,6 +599,50 @@ public sealed class BatchPlotForm : Form
         }
 
         RefreshStatus();
+        if (_sequenceOverlayFollowsCurrentJobs)
+        {
+            ShowSequenceOverlayForCurrentJobs();
+        }
+    }
+
+    private void ShowSequenceOverlayForCurrentJobs()
+    {
+        _sequenceOverlayFollowsCurrentJobs = true;
+        try
+        {
+            _sequenceOverlay.Show(_jobs.ToList());
+        }
+        catch (Exception ex)
+        {
+            _sequenceOverlayFollowsCurrentJobs = false;
+            _sequenceOverlay.Clear();
+            AppendLog("WARN", "临时序号标注显示失败: " + ex.Message);
+        }
+    }
+
+    private void ClearSequenceOverlay()
+    {
+        _sequenceOverlayFollowsCurrentJobs = false;
+        _sequenceOverlay.Clear();
+    }
+
+    private bool IsCurrentDocumentJob(PlotJob job)
+    {
+        var source = job.SourceFile;
+        var file = _currentDocument.Database.Filename;
+        if (!string.IsNullOrWhiteSpace(source) && !string.IsNullOrWhiteSpace(file))
+        {
+            try
+            {
+                return string.Equals(Path.GetFullPath(source), Path.GetFullPath(file), StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return string.Equals(source, file, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+
+        return string.Equals(source, _currentDocument.Name, StringComparison.OrdinalIgnoreCase);
     }
 
     private void SetAllSelected(bool selected)
@@ -607,6 +713,7 @@ public sealed class BatchPlotForm : Form
 
         _jobs.Clear();
         _selectedDwgFiles.Clear();
+        ClearSequenceOverlay();
         RefreshStatus();
     }
 
@@ -738,7 +845,7 @@ public sealed class BatchPlotForm : Form
         {
             existingPdfs = Directory
                 .EnumerateFiles(_outputDirectory.Text, "*.pdf", SearchOption.TopDirectoryOnly)
-                .OrderBy(Path.GetFileNameWithoutExtension, NaturalStringComparer.Instance)
+                .OrderBy(x => Path.GetFileNameWithoutExtension(x) ?? "", NaturalStringComparer.Instance)
                 .ToList();
         }
 
@@ -956,6 +1063,7 @@ public sealed class BatchPlotForm : Form
         var device = _deviceCombo.SelectedItem?.ToString() ?? "";
         var style = _styleCombo.SelectedItem?.ToString() ?? "";
 
+        ShowSequenceOverlayForPrint(selected);
         _printButton.Enabled = false;
         var wasVisible = Visible;
         if (_settings.OpenExternalDwgForPlot)
@@ -1019,6 +1127,7 @@ public sealed class BatchPlotForm : Form
         }
         finally
         {
+            ClearSequenceOverlay();
             if (wasVisible && !Visible)
             {
                 Show();
@@ -1027,6 +1136,47 @@ public sealed class BatchPlotForm : Form
 
             _printButton.Enabled = true;
             RefreshStatus();
+        }
+    }
+
+    private void OpenOutputDirectoryAfterPrint()
+    {
+        var directory = _outputDirectory.Text.Trim();
+        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+        {
+            return;
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = directory,
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex)
+        {
+            AppendLog("WARN", "打开输出目录失败: " + ex.Message);
+        }
+    }
+
+    private void ShowSequenceOverlayForPrint(IReadOnlyList<PlotJob> selected)
+    {
+        var currentJobs = selected.Where(IsCurrentDocumentJob).ToList();
+        if (currentJobs.Count == 0)
+        {
+            ClearSequenceOverlay();
+            return;
+        }
+
+        try
+        {
+            _sequenceOverlay.Show(currentJobs);
+        }
+        catch (Exception ex)
+        {
+            AppendLog("WARN", "打印临时序号标注显示失败: " + ex.Message);
         }
     }
 
@@ -1145,28 +1295,6 @@ public sealed class BatchPlotForm : Form
         }
     }
 
-    private void OpenOutputDirectoryAfterPrint()
-    {
-        var directory = _outputDirectory.Text.Trim();
-        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
-        {
-            return;
-        }
-
-        try
-        {
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = directory,
-                UseShellExecute = true
-            });
-        }
-        catch (Exception ex)
-        {
-            AppendLog("WARN", "打开输出目录失败: " + ex.Message);
-        }
-    }
-
     private void AppendLog(string level, string message)
     {
         _logLines.Add(BatchPlotLogger.Format(level, message));
@@ -1180,6 +1308,11 @@ public sealed class BatchPlotForm : Form
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
+        if (!HasPendingPrint)
+        {
+            ClearSequenceOverlay();
+        }
+
         SaveCurrentSettings();
         base.OnFormClosing(e);
     }

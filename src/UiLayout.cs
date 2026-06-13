@@ -32,7 +32,7 @@ public static class UiLayout
 
         var workingArea = Screen.FromPoint(Cursor.Position).WorkingArea;
         var width = Math.Max(Scale(720), (int)Math.Round(workingArea.Width * 0.5));
-        var height = Math.Max(Scale(460), (int)Math.Round(workingArea.Height * 0.56));
+        var height = Math.Max(Scale(460), (int)Math.Round(workingArea.Height * 0.50));
         width = Math.Min(width, workingArea.Width - Scale(80));
         height = Math.Min(height, workingArea.Height - Scale(80));
 

@@ -11,15 +11,36 @@ using CadApp = ZwSoft.ZwCAD.ApplicationServices.Application;
 
 namespace ZwcadBatchPlot;
 
-public sealed class BatchPlotCommands : IExtensionApplication
+public sealed partial class BatchPlotCommands : IExtensionApplication
 {
+    private static BatchPlotForm? _batchPlotForm;
+
     public void Initialize()
     {
+        if (IsCoreConsole())
+        {
+            return;
+        }
+
+        AcadPlotterInstaller.InstallBundledPlotter();
         CadMenuInstaller.Install(force: true);
     }
 
     public void Terminate()
     {
+    }
+
+    private static bool IsCoreConsole()
+    {
+        try
+        {
+            var processName = System.Diagnostics.Process.GetCurrentProcess().ProcessName;
+            return string.Equals(processName, "accoreconsole", StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     [CommandMethod("ZBP_ADD_TITLE_BLOCK")]
@@ -50,7 +71,7 @@ public sealed class BatchPlotCommands : IExtensionApplication
     public void ShowPdfViewer()
     {
         using var form = new PdfPreviewForm(Array.Empty<string>());
-        CadApp.ShowModalDialog(form);
+        ShowModalDialog(form);
     }
 
     [CommandMethod("_ZBP_INTERNAL_PDF_VIEWER", CommandFlags.Session)]
@@ -76,7 +97,7 @@ public sealed class BatchPlotCommands : IExtensionApplication
     public void ManageLibrary()
     {
         using var form = new TitleBlockLibraryManagerForm();
-        CadApp.ShowModalDialog(form);
+        ShowModalDialog(form);
     }
 
     [CommandMethod("_ZBP_INTERNAL_MANAGE_LIBRARY", CommandFlags.Session)]
@@ -90,7 +111,7 @@ public sealed class BatchPlotCommands : IExtensionApplication
     {
         var doc = CadApp.DocumentManager.MdiActiveDocument;
         using var form = new SettingsForm(doc);
-        if (CadApp.ShowModalDialog(form) == DialogResult.OK && form.RequestPickDirectoryCellSizes && doc != null)
+        if (ShowModalDialog(form) == DialogResult.OK && form.RequestPickDirectoryCellSizes && doc != null)
         {
             var settings = AppSettingsStore.Load();
             var ok = DirectoryTableGenerator.PromptCellSizes(doc, settings, out _, out var message);
@@ -123,7 +144,7 @@ public sealed class BatchPlotCommands : IExtensionApplication
         {
             var roots = AutoloadManager.Install();
             MessageBox.Show(
-                "已安装自动加载。\n\n下次启动中望CAD会自动加载批量打印插件。\n\n写入位置:\n" + string.Join("\n", roots),
+                "已安装自动加载。\n\n下次启动AutoCAD会自动加载批量打印插件。\n\n写入位置:\n" + string.Join("\n", roots),
                 "批量打印",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information);
@@ -247,7 +268,7 @@ public sealed class BatchPlotCommands : IExtensionApplication
             AddBlockLog($"Detected paper: {detected.PaperName}, {detected.PaperWidthMm:0.##} x {detected.PaperHeightMm:0.##}");
 
             using var paperForm = new PaperSizeSelectionForm(detected);
-            var paperResult = CadApp.ShowModalDialog(paperForm);
+            var paperResult = ShowModalDialog(paperForm);
             AddBlockLog("Paper dialog result: " + paperResult);
             if (paperResult != DialogResult.OK)
             {
@@ -312,12 +333,53 @@ public sealed class BatchPlotCommands : IExtensionApplication
             return;
         }
 
-        using var form = new BatchPlotForm(doc);
-        CadApp.ShowModalDialog(form);
-        if (form.HasPendingPrint)
+        if (_batchPlotForm is { IsDisposed: false })
         {
-            form.ExecutePendingPrint();
+            _batchPlotForm.Activate();
+            return;
         }
+
+        var form = new BatchPlotForm(doc);
+        _batchPlotForm = form;
+        form.FormClosed += (_, _) =>
+        {
+            try
+            {
+                if (form.HasPendingPrint)
+                {
+                    form.ExecutePendingPrint();
+                }
+            }
+            finally
+            {
+                if (ReferenceEquals(_batchPlotForm, form))
+                {
+                    _batchPlotForm = null;
+                }
+
+                form.Dispose();
+            }
+        };
+
+        ShowModelessDialog(form);
+    }
+
+    private static DialogResult ShowModalDialog(Form form)
+    {
+#if ACAD_CORE
+        return form.ShowDialog();
+#else
+        return CadApp.ShowModalDialog(form);
+#endif
+    }
+
+    private static void ShowModelessDialog(Form form)
+    {
+#if ACAD_CORE
+        form.Show();
+#else
+        CadApp.ShowModelessDialog(form);
+#endif
     }
 
     private static bool TryGetRegion(Editor editor, string firstPrompt, string secondPrompt, Matrix3d inverseBlockTransform, out LocalRectangle region)
