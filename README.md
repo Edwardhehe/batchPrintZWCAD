@@ -57,11 +57,13 @@ AutoCAD 2019 ~ 2020 使用 .NET Framework 4.7，AutoCAD 2021 ~ 2024 使用 .NET 
 
 ### AutoCAD 发布包
 
-AutoCAD 版本下载对应发布包后，关闭 AutoCAD，双击 `安装.cmd`。也可以手动 `NETLOAD`：
+AutoCAD 版本请下载与本机 AutoCAD 年份对应的发布包，解压后关闭 AutoCAD，双击 `安装.cmd`。安装脚本会复制插件文件、写入自动加载注册表项，并保留 `卸载.cmd` 供以后卸载。安装成功后用户以后不需要每次 `NETLOAD`。
 
-- AutoCAD 2019 ~ 2020：选择对应发布包中的 `AcadBatchPlot.dll`。
-- AutoCAD 2021 ~ 2024：选择对应发布包中的 `AcadBatchPlot.dll`。
-- AutoCAD 2025 及以后：选择 `AcadBatchPlot.Core.dll`。
+- AutoCAD 2019 ~ 2020：使用 `AcadBatchPlot-AutoCAD2019-2020-*.zip`。
+- AutoCAD 2021 ~ 2024：使用 `AcadBatchPlot-AutoCAD2021-2024-*.zip`。
+- AutoCAD 2025 及以后：使用 `AcadBatchPlot-AutoCAD2025Plus-*.zip`。
+
+AutoCAD 包内带有 `LA_pdf.pc3` 和 `LA_pdf.pmp`。插件首次自动加载时会把它们复制到 AutoCAD 的 Plotters 目录，用户不需要手动安装 PDF 绘图仪。
 
 AutoCAD 2025 及以后如果菜单栏未显示，可以执行 `ZBP_SHOW_PANEL` 打开批量打印主界面。
 

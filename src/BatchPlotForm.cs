@@ -34,22 +34,16 @@ public sealed class BatchPlotForm : Form
     {
         _currentDocument = currentDocument;
         _settings = AppSettingsStore.Load();
+        _settings.AutoScanCurrentDrawing = false;
         InitializeComponents();
         LoadPlotOptions();
-        if (_settings.AutoScanCurrentDrawing)
-        {
-            ScanCurrentDrawing();
-        }
-        else
-        {
-            RefreshStatus();
-        }
+        RefreshStatus();
     }
 
     private void InitializeComponents()
     {
         Text = "批量打印 - ZWCAD";
-        UiLayout.ConfigureForm(this, 1320, 820, 1080, 680);
+        UiLayout.ConfigureBatchPlotForm(this);
         var tips = new ToolTip
         {
             AutoPopDelay = 8000,
@@ -61,22 +55,22 @@ public sealed class BatchPlotForm : Form
         var top = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
-            Height = UiLayout.Scale(160),
+            Height = UiLayout.ActionPanelHeight(),
             ColumnCount = 1,
             RowCount = 3,
             Padding = new Padding(UiLayout.Scale(10), UiLayout.Scale(8), UiLayout.Scale(10), UiLayout.Scale(6)),
             BackColor = SystemColors.Control
         };
-        top.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.ButtonHeight() + UiLayout.Scale(12)));
-        top.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.ButtonHeight() + UiLayout.Scale(18)));
-        top.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.ButtonHeight() + UiLayout.Scale(8)));
+        top.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.ActionButtonRowsHeight()));
+        top.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.ButtonHeight() + UiLayout.Scale(10)));
+        top.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.ButtonHeight() + UiLayout.Scale(4)));
 
         var actionRow = new FlowLayoutPanel
         {
             Dock = DockStyle.Fill,
             FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight,
-            WrapContents = false,
-            AutoScroll = true,
+            WrapContents = true,
+            AutoScroll = false,
             Margin = Padding.Empty
         };
 
@@ -96,14 +90,14 @@ public sealed class BatchPlotForm : Form
             AutoScroll = true,
             Margin = Padding.Empty
         };
-        settingsRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(48)));
+        settingsRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(42)));
         settingsRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        settingsRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.ButtonWidth("浏览...", 84) + UiLayout.Scale(8)));
-        settingsRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(70)));
-        settingsRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(260)));
-        settingsRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(48)));
-        settingsRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(210)));
-        settingsRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.ButtonWidth("开始打印", 104) + UiLayout.Scale(10)));
+        settingsRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.ButtonWidth("浏览...", 70) + UiLayout.Scale(6)));
+        settingsRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(54)));
+        settingsRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(170)));
+        settingsRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(36)));
+        settingsRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(130)));
+        settingsRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.ButtonWidth("开始打印", 86) + UiLayout.Scale(8)));
 
         Button MakeButton(string text, int width)
         {
@@ -1012,6 +1006,11 @@ public sealed class BatchPlotForm : Form
                 summary += "\n\n失败项:\n" + string.Join("\n", failed);
             }
 
+            if (printed > 0)
+            {
+                OpenOutputDirectoryAfterPrint();
+            }
+
             MessageBox.Show(summary, "批量打印", MessageBoxButtons.OK, failed.Count > 0 ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
         }
         catch (Exception ex)
@@ -1122,6 +1121,11 @@ public sealed class BatchPlotForm : Form
                 summary += "\n\n失败项:\n" + string.Join("\n", failed);
             }
 
+            if (printed > 0)
+            {
+                OpenOutputDirectoryAfterPrint();
+            }
+
             MessageBox.Show(summary, "批量打印", MessageBoxButtons.OK, failed.Count > 0 ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
         }
         catch (Exception ex)
@@ -1138,6 +1142,28 @@ public sealed class BatchPlotForm : Form
 
             _printButton.Enabled = true;
             RefreshStatus();
+        }
+    }
+
+    private void OpenOutputDirectoryAfterPrint()
+    {
+        var directory = _outputDirectory.Text.Trim();
+        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+        {
+            return;
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = directory,
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex)
+        {
+            AppendLog("WARN", "打开输出目录失败: " + ex.Message);
         }
     }
 
@@ -1163,6 +1189,7 @@ public sealed class BatchPlotForm : Form
         _settings.LastOutputDirectory = _outputDirectory.Text;
         _settings.LastPlotDevice = _deviceCombo.SelectedItem?.ToString() ?? "";
         _settings.LastStyleSheet = _styleCombo.SelectedItem?.ToString() ?? "";
+        _settings.AutoScanCurrentDrawing = false;
         AppSettingsStore.Save(_settings);
     }
 }

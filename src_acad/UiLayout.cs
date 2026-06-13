@@ -6,7 +6,7 @@ namespace ZwcadBatchPlot;
 
 public static class UiLayout
 {
-    public static readonly Font DefaultFont = new("Microsoft YaHei UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
+    public static readonly Font DefaultFont = new("Microsoft YaHei UI", 8F, FontStyle.Regular, GraphicsUnit.Point);
 
     public static void ConfigureForm(Form form, int designWidth, int designHeight, int minimumWidth, int minimumHeight)
     {
@@ -23,6 +23,23 @@ public static class UiLayout
         form.MinimumSize = new Size(Math.Min(minimumWidth, workingArea.Width - Scale(40)), Math.Min(minimumHeight, workingArea.Height - Scale(40)));
     }
 
+    public static void ConfigureBatchPlotForm(Form form)
+    {
+        form.AutoScaleMode = AutoScaleMode.Dpi;
+        form.AutoScaleDimensions = new SizeF(96F, 96F);
+        form.Font = DefaultFont;
+        form.StartPosition = FormStartPosition.CenterScreen;
+
+        var workingArea = Screen.FromPoint(Cursor.Position).WorkingArea;
+        var width = Math.Max(Scale(720), (int)Math.Round(workingArea.Width * 0.5));
+        var height = Math.Max(Scale(460), (int)Math.Round(workingArea.Height * 0.56));
+        width = Math.Min(width, workingArea.Width - Scale(80));
+        height = Math.Min(height, workingArea.Height - Scale(80));
+
+        form.Size = new Size(width, height);
+        form.MinimumSize = new Size(Math.Min(Scale(640), workingArea.Width - Scale(40)), Math.Min(Scale(380), workingArea.Height - Scale(40)));
+    }
+
     public static int Scale(int value)
     {
         using var graphics = Graphics.FromHwnd(IntPtr.Zero);
@@ -31,13 +48,23 @@ public static class UiLayout
 
     public static int ButtonWidth(string text, int minimumWidth)
     {
-        var measured = TextRenderer.MeasureText(text, DefaultFont).Width + Scale(26);
+        var measured = TextRenderer.MeasureText(text, DefaultFont).Width + Scale(20);
         return Math.Max(Scale(minimumWidth), measured);
     }
 
     public static int ButtonHeight()
     {
-        return Math.Max(Scale(30), TextRenderer.MeasureText("批量打印", DefaultFont).Height + Scale(12));
+        return Math.Max(Scale(24), TextRenderer.MeasureText("批量打印", DefaultFont).Height + Scale(8));
+    }
+
+    public static int ActionButtonRowsHeight()
+    {
+        return ButtonHeight() * 2 + Scale(14);
+    }
+
+    public static int ActionPanelHeight()
+    {
+        return ActionButtonRowsHeight() + ButtonHeight() * 2 + Scale(30);
     }
 
     public static Button CreateButton(string text, int minimumWidth)
@@ -47,7 +74,7 @@ public static class UiLayout
             Text = text,
             Width = ButtonWidth(text, minimumWidth),
             Height = ButtonHeight(),
-            Margin = new Padding(0, Scale(2), Scale(8), Scale(2)),
+            Margin = new Padding(0, Scale(2), Scale(6), Scale(2)),
             UseVisualStyleBackColor = true
         };
     }

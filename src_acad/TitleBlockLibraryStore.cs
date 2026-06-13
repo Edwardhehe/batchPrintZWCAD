@@ -28,6 +28,7 @@ public static class TitleBlockLibraryStore
 
         var json = File.ReadAllText(path);
         var loaded = JsonConvert.DeserializeObject<TitleBlockLibrary>(json) ?? new TitleBlockLibrary();
+        NormalizeFrameCoordinates(loaded);
         return isDefaultPath ? MergeZwcadLibrary(loaded) : loaded;
     }
 
@@ -79,6 +80,11 @@ public static class TitleBlockLibraryStore
 
             var zwcadJson = File.ReadAllText(ZwcadLibraryPath);
             var zwcadLibrary = JsonConvert.DeserializeObject<TitleBlockLibrary>(zwcadJson);
+            if (zwcadLibrary != null)
+            {
+                NormalizeFrameCoordinates(zwcadLibrary);
+            }
+
             if (zwcadLibrary?.Blocks == null || zwcadLibrary.Blocks.Count == 0)
             {
                 return library;
@@ -126,5 +132,36 @@ public static class TitleBlockLibraryStore
         {
             return library;
         }
+    }
+
+    private static void NormalizeFrameCoordinates(TitleBlockLibrary library)
+    {
+        foreach (var definition in library.Blocks)
+        {
+            if (!string.Equals(definition.CoordinateMode, "Local", StringComparison.OrdinalIgnoreCase)
+                || !HasArea(definition.PrintRegion))
+            {
+                continue;
+            }
+
+            definition.TitleRegion = ToFrameRelative(definition.TitleRegion, definition.PrintRegion);
+            definition.DrawingNumberRegion = ToFrameRelative(definition.DrawingNumberRegion, definition.PrintRegion);
+            definition.CoordinateMode = "Frame";
+        }
+    }
+
+    private static LocalRectangle ToFrameRelative(LocalRectangle region, LocalRectangle referenceFrame)
+    {
+        return LocalRectangle.FromPoints(
+            region.MinX - referenceFrame.MinX,
+            region.MinY - referenceFrame.MinY,
+            region.MaxX - referenceFrame.MinX,
+            region.MaxY - referenceFrame.MinY);
+    }
+
+    private static bool HasArea(LocalRectangle region)
+    {
+        return Math.Abs(region.MaxX - region.MinX) > 1e-6
+            && Math.Abs(region.MaxY - region.MinY) > 1e-6;
     }
 }

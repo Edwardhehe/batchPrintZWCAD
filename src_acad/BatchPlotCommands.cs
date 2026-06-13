@@ -15,16 +15,36 @@ using CadApp = Autodesk.AutoCAD.ApplicationServices.Application;
 
 namespace ZwcadBatchPlot;
 
-public sealed class BatchPlotCommands : IExtensionApplication
+public sealed partial class BatchPlotCommands : IExtensionApplication
 {
+    private static BatchPlotForm? _batchPlotForm;
+
     public void Initialize()
     {
+        if (IsCoreConsole())
+        {
+            return;
+        }
+
         AcadPlotterInstaller.InstallBundledPlotter();
         CadMenuInstaller.Install(force: true);
     }
 
     public void Terminate()
     {
+    }
+
+    private static bool IsCoreConsole()
+    {
+        try
+        {
+            var processName = System.Diagnostics.Process.GetCurrentProcess().ProcessName;
+            return string.Equals(processName, "accoreconsole", StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     [CommandMethod("ZBP_ADD_TITLE_BLOCK")]
@@ -241,6 +261,9 @@ public sealed class BatchPlotCommands : IExtensionApplication
             var printExtents = hasPrintRegion
                 ? TransformRegion(printRegion, blockTransform)
                 : blockExtents;
+            var referenceFrame = hasPrintRegion
+                ? printRegion
+                : TransformExtents(blockExtents, inverse);
 
             var detected = PaperSizeDetector.Detect(
                 printExtents.MaxPoint.X - printExtents.MinPoint.X,
@@ -261,13 +284,13 @@ public sealed class BatchPlotCommands : IExtensionApplication
             {
                 BlockName = blockName,
                 HasPrintRegion = hasPrintRegion,
-                CoordinateMode = "Local",
-                PrintRegion = printRegion,
+                CoordinateMode = "Frame",
+                PrintRegion = referenceFrame,
                 PaperName = paperForm.PaperName,
                 PaperWidthMm = paperForm.PaperWidthMm,
                 PaperHeightMm = paperForm.PaperHeightMm,
-                TitleRegion = titleRegion,
-                DrawingNumberRegion = numberRegion,
+                TitleRegion = ToFrameRelative(titleRegion, referenceFrame),
+                DrawingNumberRegion = ToFrameRelative(numberRegion, referenceFrame),
                 CreatedAt = now,
                 UpdatedAt = now
             };
@@ -314,12 +337,35 @@ public sealed class BatchPlotCommands : IExtensionApplication
             return;
         }
 
-        using var form = new BatchPlotForm(doc);
-        ShowModalDialog(form);
-        if (form.HasPendingPrint)
+        if (_batchPlotForm is { IsDisposed: false })
         {
-            form.ExecutePendingPrint();
+            _batchPlotForm.Activate();
+            return;
         }
+
+        var form = new BatchPlotForm(doc);
+        _batchPlotForm = form;
+        form.FormClosed += (_, _) =>
+        {
+            try
+            {
+                if (form.HasPendingPrint)
+                {
+                    form.ExecutePendingPrint();
+                }
+            }
+            finally
+            {
+                if (ReferenceEquals(_batchPlotForm, form))
+                {
+                    _batchPlotForm = null;
+                }
+
+                form.Dispose();
+            }
+        };
+
+        ShowModelessDialog(form);
     }
 
     private static DialogResult ShowModalDialog(Form form)
@@ -328,6 +374,15 @@ public sealed class BatchPlotCommands : IExtensionApplication
         return form.ShowDialog();
 #else
         return CadApp.ShowModalDialog(form);
+#endif
+    }
+
+    private static void ShowModelessDialog(Form form)
+    {
+#if ACAD_CORE
+        form.Show();
+#else
+        CadApp.ShowModelessDialog(form);
 #endif
     }
 
@@ -404,6 +459,32 @@ public sealed class BatchPlotCommands : IExtensionApplication
         var maxX = Math.Max(Math.Max(points[0].X, points[1].X), Math.Max(points[2].X, points[3].X));
         var maxY = Math.Max(Math.Max(points[0].Y, points[1].Y), Math.Max(points[2].Y, points[3].Y));
         return new Extents3d(new Point3d(minX, minY, 0), new Point3d(maxX, maxY, 0));
+    }
+
+    private static LocalRectangle TransformExtents(Extents3d extents, Matrix3d transform)
+    {
+        var points = new[]
+        {
+            new Point3d(extents.MinPoint.X, extents.MinPoint.Y, 0).TransformBy(transform),
+            new Point3d(extents.MinPoint.X, extents.MaxPoint.Y, 0).TransformBy(transform),
+            new Point3d(extents.MaxPoint.X, extents.MinPoint.Y, 0).TransformBy(transform),
+            new Point3d(extents.MaxPoint.X, extents.MaxPoint.Y, 0).TransformBy(transform)
+        };
+
+        return LocalRectangle.FromPoints(
+            points.Min(p => p.X),
+            points.Min(p => p.Y),
+            points.Max(p => p.X),
+            points.Max(p => p.Y));
+    }
+
+    private static LocalRectangle ToFrameRelative(LocalRectangle region, LocalRectangle referenceFrame)
+    {
+        return LocalRectangle.FromPoints(
+            region.MinX - referenceFrame.MinX,
+            region.MinY - referenceFrame.MinY,
+            region.MaxX - referenceFrame.MinX,
+            region.MaxY - referenceFrame.MinY);
     }
 
     private static void AddBlockLog(string message)

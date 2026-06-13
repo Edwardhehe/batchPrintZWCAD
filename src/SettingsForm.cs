@@ -101,9 +101,10 @@ public sealed class SettingsForm : Form
 
         _outputSubfolder.Dock = DockStyle.Fill;
 
-        _autoScan.Text = "打开批量打印窗口时自动扫描当前图";
+        _autoScan.Text = "打开窗口不自动扫描，点击扫描才扫描";
         _autoScan.AutoSize = true;
         _autoScan.Dock = DockStyle.Fill;
+        _autoScan.Enabled = false;
 
         ConfigureNumber(_paperTolerance, 0.5M, 20M, 0.5M, 1);
 
@@ -236,7 +237,7 @@ public sealed class SettingsForm : Form
     {
         _rememberOutput.Checked = settings.RememberLastOutputDirectory;
         _outputSubfolder.Text = settings.DefaultOutputSubfolder;
-        _autoScan.Checked = settings.AutoScanCurrentDrawing;
+        _autoScan.Checked = false;
         _paperTolerance.Value = Clamp(_paperTolerance, settings.PaperMatchToleranceMm);
         _allowPaperNameFallback.Checked = settings.AllowStandardPaperNameFallback;
         _showProgress.Checked = settings.ShowPlotProgress;
@@ -271,7 +272,7 @@ public sealed class SettingsForm : Form
         var current = AppSettingsStore.Load();
         current.RememberLastOutputDirectory = _rememberOutput.Checked;
         current.DefaultOutputSubfolder = string.IsNullOrWhiteSpace(_outputSubfolder.Text) ? "PDF" : _outputSubfolder.Text.Trim();
-        current.AutoScanCurrentDrawing = _autoScan.Checked;
+        current.AutoScanCurrentDrawing = false;
         current.PaperMatchToleranceMm = (double)_paperTolerance.Value;
         current.AllowStandardPaperNameFallback = _allowPaperNameFallback.Checked;
         current.ShowPlotProgress = _showProgress.Checked;

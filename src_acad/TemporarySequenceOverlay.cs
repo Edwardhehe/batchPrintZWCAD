@@ -1,21 +1,33 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
+using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.Colors;
 using Autodesk.AutoCAD.DatabaseServices;
+using Autodesk.AutoCAD.EditorInput;
 using Autodesk.AutoCAD.Geometry;
-using Autodesk.AutoCAD.GraphicsInterface;
 
 namespace ZwcadBatchPlot;
 
-public sealed class TemporarySequenceOverlay : IDisposable
+public sealed class TemporarySequenceOverlay
 {
-    private readonly List<Entity> _entities = new();
-    private readonly IntegerCollection _viewportIds = new();
+    private const string LayerName = "ZBP_TEMP_SEQUENCE_OVERLAY";
+    private readonly Document _document;
+    private readonly List<ObjectId> _entityIds = new();
+
+    public TemporarySequenceOverlay(Document document)
+    {
+        _document = document;
+    }
 
     public void Show(IReadOnlyList<PlotJob> jobs)
     {
         Clear();
+
+        using var docLock = _document.LockDocument();
+        using var tr = _document.Database.TransactionManager.StartTransaction();
+        var db = _document.Database;
+        var layerId = EnsureLayer(tr, db);
+        var currentSpaceId = db.CurrentSpaceId;
 
         for (var i = 0; i < jobs.Count; i++)
         {
@@ -28,75 +40,190 @@ public sealed class TemporarySequenceOverlay : IDisposable
             var width = maxX - minX;
             var height = maxY - minY;
             var minSide = Math.Min(width, height);
-            var padding = Math.Max(minSide * 0.012, 2d);
+            var padding = Math.Max(minSide * 0.035, 10d);
             var textHeight = GetTextHeight(width, height);
             var color = Color.FromColorIndex(ColorMethod.ByAci, 1);
+            var frameWidth = GetFrameWidth(minSide);
 
-            var frame = new Polyline(4)
+            foreach (var ownerId in GetOwnerIds(tr, db, job, currentSpaceId))
             {
-                Closed = true,
-                Color = color,
-                LineWeight = GetLineWeight(minSide),
-                ConstantWidth = Math.Max(minSide * 0.004, 0.8d)
-            };
-            frame.AddVertexAt(0, new Point2d(minX - padding, minY - padding), 0, 0, 0);
-            frame.AddVertexAt(1, new Point2d(maxX + padding, minY - padding), 0, 0, 0);
-            frame.AddVertexAt(2, new Point2d(maxX + padding, maxY + padding), 0, 0, 0);
-            frame.AddVertexAt(3, new Point2d(minX - padding, maxY + padding), 0, 0, 0);
+                var owner = (BlockTableRecord)tr.GetObject(ownerId, OpenMode.ForWrite);
+                var frame = new Polyline(4)
+                {
+                    Closed = true,
+                    Color = color,
+                    LayerId = layerId,
+                    LineWeight = GetLineWeight(minSide),
+                    ConstantWidth = frameWidth
+                };
+                frame.AddVertexAt(0, new Point2d(minX - padding, minY - padding), 0, 0, 0);
+                frame.AddVertexAt(1, new Point2d(maxX + padding, minY - padding), 0, 0, 0);
+                frame.AddVertexAt(2, new Point2d(maxX + padding, maxY + padding), 0, 0, 0);
+                frame.AddVertexAt(3, new Point2d(minX - padding, maxY + padding), 0, 0, 0);
+                AddEntity(tr, owner, frame);
 
-            var label = new DBText
-            {
-                TextString = (i + 1).ToString(),
-                Color = color,
-                Height = textHeight,
-                HorizontalMode = TextHorizontalMode.TextCenter,
-                VerticalMode = TextVerticalMode.TextVerticalMid,
-                Position = new Point3d((minX + maxX) / 2d, (minY + maxY) / 2d, 0),
-                AlignmentPoint = new Point3d((minX + maxX) / 2d, (minY + maxY) / 2d, 0)
-            };
-
-            Add(frame);
-            Add(label);
+                var center = new Point3d((minX + maxX) / 2d, (minY + maxY) / 2d, 0);
+                AddBoldLabel(tr, owner, layerId, color, center, (i + 1).ToString(), textHeight);
+            }
         }
+
+        tr.Commit();
+        Regen();
     }
 
     public void Clear()
     {
-        if (_entities.Count == 0)
+        if (_entityIds.Count == 0)
         {
             return;
         }
 
-        var manager = TransientManager.CurrentTransientManager;
-        foreach (var entity in _entities)
+        try
         {
-            try
+            using var docLock = _document.LockDocument();
+            using var tr = _document.Database.TransactionManager.StartTransaction();
+            foreach (var id in _entityIds)
             {
-                manager.EraseTransient(entity, _viewportIds);
-            }
-            catch
-            {
+                if (id.IsNull || id.IsErased)
+                {
+                    continue;
+                }
+
+                if (tr.GetObject(id, OpenMode.ForWrite, false) is Entity entity && !entity.IsErased)
+                {
+                    entity.Erase();
+                }
             }
 
-            entity.Dispose();
+            tr.Commit();
+        }
+        catch
+        {
+        }
+        finally
+        {
+            _entityIds.Clear();
+            Regen();
+        }
+    }
+
+    private static ObjectId EnsureLayer(Transaction tr, Database db)
+    {
+        var table = (LayerTable)tr.GetObject(db.LayerTableId, OpenMode.ForRead);
+        if (table.Has(LayerName))
+        {
+            var existing = (LayerTableRecord)tr.GetObject(table[LayerName], OpenMode.ForWrite);
+            existing.IsOff = false;
+            existing.IsFrozen = false;
+            existing.IsLocked = false;
+            existing.IsPlottable = false;
+            existing.Color = Color.FromColorIndex(ColorMethod.ByAci, 1);
+            return existing.ObjectId;
         }
 
-        _entities.Clear();
+        table.UpgradeOpen();
+        var record = new LayerTableRecord
+        {
+            Name = LayerName,
+            Color = Color.FromColorIndex(ColorMethod.ByAci, 1),
+            IsPlottable = false
+        };
+        var id = table.Add(record);
+        tr.AddNewlyCreatedDBObject(record, true);
+        return id;
     }
 
-    public void Dispose()
+    private void AddEntity(Transaction tr, BlockTableRecord owner, Entity entity)
     {
-        Clear();
+        var id = owner.AppendEntity(entity);
+        tr.AddNewlyCreatedDBObject(entity, true);
+        _entityIds.Add(id);
     }
 
-    private void Add(Entity entity)
+    private static IEnumerable<ObjectId> GetOwnerIds(Transaction tr, Database db, PlotJob job, ObjectId currentSpaceId)
     {
-        TransientManager.CurrentTransientManager.AddTransient(
-            entity,
-            TransientDrawingMode.DirectShortTerm,
-            128,
-            _viewportIds);
-        _entities.Add(entity);
+        var ownerIds = new HashSet<ObjectId>();
+        if (!currentSpaceId.IsNull)
+        {
+            ownerIds.Add(currentSpaceId);
+        }
+
+        var targetId = GetJobOwnerId(tr, db, job);
+        if (!targetId.IsNull)
+        {
+            ownerIds.Add(targetId);
+        }
+
+        return ownerIds;
+    }
+
+    private static ObjectId GetJobOwnerId(Transaction tr, Database db, PlotJob job)
+    {
+        try
+        {
+            if (job.IsPaperSpace && !string.IsNullOrWhiteSpace(job.SpaceName))
+            {
+                var layouts = (DBDictionary)tr.GetObject(db.LayoutDictionaryId, OpenMode.ForRead);
+                if (layouts.Contains(job.SpaceName))
+                {
+                    var layout = (Layout)tr.GetObject(layouts.GetAt(job.SpaceName), OpenMode.ForRead);
+                    return layout.BlockTableRecordId;
+                }
+            }
+
+            var blockTable = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+            return blockTable[BlockTableRecord.ModelSpace];
+        }
+        catch
+        {
+            return ObjectId.Null;
+        }
+    }
+
+    private void AddBoldLabel(Transaction tr, BlockTableRecord owner, ObjectId layerId, Color color, Point3d center, string text, double height)
+    {
+        var stroke = Math.Max(height * 0.035, 2d);
+        var offsets = new[]
+        {
+            (0d, 0d),
+            (-stroke, 0d),
+            (stroke, 0d),
+            (0d, -stroke),
+            (0d, stroke),
+            (-stroke * 0.7, -stroke * 0.7),
+            (-stroke * 0.7, stroke * 0.7),
+            (stroke * 0.7, -stroke * 0.7),
+            (stroke * 0.7, stroke * 0.7)
+        };
+
+        foreach (var (dx, dy) in offsets)
+        {
+            var point = new Point3d(center.X + dx, center.Y + dy, center.Z);
+            var label = new DBText
+            {
+                TextString = text,
+                Color = color,
+                LayerId = layerId,
+                Height = height,
+                HorizontalMode = TextHorizontalMode.TextCenter,
+                VerticalMode = TextVerticalMode.TextVerticalMid,
+                Position = point,
+                AlignmentPoint = point
+            };
+            AddEntity(tr, owner, label);
+        }
+    }
+
+    private void Regen()
+    {
+        try
+        {
+            _document.Editor.UpdateScreen();
+            _document.Editor.Regen();
+        }
+        catch (Autodesk.AutoCAD.Runtime.Exception)
+        {
+        }
     }
 
     private static bool TryGetBounds(PlotJob job, out double minX, out double minY, out double maxX, out double maxY)
@@ -112,9 +239,14 @@ public sealed class TemporarySequenceOverlay : IDisposable
     {
         var minSide = Math.Min(width, height);
         var maxSide = Math.Max(width, height);
-        var heightBySmallSide = minSide * 0.16;
-        var heightByLongSide = maxSide * 0.035;
-        return Math.Max(Math.Min(heightBySmallSide, heightByLongSide), minSide * 0.08);
+        var heightBySmallSide = minSide * 0.55;
+        var heightByLongSide = maxSide * 0.16;
+        return Math.Max(Math.Min(heightBySmallSide, heightByLongSide), minSide * 0.35);
+    }
+
+    private static double GetFrameWidth(double minSide)
+    {
+        return Math.Min(Math.Max(minSide * 0.08, 20d), minSide * 0.18);
     }
 
     private static LineWeight GetLineWeight(double minSide)

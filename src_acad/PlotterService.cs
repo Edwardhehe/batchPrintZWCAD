@@ -584,7 +584,7 @@ public static class PlotterService
             progress.UpperPlotProgressRange = 100;
             progress.PlotProgressPos = 0;
             progress.OnBeginPlot();
-            progress.IsVisible = false;
+            progress.IsVisible = true;
 
             engine.BeginPlot(progress, null);
             plotStarted = true;

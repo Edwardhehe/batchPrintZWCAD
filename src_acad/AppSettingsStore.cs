@@ -11,7 +11,7 @@ public sealed class AppSettings
     public string LastStyleSheet { get; set; } = "";
     public bool RememberLastOutputDirectory { get; set; } = true;
     public string DefaultOutputSubfolder { get; set; } = "PDF";
-    public bool AutoScanCurrentDrawing { get; set; } = true;
+    public bool AutoScanCurrentDrawing { get; set; }
     public double PaperMatchToleranceMm { get; set; } = 3;
     public bool AllowStandardPaperNameFallback { get; set; } = true;
     public bool ShowPlotProgress { get; set; } = true;

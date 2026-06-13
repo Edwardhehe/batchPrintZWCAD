@@ -58,8 +58,9 @@ public static class CadTextUpdater
         }
 
         var coordinateMode = GetCoordinateMode(definition);
-        var titleRegion = ResolveLocalRegion(definition.TitleRegion, blockRef.BlockTransform, coordinateMode);
-        var numberRegion = ResolveLocalRegion(definition.DrawingNumberRegion, blockRef.BlockTransform, coordinateMode);
+        var referenceFrame = ResolveReferenceFrame(definition, blockRef);
+        var titleRegion = ResolveLocalRegion(definition.TitleRegion, blockRef.BlockTransform, coordinateMode, referenceFrame);
+        var numberRegion = ResolveLocalRegion(definition.DrawingNumberRegion, blockRef.BlockTransform, coordinateMode, referenceFrame);
 
         var changed = 0;
         if (newTitle != null)
@@ -109,8 +110,9 @@ public static class CadTextUpdater
         var coordinateMode = GetCoordinateMode(definition);
         var byOriginalText = matches.FirstOrDefault(blockRef =>
         {
-            var titleRegion = ResolveLocalRegion(definition.TitleRegion, blockRef.BlockTransform, coordinateMode);
-            var numberRegion = ResolveLocalRegion(definition.DrawingNumberRegion, blockRef.BlockTransform, coordinateMode);
+            var referenceFrame = ResolveReferenceFrame(definition, blockRef);
+            var titleRegion = ResolveLocalRegion(definition.TitleRegion, blockRef.BlockTransform, coordinateMode, referenceFrame);
+            var numberRegion = ResolveLocalRegion(definition.DrawingNumberRegion, blockRef.BlockTransform, coordinateMode, referenceFrame);
             return string.Equals(CadTextExtractor.ExtractRegionText(tr, blockRef, owner, numberRegion), job.CadDrawingNumber, StringComparison.Ordinal)
                 && string.Equals(CadTextExtractor.ExtractRegionText(tr, blockRef, owner, titleRegion), job.CadTitle, StringComparison.Ordinal);
         });
@@ -178,13 +180,23 @@ public static class CadTextUpdater
 
     private static RegionCoordinateMode GetCoordinateMode(TitleBlockDefinition definition)
     {
+        if (string.Equals(definition.CoordinateMode, "Frame", StringComparison.OrdinalIgnoreCase))
+        {
+            return RegionCoordinateMode.Frame;
+        }
+
         return string.Equals(definition.CoordinateMode, "World", StringComparison.OrdinalIgnoreCase)
             ? RegionCoordinateMode.World
             : RegionCoordinateMode.Local;
     }
 
-    private static LocalRectangle ResolveLocalRegion(LocalRectangle region, Matrix3d blockTransform, RegionCoordinateMode mode)
+    private static LocalRectangle ResolveLocalRegion(LocalRectangle region, Matrix3d blockTransform, RegionCoordinateMode mode, LocalRectangle referenceFrame)
     {
+        if (mode == RegionCoordinateMode.Frame)
+        {
+            return OffsetRegion(region, referenceFrame.MinX, referenceFrame.MinY);
+        }
+
         if (mode == RegionCoordinateMode.Local)
         {
             return region;
@@ -204,6 +216,42 @@ public static class CadTextUpdater
             points.Min(p => p.Y),
             points.Max(p => p.X),
             points.Max(p => p.Y));
+    }
+
+    private static LocalRectangle ResolveReferenceFrame(TitleBlockDefinition definition, BlockReference blockRef)
+    {
+        var blockFrame = TransformExtents(blockRef.GeometricExtents, blockRef.BlockTransform.Inverse());
+        if (HasArea(definition.PrintRegion))
+        {
+            if (HasMeaningfulOverlap(definition.PrintRegion, blockFrame))
+            {
+                return definition.PrintRegion;
+            }
+
+            return blockFrame;
+        }
+
+        return blockFrame;
+    }
+
+    private static bool HasMeaningfulOverlap(LocalRectangle a, LocalRectangle b)
+    {
+        var overlapWidth = Math.Max(0, Math.Min(a.MaxX, b.MaxX) - Math.Max(a.MinX, b.MinX));
+        var overlapHeight = Math.Max(0, Math.Min(a.MaxY, b.MaxY) - Math.Max(a.MinY, b.MinY));
+        var overlapArea = overlapWidth * overlapHeight;
+        if (overlapArea <= 0)
+        {
+            return false;
+        }
+
+        var smallerArea = Math.Min(RectangleArea(a), RectangleArea(b));
+        return smallerArea > 0 && overlapArea / smallerArea >= 0.25;
+    }
+
+    private static double RectangleArea(LocalRectangle rectangle)
+    {
+        return Math.Max(0, rectangle.MaxX - rectangle.MinX)
+            * Math.Max(0, rectangle.MaxY - rectangle.MinY);
     }
 
     private static bool IsInRegion(Entity entity, Matrix3d entityToLocal, LocalRectangle region, Point3d fallbackPoint)
@@ -241,6 +289,38 @@ public static class CadTextUpdater
         {
             return false;
         }
+    }
+
+    private static LocalRectangle TransformExtents(Extents3d extents, Matrix3d transform)
+    {
+        var points = new[]
+        {
+            new Point3d(extents.MinPoint.X, extents.MinPoint.Y, 0).TransformBy(transform),
+            new Point3d(extents.MinPoint.X, extents.MaxPoint.Y, 0).TransformBy(transform),
+            new Point3d(extents.MaxPoint.X, extents.MinPoint.Y, 0).TransformBy(transform),
+            new Point3d(extents.MaxPoint.X, extents.MaxPoint.Y, 0).TransformBy(transform)
+        };
+
+        return LocalRectangle.FromPoints(
+            points.Min(p => p.X),
+            points.Min(p => p.Y),
+            points.Max(p => p.X),
+            points.Max(p => p.Y));
+    }
+
+    private static LocalRectangle OffsetRegion(LocalRectangle region, double offsetX, double offsetY)
+    {
+        return LocalRectangle.FromPoints(
+            region.MinX + offsetX,
+            region.MinY + offsetY,
+            region.MaxX + offsetX,
+            region.MaxY + offsetY);
+    }
+
+    private static bool HasArea(LocalRectangle region)
+    {
+        return Math.Abs(region.MaxX - region.MinX) > 1e-6
+            && Math.Abs(region.MaxY - region.MinY) > 1e-6;
     }
 
     private static bool Intersects(LocalRectangle a, LocalRectangle b)
@@ -283,6 +363,7 @@ public static class CadTextUpdater
     private enum RegionCoordinateMode
     {
         Local,
-        World
+        World,
+        Frame
     }
 }

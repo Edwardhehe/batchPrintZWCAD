@@ -398,7 +398,7 @@ public static class PlotterService
             progress.UpperPlotProgressRange = 100;
             progress.PlotProgressPos = 0;
             progress.OnBeginPlot();
-            progress.IsVisible = settings.ShowPlotProgress;
+            progress.IsVisible = true;
 
             engine.BeginPlot(progress, null);
             engine.BeginDocument(plotInfo, documentName, null, 1, true, job.OutputPath);

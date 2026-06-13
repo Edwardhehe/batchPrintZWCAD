@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.Geometry;
@@ -73,11 +74,10 @@ public static class TitleBlockScanner
                 try
                 {
                     coordinateMode = GetCoordinateMode(definition);
-                    extents = definition.HasPrintRegion
-                        ? ResolveWorldExtents(definition.PrintRegion, blockRef.BlockTransform, coordinateMode)
-                        : blockRef.GeometricExtents;
-                    titleRegion = ResolveLocalRegion(definition.TitleRegion, blockRef.BlockTransform, coordinateMode);
-                    numberRegion = ResolveLocalRegion(definition.DrawingNumberRegion, blockRef.BlockTransform, coordinateMode);
+                    var referenceFrame = ResolveReferenceFrame(definition, blockRef);
+                    extents = ResolveWorldExtents(definition, blockRef, coordinateMode, referenceFrame);
+                    titleRegion = ResolveLocalRegion(definition.TitleRegion, blockRef.BlockTransform, coordinateMode, referenceFrame);
+                    numberRegion = ResolveLocalRegion(definition.DrawingNumberRegion, blockRef.BlockTransform, coordinateMode, referenceFrame);
                 }
                 catch
                 {
@@ -143,28 +143,115 @@ public static class TitleBlockScanner
         }
 
         tr.Commit();
-        return jobs
+        return DeduplicateOverlappingJobs(jobs)
             .OrderBy(x => x.DrawingNumber, NaturalStringComparer.Instance)
             .ThenBy(x => Path.GetFileName(x.SourceFile), StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
 
+    private static List<PlotJob> DeduplicateOverlappingJobs(List<PlotJob> jobs)
+    {
+        var result = new List<PlotJob>();
+        foreach (var job in jobs.OrderByDescending(ScoreJob))
+        {
+            var duplicateIndex = result.FindIndex(existing => GetOverlapRatio(existing, job) >= 0.9);
+            if (duplicateIndex < 0)
+            {
+                result.Add(job);
+                continue;
+            }
+
+            if (ScoreJob(job) > ScoreJob(result[duplicateIndex]))
+            {
+                result[duplicateIndex] = job;
+            }
+        }
+
+        return result;
+    }
+
+    private static int ScoreJob(PlotJob job)
+    {
+        var score = 0;
+        if (!string.IsNullOrWhiteSpace(job.Title) && !job.Title.Contains("未识别"))
+        {
+            score += 10;
+        }
+
+        if (!string.IsNullOrWhiteSpace(job.DrawingNumber) && !job.DrawingNumber.Contains("未识别"))
+        {
+            score += 10;
+        }
+
+        if (Regex.IsMatch(job.DrawingNumber ?? "", @"[A-Za-z].*\d"))
+        {
+            score += 10;
+        }
+
+        var combined = (job.Title ?? "") + " " + (job.DrawingNumber ?? "");
+        if (Regex.IsMatch(combined, "审\\s*定|审\\s*核|校\\s*对|设\\s*计|项目负责人|专业负责人"))
+        {
+            score -= 20;
+        }
+
+        return score;
+    }
+
+    private static double GetOverlapRatio(PlotJob a, PlotJob b)
+    {
+        var overlapWidth = Math.Max(0, Math.Min(a.MaxX, b.MaxX) - Math.Max(a.MinX, b.MinX));
+        var overlapHeight = Math.Max(0, Math.Min(a.MaxY, b.MaxY) - Math.Max(a.MinY, b.MinY));
+        var overlapArea = overlapWidth * overlapHeight;
+        if (overlapArea <= 0)
+        {
+            return 0;
+        }
+
+        var smallerArea = Math.Min(JobArea(a), JobArea(b));
+        return smallerArea <= 0 ? 0 : overlapArea / smallerArea;
+    }
+
+    private static double JobArea(PlotJob job)
+    {
+        return Math.Max(0, job.MaxX - job.MinX) * Math.Max(0, job.MaxY - job.MinY);
+    }
+
     private static RegionCoordinateMode GetCoordinateMode(TitleBlockDefinition definition)
     {
+        if (string.Equals(definition.CoordinateMode, "Frame", StringComparison.OrdinalIgnoreCase))
+        {
+            return RegionCoordinateMode.Frame;
+        }
+
         return string.Equals(definition.CoordinateMode, "World", StringComparison.OrdinalIgnoreCase)
             ? RegionCoordinateMode.World
             : RegionCoordinateMode.Local;
     }
 
-    private static Extents3d ResolveWorldExtents(LocalRectangle region, Matrix3d blockTransform, RegionCoordinateMode mode)
+    private static Extents3d ResolveWorldExtents(TitleBlockDefinition definition, BlockReference blockRef, RegionCoordinateMode mode, LocalRectangle referenceFrame)
     {
-        return mode == RegionCoordinateMode.World
-            ? ToExtents(region)
-            : TransformRegion(region, blockTransform);
+        if (mode == RegionCoordinateMode.World && definition.HasPrintRegion)
+        {
+            return ToExtents(definition.PrintRegion);
+        }
+
+        if (mode == RegionCoordinateMode.Frame)
+        {
+            return TransformRegion(referenceFrame, blockRef.BlockTransform);
+        }
+
+        return definition.HasPrintRegion
+            ? TransformRegion(definition.PrintRegion, blockRef.BlockTransform)
+            : blockRef.GeometricExtents;
     }
 
-    private static LocalRectangle ResolveLocalRegion(LocalRectangle region, Matrix3d blockTransform, RegionCoordinateMode mode)
+    private static LocalRectangle ResolveLocalRegion(LocalRectangle region, Matrix3d blockTransform, RegionCoordinateMode mode, LocalRectangle referenceFrame)
     {
+        if (mode == RegionCoordinateMode.Frame)
+        {
+            return OffsetRegion(region, referenceFrame.MinX, referenceFrame.MinY);
+        }
+
         if (mode == RegionCoordinateMode.Local)
         {
             return region;
@@ -184,6 +271,42 @@ public static class TitleBlockScanner
             points.Min(p => p.Y),
             points.Max(p => p.X),
             points.Max(p => p.Y));
+    }
+
+    private static LocalRectangle ResolveReferenceFrame(TitleBlockDefinition definition, BlockReference blockRef)
+    {
+        var blockFrame = TransformExtents(blockRef.GeometricExtents, blockRef.BlockTransform.Inverse());
+        if (HasArea(definition.PrintRegion))
+        {
+            if (HasMeaningfulOverlap(definition.PrintRegion, blockFrame))
+            {
+                return definition.PrintRegion;
+            }
+
+            return blockFrame;
+        }
+
+        return blockFrame;
+    }
+
+    private static bool HasMeaningfulOverlap(LocalRectangle a, LocalRectangle b)
+    {
+        var overlapWidth = Math.Max(0, Math.Min(a.MaxX, b.MaxX) - Math.Max(a.MinX, b.MinX));
+        var overlapHeight = Math.Max(0, Math.Min(a.MaxY, b.MaxY) - Math.Max(a.MinY, b.MinY));
+        var overlapArea = overlapWidth * overlapHeight;
+        if (overlapArea <= 0)
+        {
+            return false;
+        }
+
+        var smallerArea = Math.Min(RectangleArea(a), RectangleArea(b));
+        return smallerArea > 0 && overlapArea / smallerArea >= 0.25;
+    }
+
+    private static double RectangleArea(LocalRectangle rectangle)
+    {
+        return Math.Max(0, rectangle.MaxX - rectangle.MinX)
+            * Math.Max(0, rectangle.MaxY - rectangle.MinY);
     }
 
     private static bool Intersects(Extents3d a, Extents3d b)
@@ -214,6 +337,38 @@ public static class TitleBlockScanner
         var maxX = points.Max(p => p.X);
         var maxY = points.Max(p => p.Y);
         return new Extents3d(new Point3d(minX, minY, 0), new Point3d(maxX, maxY, 0));
+    }
+
+    private static LocalRectangle TransformExtents(Extents3d extents, Matrix3d transform)
+    {
+        var points = new[]
+        {
+            new Point3d(extents.MinPoint.X, extents.MinPoint.Y, 0).TransformBy(transform),
+            new Point3d(extents.MinPoint.X, extents.MaxPoint.Y, 0).TransformBy(transform),
+            new Point3d(extents.MaxPoint.X, extents.MinPoint.Y, 0).TransformBy(transform),
+            new Point3d(extents.MaxPoint.X, extents.MaxPoint.Y, 0).TransformBy(transform)
+        };
+
+        return LocalRectangle.FromPoints(
+            points.Min(p => p.X),
+            points.Min(p => p.Y),
+            points.Max(p => p.X),
+            points.Max(p => p.Y));
+    }
+
+    private static LocalRectangle OffsetRegion(LocalRectangle region, double offsetX, double offsetY)
+    {
+        return LocalRectangle.FromPoints(
+            region.MinX + offsetX,
+            region.MinY + offsetY,
+            region.MaxX + offsetX,
+            region.MaxY + offsetY);
+    }
+
+    private static bool HasArea(LocalRectangle region)
+    {
+        return Math.Abs(region.MaxX - region.MinX) > 1e-6
+            && Math.Abs(region.MaxY - region.MinY) > 1e-6;
     }
 
     private static PaperDetection ApplyFixedPaper(TitleBlockDefinition definition, PaperDetection detected)
@@ -261,6 +416,7 @@ public static class TitleBlockScanner
     private enum RegionCoordinateMode
     {
         Local,
-        World
+        World,
+        Frame
     }
 }
