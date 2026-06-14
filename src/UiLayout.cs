@@ -31,13 +31,17 @@ public static class UiLayout
         form.StartPosition = FormStartPosition.CenterScreen;
 
         var workingArea = Screen.FromPoint(Cursor.Position).WorkingArea;
-        var width = Math.Max(Scale(720), (int)Math.Round(workingArea.Width * 0.5));
-        var height = Math.Max(Scale(460), (int)Math.Round(workingArea.Height * 0.56));
-        width = Math.Min(width, workingArea.Width - Scale(80));
-        height = Math.Min(height, workingArea.Height - Scale(80));
+        var designWidth = Scale(980);
+        var designHeight = Scale(620);
+        var minimumWidth = Scale(720);
+        var minimumHeight = Scale(460);
+        var maxWidth = workingArea.Width - Scale(80);
+        var maxHeight = workingArea.Height - Scale(80);
+        var width = Math.Min(designWidth, Math.Max(minimumWidth, maxWidth));
+        var height = Math.Min(designHeight, Math.Max(minimumHeight, maxHeight));
 
         form.Size = new Size(width, height);
-        form.MinimumSize = new Size(Math.Min(Scale(640), workingArea.Width - Scale(40)), Math.Min(Scale(380), workingArea.Height - Scale(40)));
+        form.MinimumSize = new Size(Math.Min(minimumWidth, workingArea.Width - Scale(40)), Math.Min(minimumHeight, workingArea.Height - Scale(40)));
     }
 
     public static int Scale(int value)

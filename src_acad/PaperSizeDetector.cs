@@ -42,7 +42,8 @@ public static class PaperSizeDetector
 
     private static readonly double[] CommonScales =
     {
-        1d, 2d, 5d, 10d, 20d, 25d, 50d, 75d, 100d, 125d, 150d, 200d, 250d, 500d, 1000d
+        1d, 2d, 5d, 10d, 20d, 25d, 30d, 40d, 50d, 60d, 75d, 80d, 90d, 100d,
+        120d, 125d, 150d, 200d, 250d, 300d, 400d, 500d, 600d, 1000d
     };
 
     public static PaperDetection Detect(double width, double height)

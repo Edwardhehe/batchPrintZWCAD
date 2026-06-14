@@ -350,8 +350,8 @@ public static class PlotterService
 
             var validator = PlotSettingsValidator.Current;
             validator.SetPlotConfigurationName(plotSettings, deviceName, null);
-            validator.SetPlotPaperUnits(plotSettings, PlotPaperUnit.Millimeters);
             validator.RefreshLists(plotSettings);
+            TrySetPlotPaperUnits(validator, plotSettings, PlotPaperUnit.Millimeters);
 
             var media = SelectMedia(validator, plotSettings, job, settings);
             if (media == null)
@@ -532,6 +532,19 @@ public static class PlotterService
         var named = media.FirstOrDefault(x => x.IndexOf(basePaper, StringComparison.OrdinalIgnoreCase) >= 0)
             ?? media.FirstOrDefault(x => x.IndexOf(basePaper.Replace("A", "ISO_A"), StringComparison.OrdinalIgnoreCase) >= 0);
         return named == null ? null : new MediaSelection { Name = named, NeedsRotation = false };
+    }
+
+    private static bool TrySetPlotPaperUnits(PlotSettingsValidator validator, PlotSettings plotSettings, PlotPaperUnit units)
+    {
+        try
+        {
+            validator.SetPlotPaperUnits(plotSettings, units);
+            return true;
+        }
+        catch (ZwSoft.ZwCAD.Runtime.Exception ex) when (ex.ErrorStatus == ZwSoft.ZwCAD.Runtime.ErrorStatus.InvalidInput)
+        {
+            return false;
+        }
     }
 
     private static MediaSelection? FindByPhysicalSize(IEnumerable<string> mediaNames, double widthMm, double heightMm, double toleranceMm)

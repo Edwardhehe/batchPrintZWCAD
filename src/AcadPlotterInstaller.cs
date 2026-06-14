@@ -152,8 +152,9 @@ public static class AcadPlotterInstaller
 
     private static void InstallPc5(string source, string target, string targetPmp)
     {
-        var text = File.ReadAllText(source).Replace("{PMP_PATH}", targetPmp);
+        var encoding = System.Text.Encoding.GetEncoding(936);
+        var text = File.ReadAllText(source, encoding).Replace("{PMP_PATH}", targetPmp);
         Directory.CreateDirectory(Path.GetDirectoryName(target) ?? "");
-        File.WriteAllText(target, text, new System.Text.ASCIIEncoding());
+        File.WriteAllText(target, text, encoding);
     }
 }

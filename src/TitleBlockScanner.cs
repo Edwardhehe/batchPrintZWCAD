@@ -471,16 +471,56 @@ public static class TitleBlockScanner
             ? detected.PaperName
             : definition.PaperName;
 
+        if (ShouldPreferDetectedLongPaper(name, definition, detected))
+        {
+            return new PaperDetection
+            {
+                PaperName = detected.PaperName,
+                ScaleText = detected.ScaleText,
+                ScaleValue = detected.ScaleValue,
+                IsLong = detected.IsLong,
+                PaperWidthMm = detected.PaperWidthMm,
+                PaperHeightMm = detected.PaperHeightMm,
+                Note = $"Detected long paper overrides title block library default {name} {definition.PaperWidthMm:0.##} x {definition.PaperHeightMm:0.##} mm. {detected.Note}"
+            };
+        }
+
         return new PaperDetection
         {
             PaperName = name,
             ScaleText = detected.ScaleText,
             ScaleValue = detected.ScaleValue,
-            IsLong = name.EndsWith("+", StringComparison.OrdinalIgnoreCase),
+            IsLong = IsLongPaperName(name),
             PaperWidthMm = definition.PaperWidthMm,
             PaperHeightMm = definition.PaperHeightMm,
             Note = $"固定纸张来自图框库，输出纸张 {definition.PaperWidthMm:0.##} x {definition.PaperHeightMm:0.##} mm；比例按图框边界自动识别为 {detected.ScaleText}"
         };
+    }
+
+    private static bool ShouldPreferDetectedLongPaper(string libraryPaperName, TitleBlockDefinition definition, PaperDetection detected)
+    {
+        if (!detected.IsLong || detected.PaperWidthMm <= 0 || detected.PaperHeightMm <= 0)
+        {
+            return false;
+        }
+
+        if (!IsLongPaperName(libraryPaperName))
+        {
+            return true;
+        }
+
+        var directError = Math.Max(
+            Math.Abs(definition.PaperWidthMm - detected.PaperWidthMm),
+            Math.Abs(definition.PaperHeightMm - detected.PaperHeightMm));
+        var rotatedError = Math.Max(
+            Math.Abs(definition.PaperWidthMm - detected.PaperHeightMm),
+            Math.Abs(definition.PaperHeightMm - detected.PaperWidthMm));
+        return Math.Min(directError, rotatedError) > 10d;
+    }
+
+    private static bool IsLongPaperName(string paperName)
+    {
+        return paperName.EndsWith("+", StringComparison.OrdinalIgnoreCase);
     }
 
     private enum RegionCoordinateMode
