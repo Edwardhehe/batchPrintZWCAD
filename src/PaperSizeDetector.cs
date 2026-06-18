@@ -42,6 +42,7 @@ public static class PaperSizeDetector
 
     private static readonly double[] CommonScales =
     {
+        0.01d, 0.02d, 0.025d, 0.04d, 0.05d, 0.1d, 0.2d, 0.25d, 0.4d, 0.5d,
         1d, 2d, 5d, 10d, 20d, 25d, 30d, 40d, 50d, 60d, 75d, 80d, 90d, 100d,
         120d, 125d, 150d, 200d, 250d, 300d, 400d, 500d, 600d, 1000d
     };
@@ -209,6 +210,6 @@ public static class PaperSizeDetector
             return "1:" + scale.ToString("0.###", CultureInfo.InvariantCulture);
         }
 
-        return scale.ToString("0.###", CultureInfo.InvariantCulture) + ":1";
+        return (1d / scale).ToString("0.###", CultureInfo.InvariantCulture) + ":1";
     }
 }

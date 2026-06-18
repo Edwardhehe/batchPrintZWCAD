@@ -442,7 +442,8 @@ public static class PlotterService
 
             var layout = (Layout)tr.GetObject(owner.LayoutId, OpenMode.ForRead);
             firstLayout ??= layout;
-            if (string.Equals(owner.Name, job.SpaceName, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(owner.Name, job.SpaceName, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(layout.LayoutName, job.SpaceName, StringComparison.OrdinalIgnoreCase))
             {
                 return layout;
             }

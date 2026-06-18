@@ -53,12 +53,16 @@ function Test-CompatiblePackage([string]$registryName) {
         return $major -ge 25
     }
 
-    if ($packageName -match '2019-2020') {
+    if ($packageName -match '2019(?:-2020)?') {
         return $major -eq 23
     }
 
-    if ($packageName -match '2021-2024') {
+    if ($packageName -match '2021(?:-2024)?') {
         return $major -eq 24
+    }
+
+    if ($packageName -match '2025(?:Plus)?') {
+        return $major -ge 25
     }
 
     return $major -lt 25
