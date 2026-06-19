@@ -9,10 +9,10 @@
 
   <ItemGroup>
     <Compile Include="Program.cs" />
-    <Compile Include="..\..\shared\Models.cs" Link="Models.cs" />
-    <Compile Include="..\..\shared\PaperSizeDetector.cs" Link="PaperSizeDetector.cs" />
-    <Compile Include="..\..\shared\FileNameSanitizer.cs" Link="FileNameSanitizer.cs" />
-    <Compile Include="..\..\src\TitleBlockLibraryStore.cs" Link="TitleBlockLibraryStore.cs" />
+    <Compile Include="..\..\src\Common\Models.cs" Link="Models.cs" />
+    <Compile Include="..\..\src\Common\PaperSizeDetector.cs" Link="PaperSizeDetector.cs" />
+    <Compile Include="..\..\src\Common\FileNameSanitizer.cs" Link="FileNameSanitizer.cs" />
+    <Compile Include="..\..\src\ZWCAD\TitleBlockLibraryStore.cs" Link="TitleBlockLibraryStore.cs" />
   </ItemGroup>
 
   <ItemGroup>

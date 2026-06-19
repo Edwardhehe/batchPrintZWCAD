@@ -18,10 +18,10 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="shared\**\*.cs" />
-    <Compile Include="src_acad\**\*.cs" />
-    <EmbeddedResource Include="src_acad\**\*.resx" />
-    <None Remove="src_acad\**\*" />
+    <Compile Include="src\Common\**\*.cs" />
+    <Compile Include="src\AutoCAD\**\*.cs" />
+    <EmbeddedResource Include="src\AutoCAD\**\*.resx" />
+    <None Remove="src\AutoCAD\**\*" />
   </ItemGroup>
 
   <ItemGroup>

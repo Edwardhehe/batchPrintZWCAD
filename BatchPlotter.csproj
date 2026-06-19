@@ -15,7 +15,7 @@
 
   <ItemGroup>
     <Compile Remove="FileTools\**\*.cs" />
-    <Compile Remove="src_acad\**\*.cs" />
+    <Compile Remove="src\AutoCAD\**\*.cs" />
     <Compile Remove="local-artifacts\**\*.cs" />
     <Compile Remove="tests\**\*.cs" />
     <Compile Remove="tmp\**\*.cs" />
@@ -24,7 +24,7 @@
     <Compile Remove="_tmp*\**\*.cs" />
     <Compile Remove="._tmp*\**\*.cs" />
     <EmbeddedResource Remove="FileTools\**\*" />
-    <EmbeddedResource Remove="src_acad\**\*" />
+    <EmbeddedResource Remove="src\AutoCAD\**\*" />
     <EmbeddedResource Remove="local-artifacts\**\*" />
     <EmbeddedResource Remove="tests\**\*" />
     <EmbeddedResource Remove="tmp\**\*" />
@@ -33,7 +33,7 @@
     <EmbeddedResource Remove="_tmp*\**\*" />
     <EmbeddedResource Remove="._tmp*\**\*" />
     <None Remove="FileTools\**\*" />
-    <None Remove="src_acad\**\*" />
+    <None Remove="src\AutoCAD\**\*" />
     <None Remove="local-artifacts\**\*" />
     <None Remove="tests\**\*" />
     <None Remove="tmp\**\*" />

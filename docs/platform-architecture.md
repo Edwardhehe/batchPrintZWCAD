@@ -4,7 +4,7 @@ The plugin uses one shared application layer with thin platform-specific CAD int
 
 ## Shared code
 
-Files under `shared/` are compiled into both the ZWCAD and AutoCAD assemblies. They contain:
+Files under `src/Common/` are compiled into both the ZWCAD and AutoCAD assemblies. They contain:
 
 - application settings, models, file naming, logging, CSV and PDF UI;
 - paper-size detection and title-block management UI;
@@ -15,7 +15,7 @@ Shared files that reference CAD types use only small `ZWCAD` / `AUTOCAD` conditi
 
 ## Platform-specific code
 
-The following files remain under both `src/` and `src_acad/` because their runtime behavior or available APIs differ materially:
+The following files remain under both `src/ZWCAD/` and `src/AutoCAD/` because their runtime behavior or available APIs differ materially:
 
 | File | Reason to keep platform-specific |
 | --- | --- |
@@ -27,7 +27,7 @@ The following files remain under both `src/` and `src_acad/` because their runti
 | `PlotterService.cs` | Plot engines, media validation, document opening and Core Console support differ substantially. |
 | `TitleBlockLibraryStore.cs` | AutoCAD additionally imports/migrates the existing ZWCAD library. |
 
-`src_acad/ScanDiagnostics.cs` is AutoCAD-only diagnostic tooling.
+`src/AutoCAD/ScanDiagnostics.cs` is AutoCAD-only diagnostic tooling.
 
 ## Build constants
 
