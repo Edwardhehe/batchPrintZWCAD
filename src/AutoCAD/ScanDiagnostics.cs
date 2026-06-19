@@ -252,6 +252,255 @@ public sealed partial class BatchPlotCommands
         doc.Editor.WriteMessage("\nScan scope diagnostics written to: " + logPath);
     }
 
+    [CommandMethod("ZBP_DIAG_ATTRIBUTES", CommandFlags.Session)]
+    public void DiagnoseAttributes()
+    {
+        var doc = CadApp.DocumentManager.MdiActiveDocument;
+        if (doc == null)
+        {
+            return;
+        }
+
+        var lines = new List<string>
+        {
+            "Attribute diagnostics",
+            "Time: " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+            "Document: " + (string.IsNullOrWhiteSpace(doc.Database.Filename) ? doc.Name : doc.Database.Filename)
+        };
+
+        using (var tr = doc.Database.TransactionManager.StartTransaction())
+        {
+            var library = TitleBlockLibraryStore.Load();
+            var names = new HashSet<string>(library.Blocks.Select(x => x.BlockName), StringComparer.OrdinalIgnoreCase);
+            var blockTable = (BlockTable)tr.GetObject(doc.Database.BlockTableId, OpenMode.ForRead);
+            var dumped = 0;
+            foreach (ObjectId recordId in blockTable)
+            {
+                var owner = (BlockTableRecord)tr.GetObject(recordId, OpenMode.ForRead);
+                if (!owner.IsLayout)
+                {
+                    continue;
+                }
+
+                foreach (ObjectId id in owner)
+                {
+                    if (dumped >= 160 || tr.GetObject(id, OpenMode.ForRead, false) is not BlockReference blockRef)
+                    {
+                        continue;
+                    }
+
+                    var name = CadTextExtractor.GetBlockName(blockRef, tr);
+                    if (!names.Contains(name) && blockRef.AttributeCollection.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    lines.Add($"BREF\tname={name}\thandle={blockRef.Handle}\tattributes={blockRef.AttributeCollection.Count}");
+                    foreach (ObjectId attributeId in blockRef.AttributeCollection)
+                    {
+                        if (tr.GetObject(attributeId, OpenMode.ForRead, false) is not AttributeReference attribute)
+                        {
+                            continue;
+                        }
+
+                        lines.Add(
+                            $"ATTR\ttag={attribute.Tag}\ttext={attribute.TextString}\tposition={attribute.Position}\talignment={ReadPointProperty(attribute, "AlignmentPoint")}\tinvisible={attribute.Invisible}\tmtext={ReadProperty(attribute, "IsMTextAttribute")}\tmtextValue={ReadMTextAttribute(attribute)}");
+                    }
+
+                    var definition = (BlockTableRecord)tr.GetObject(blockRef.BlockTableRecord, OpenMode.ForRead);
+                    DumpNestedAttributes(tr, definition, Matrix3d.Identity, lines, new HashSet<ObjectId>(), 0);
+                    foreach (ObjectId definitionId in definition)
+                    {
+                        if (tr.GetObject(definitionId, OpenMode.ForRead, false) is AttributeDefinition attributeDefinition)
+                        {
+                            lines.Add(
+                                $"ATTDEF\ttag={attributeDefinition.Tag}\tdefault={attributeDefinition.TextString}\tposition={attributeDefinition.Position}\talignment={ReadPointProperty(attributeDefinition, "AlignmentPoint")}\tconstant={attributeDefinition.Constant}\tinvisible={attributeDefinition.Invisible}");
+                        }
+                    }
+
+                    if (dumped == 0 && string.Equals(name, "TKHF", StringComparison.OrdinalIgnoreCase))
+                    {
+                        DumpDefinitionText(tr, definition, Matrix3d.Identity, lines, new HashSet<ObjectId>(), 0);
+                    }
+
+                    dumped++;
+                }
+            }
+
+            tr.Commit();
+        }
+
+        var logDirectory = Path.Combine(TitleBlockLibraryStore.DefaultDirectory, "Logs");
+        Directory.CreateDirectory(logDirectory);
+        var logPath = Path.Combine(logDirectory, "Attributes_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".txt");
+        File.WriteAllLines(logPath, lines);
+        doc.Editor.WriteMessage("\nAttribute diagnostics written to: " + logPath);
+    }
+
+    private static void DumpNestedAttributes(
+        Transaction tr,
+        BlockTableRecord definition,
+        Matrix3d entityToRoot,
+        ICollection<string> lines,
+        ISet<ObjectId> visited,
+        int depth)
+    {
+        if (depth > 10 || !visited.Add(definition.ObjectId))
+        {
+            return;
+        }
+
+        foreach (ObjectId id in definition)
+        {
+            if (tr.GetObject(id, OpenMode.ForRead, false) is not BlockReference nested)
+            {
+                continue;
+            }
+
+            foreach (ObjectId attributeId in nested.AttributeCollection)
+            {
+                if (tr.GetObject(attributeId, OpenMode.ForRead, false) is not AttributeReference attribute)
+                {
+                    continue;
+                }
+
+                var local = attribute.Position.TransformBy(entityToRoot);
+                var alignment = ReadPointProperty(attribute, "AlignmentPoint");
+                lines.Add($"NESTED_ATTR\tdepth={depth}\tblock={CadTextExtractor.GetBlockName(nested, tr)}\ttag={attribute.Tag}\ttext={attribute.TextString}\trootPosition={local}\talignment={alignment}");
+            }
+
+            try
+            {
+                var nestedDefinition = (BlockTableRecord)tr.GetObject(nested.BlockTableRecord, OpenMode.ForRead);
+                DumpNestedAttributes(
+                    tr,
+                    nestedDefinition,
+                    nested.BlockTransform * entityToRoot,
+                    lines,
+                    visited,
+                    depth + 1);
+            }
+            catch
+            {
+            }
+        }
+
+        visited.Remove(definition.ObjectId);
+    }
+
+    private static void DumpDefinitionText(
+        Transaction tr,
+        BlockTableRecord definition,
+        Matrix3d entityToRoot,
+        ICollection<string> lines,
+        ISet<ObjectId> visited,
+        int depth)
+    {
+        if (depth > 12 || !visited.Add(definition.ObjectId))
+        {
+            return;
+        }
+
+        foreach (ObjectId id in definition)
+        {
+            if (tr.GetObject(id, OpenMode.ForRead, false) is not Entity entity)
+            {
+                continue;
+            }
+
+            string text = "";
+            Point3d point = Point3d.Origin;
+            string tag = "";
+            if (entity is AttributeDefinition attributeDefinition)
+            {
+                text = attributeDefinition.TextString;
+                point = attributeDefinition.Position;
+                tag = attributeDefinition.Tag;
+            }
+            else if (entity is DBText dbText)
+            {
+                text = dbText.TextString;
+                point = dbText.Position;
+            }
+            else if (entity is MText mText)
+            {
+                text = mText.Contents;
+                point = mText.Location;
+            }
+
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                lines.Add(
+                    $"DEF_TEXT\tdepth={depth}\ttype={entity.GetType().Name}\ttag={tag}\ttext={text}\trootPosition={point.TransformBy(entityToRoot)}");
+            }
+
+            if (entity is not BlockReference nested)
+            {
+                continue;
+            }
+
+            foreach (ObjectId attributeId in nested.AttributeCollection)
+            {
+                if (tr.GetObject(attributeId, OpenMode.ForRead, false) is AttributeReference attribute)
+                {
+                    lines.Add(
+                        $"DEF_ATTR\tdepth={depth}\tblock={CadTextExtractor.GetBlockName(nested, tr)}\ttag={attribute.Tag}\ttext={attribute.TextString}\trootPosition={attribute.Position.TransformBy(entityToRoot)}");
+                }
+            }
+
+            try
+            {
+                var nestedDefinition = (BlockTableRecord)tr.GetObject(nested.BlockTableRecord, OpenMode.ForRead);
+                DumpDefinitionText(
+                    tr,
+                    nestedDefinition,
+                    nested.BlockTransform * entityToRoot,
+                    lines,
+                    visited,
+                    depth + 1);
+            }
+            catch
+            {
+            }
+        }
+
+        visited.Remove(definition.ObjectId);
+    }
+
+    private static object ReadProperty(object value, string propertyName)
+    {
+        try
+        {
+            return value.GetType().GetProperty(propertyName)?.GetValue(value, null) ?? "";
+        }
+        catch
+        {
+            return "";
+        }
+    }
+
+    private static object ReadPointProperty(object value, string propertyName)
+    {
+        return ReadProperty(value, propertyName);
+    }
+
+    private static string ReadMTextAttribute(AttributeReference attribute)
+    {
+        try
+        {
+            var value = attribute.GetType().GetProperty("MTextAttribute")?.GetValue(attribute, null);
+            if (value is MText mText)
+            {
+                return mText.Contents;
+            }
+        }
+        catch
+        {
+        }
+
+        return "";
+    }
+
     private static bool IsFinite(Point3d point)
     {
         return !double.IsNaN(point.X) && !double.IsInfinity(point.X)

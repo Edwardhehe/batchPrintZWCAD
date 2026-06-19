@@ -50,7 +50,10 @@ public static class CadTextExtractor
 
             if (TryGetText(entity, out var text, out var worldPoint))
             {
-                AddText(values, text, worldPoint, TextSourcePriority.OwnerSpace);
+                var priority = entity is AttributeDefinition or AttributeReference
+                    ? TextSourcePriority.Attribute
+                    : TextSourcePriority.OwnerSpace;
+                AddText(values, text, worldPoint, priority);
             }
         }
 
@@ -97,7 +100,7 @@ public static class CadTextExtractor
             var local = candidate.Point.TransformBy(inverse);
             if (region.Contains(local.X, local.Y))
             {
-                values.Add(new TextCandidate(candidate.Text, local, TextSourcePriority.OwnerSpace));
+                values.Add(new TextCandidate(candidate.Text, local, candidate.Priority));
             }
         }
 
@@ -205,7 +208,7 @@ public static class CadTextExtractor
             if (tr.GetObject(attributeId, OpenMode.ForRead, false) is AttributeReference attribute
                 && TryGetText(attribute, out var attributeText, out var attributePoint))
             {
-                AddText(values, attributeText, attributePoint, TextSourcePriority.OwnerSpace);
+                AddText(values, attributeText, attributePoint, TextSourcePriority.Attribute);
             }
         }
 
@@ -265,14 +268,14 @@ public static class CadTextExtractor
 
         if (entity is AttributeDefinition attributeDefinition)
         {
-            text = attributeDefinition.TextString;
+            text = GetAttributeText(attributeDefinition);
             point = attributeDefinition.Position;
             return true;
         }
 
         if (entity is AttributeReference attributeReference)
         {
-            text = attributeReference.TextString;
+            text = GetAttributeText(attributeReference);
             point = attributeReference.Position;
             return true;
         }
@@ -309,7 +312,10 @@ public static class CadTextExtractor
                 continue;
             }
 
-            if (TryGetText(entity, out var text, out var entityPoint))
+            var isNonConstantAttributeDefinition = entity is AttributeDefinition attributeDefinition
+                && !attributeDefinition.Constant;
+            if (!isNonConstantAttributeDefinition
+                && TryGetText(entity, out var text, out var entityPoint))
             {
                 var localPoint = entityPoint.TransformBy(entityToRoot);
                 if (IsInRegion(entity, entityToRoot, region, localPoint))
@@ -334,7 +340,7 @@ public static class CadTextExtractor
                         var localPoint = attributePoint.TransformBy(entityToRoot);
                         if (IsInRegion(attribute, entityToRoot, region, localPoint))
                         {
-                            AddText(values, attributeText, localPoint, priority);
+                            AddText(values, attributeText, localPoint, TextSourcePriority.Attribute);
                         }
                     }
                 }
@@ -360,12 +366,87 @@ public static class CadTextExtractor
             return true;
         }
 
-        if (TryGetTransformedExtents(entity, entityToLocal, out var extents))
+        if (TryGetAlignmentPoint(entity, out var alignmentPoint))
         {
-            return HasMeaningfulOverlap(region, extents);
+            var localAlignment = alignmentPoint.TransformBy(entityToLocal);
+            if (region.Contains(localAlignment.X, localAlignment.Y))
+            {
+                return true;
+            }
+        }
+
+        if (TryGetTransformedExtents(entity, entityToLocal, out var extents)
+            && HasMeaningfulOverlap(region, extents))
+        {
+            return true;
+        }
+
+        return entity is DBText dbText
+            && TryGetEstimatedTextExtents(dbText, entityToLocal, out var estimated)
+            && HasMeaningfulOverlap(region, estimated);
+    }
+
+    private static string GetAttributeText(Entity attribute)
+    {
+        try
+        {
+            var isMTextProperty = attribute.GetType().GetProperty("IsMTextAttribute", BindingFlags.Instance | BindingFlags.Public);
+            if (isMTextProperty?.GetValue(attribute, null) is bool isMText && isMText)
+            {
+                var mTextProperty = attribute.GetType().GetProperty("MTextAttribute", BindingFlags.Instance | BindingFlags.Public);
+                if (mTextProperty?.GetValue(attribute, null) is MText mText)
+                {
+                    var value = GetMTextPlainText(mText);
+                    if (!string.IsNullOrWhiteSpace(value))
+                    {
+                        return value;
+                    }
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        return attribute switch
+        {
+            AttributeReference reference => reference.TextString,
+            AttributeDefinition definition => definition.TextString,
+            _ => ""
+        };
+    }
+
+    private static bool TryGetAlignmentPoint(Entity entity, out Point3d point)
+    {
+        point = Point3d.Origin;
+        if (entity is not DBText)
+        {
+            return false;
+        }
+
+        try
+        {
+            var property = entity.GetType().GetProperty("AlignmentPoint", BindingFlags.Instance | BindingFlags.Public)
+                ?? typeof(DBText).GetProperty("AlignmentPoint", BindingFlags.Instance | BindingFlags.Public);
+            if (property?.GetValue(entity, null) is Point3d alignment
+                && IsFinite(alignment))
+            {
+                point = alignment;
+                return true;
+            }
+        }
+        catch
+        {
         }
 
         return false;
+    }
+
+    private static bool IsFinite(Point3d point)
+    {
+        return !double.IsNaN(point.X) && !double.IsInfinity(point.X)
+            && !double.IsNaN(point.Y) && !double.IsInfinity(point.Y)
+            && !double.IsNaN(point.Z) && !double.IsInfinity(point.Z);
     }
 
     private static bool TryGetTransformedExtents(Entity entity, Matrix3d transform, out LocalRectangle rectangle)
@@ -380,6 +461,69 @@ public static class CadTextExtractor
                 new Point3d(extents.MinPoint.X, extents.MaxPoint.Y, 0).TransformBy(transform),
                 new Point3d(extents.MaxPoint.X, extents.MinPoint.Y, 0).TransformBy(transform),
                 new Point3d(extents.MaxPoint.X, extents.MaxPoint.Y, 0).TransformBy(transform)
+            };
+
+            rectangle = LocalRectangle.FromPoints(
+                points.Min(p => p.X),
+                points.Min(p => p.Y),
+                points.Max(p => p.X),
+                points.Max(p => p.Y));
+            return true;
+        }
+        catch
+        {
+        }
+
+        return entity is DBText dbText
+            && TryGetEstimatedTextExtents(dbText, transform, out rectangle);
+    }
+
+    private static bool TryGetEstimatedTextExtents(DBText text, Matrix3d transform, out LocalRectangle rectangle)
+    {
+        rectangle = new LocalRectangle();
+        try
+        {
+            var height = Math.Abs(text.Height);
+            if (height <= 1e-9 || !IsFinite(text.Position))
+            {
+                return false;
+            }
+
+            var content = CleanText(text.TextString);
+            var characterCount = Math.Max(1, content.Length);
+            var widthFactor = Math.Abs(text.WidthFactor);
+            if (widthFactor <= 1e-9)
+            {
+                widthFactor = 1d;
+            }
+
+            // AutoCAD can throw eInvalidExtents for otherwise visible DBText and
+            // AttributeReference objects. Estimate a conservative text box from
+            // their insertion/alignment points so a visually overlapping region
+            // still recognizes the text.
+            var halfWidth = Math.Max(height * 0.6d, characterCount * height * widthFactor * 0.45d);
+            var halfHeight = height * 0.9d;
+            var center = text.Position;
+            if (TryGetAlignmentPoint(text, out var alignment)
+                && alignment.DistanceTo(text.Position) > 1e-9)
+            {
+                center = new Point3d(
+                    (text.Position.X + alignment.X) / 2d,
+                    (text.Position.Y + alignment.Y) / 2d,
+                    (text.Position.Z + alignment.Z) / 2d);
+                halfWidth = Math.Max(halfWidth, text.Position.DistanceTo(alignment) / 2d + height * 0.25d);
+            }
+
+            var cos = Math.Cos(text.Rotation);
+            var sin = Math.Sin(text.Rotation);
+            var xAxis = new Vector3d(cos, sin, 0);
+            var yAxis = new Vector3d(-sin, cos, 0);
+            var points = new[]
+            {
+                (center - xAxis * halfWidth - yAxis * halfHeight).TransformBy(transform),
+                (center - xAxis * halfWidth + yAxis * halfHeight).TransformBy(transform),
+                (center + xAxis * halfWidth - yAxis * halfHeight).TransformBy(transform),
+                (center + xAxis * halfWidth + yAxis * halfHeight).TransformBy(transform)
             };
 
             rectangle = LocalRectangle.FromPoints(
