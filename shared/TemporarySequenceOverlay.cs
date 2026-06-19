@@ -1,10 +1,20 @@
 using System;
 using System.Collections.Generic;
+#if AUTOCAD
+using Autodesk.AutoCAD.ApplicationServices;
+using Autodesk.AutoCAD.Colors;
+using Autodesk.AutoCAD.DatabaseServices;
+using Autodesk.AutoCAD.EditorInput;
+using Autodesk.AutoCAD.Geometry;
+using CadRuntimeException = Autodesk.AutoCAD.Runtime.Exception;
+#else
 using ZwSoft.ZwCAD.ApplicationServices;
 using ZwSoft.ZwCAD.Colors;
 using ZwSoft.ZwCAD.DatabaseServices;
 using ZwSoft.ZwCAD.EditorInput;
 using ZwSoft.ZwCAD.Geometry;
+using CadRuntimeException = ZwSoft.ZwCAD.Runtime.Exception;
+#endif
 
 namespace ZwcadBatchPlot;
 
@@ -206,7 +216,7 @@ public sealed class TemporarySequenceOverlay
             _document.Editor.UpdateScreen();
             _document.Editor.Regen();
         }
-        catch (ZwSoft.ZwCAD.Runtime.Exception)
+        catch (CadRuntimeException)
         {
         }
     }

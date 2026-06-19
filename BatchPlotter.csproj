@@ -8,6 +8,7 @@
     <Version>1.5.3</Version>
     <AssemblyVersion>1.5.3.0</AssemblyVersion>
     <FileVersion>1.5.3.0</FileVersion>
+    <DefineConstants>$(DefineConstants);ZWCAD</DefineConstants>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <OutputPath>bin\</OutputPath>
   </PropertyGroup>

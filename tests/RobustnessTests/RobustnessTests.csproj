@@ -9,9 +9,9 @@
 
   <ItemGroup>
     <Compile Include="Program.cs" />
-    <Compile Include="..\..\src\Models.cs" Link="Models.cs" />
-    <Compile Include="..\..\src\PaperSizeDetector.cs" Link="PaperSizeDetector.cs" />
-    <Compile Include="..\..\src\FileNameSanitizer.cs" Link="FileNameSanitizer.cs" />
+    <Compile Include="..\..\shared\Models.cs" Link="Models.cs" />
+    <Compile Include="..\..\shared\PaperSizeDetector.cs" Link="PaperSizeDetector.cs" />
+    <Compile Include="..\..\shared\FileNameSanitizer.cs" Link="FileNameSanitizer.cs" />
     <Compile Include="..\..\src\TitleBlockLibraryStore.cs" Link="TitleBlockLibraryStore.cs" />
   </ItemGroup>
 

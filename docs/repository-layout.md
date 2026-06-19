@@ -4,8 +4,10 @@ This project keeps source code, shippable resources, and local build artifacts s
 
 ## Source and project files
 
-- `src/`: ZWCAD plugin source.
-- `src_acad/`: AutoCAD plugin source.
+- `shared/`: application and UI code compiled for both CAD platforms.
+- `src/`: ZWCAD-specific API integration.
+- `src_acad/`: AutoCAD-specific API integration and diagnostics.
+- `docs/platform-architecture.md`: boundary between shared and platform-specific code.
 - `*.csproj`: build targets for ZWCAD and AutoCAD variants.
 - `scripts/`: reusable project scripts, such as DLL builds.
 - `installer/` and `installer_acad/`: installer helper scripts and user-facing install notes.

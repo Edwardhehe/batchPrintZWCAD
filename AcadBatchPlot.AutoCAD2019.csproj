@@ -10,12 +10,14 @@
     <FileVersion>1.5.3.0</FileVersion>
     <AssemblyName>AcadBatchPlot</AssemblyName>
     <RootNamespace>ZwcadBatchPlot</RootNamespace>
+    <DefineConstants>$(DefineConstants);AUTOCAD</DefineConstants>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <OutputPath>bin-acad2019\</OutputPath>
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="shared\**\*.cs" />
     <Compile Include="src_acad\**\*.cs" />
     <EmbeddedResource Include="src_acad\**\*.resx" />
     <None Remove="src_acad\**\*" />

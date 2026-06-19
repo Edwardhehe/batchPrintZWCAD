@@ -8,7 +8,11 @@ namespace ZwcadBatchPlot;
 public static class BatchPlotLogger
 {
     public static string LogDirectory =>
+#if AUTOCAD
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "AcadBatchPlot", "Logs");
+#else
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ZwcadBatchPlot", "Logs");
+#endif
 
     public static string SaveRunLog(IEnumerable<string> lines)
     {

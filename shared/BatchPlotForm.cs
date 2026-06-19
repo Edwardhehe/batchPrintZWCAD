@@ -6,6 +6,7 @@ using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Windows.Forms;
+#if AUTOCAD
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.EditorInput;
@@ -14,6 +15,13 @@ using Autodesk.AutoCAD.Geometry;
 using CadApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
 #else
 using CadApp = Autodesk.AutoCAD.ApplicationServices.Application;
+#endif
+#else
+using ZwSoft.ZwCAD.ApplicationServices;
+using ZwSoft.ZwCAD.DatabaseServices;
+using ZwSoft.ZwCAD.EditorInput;
+using ZwSoft.ZwCAD.Geometry;
+using CadApp = ZwSoft.ZwCAD.ApplicationServices.Application;
 #endif
 
 namespace ZwcadBatchPlot;
@@ -49,7 +57,11 @@ public sealed class BatchPlotForm : Form
 
     private void InitializeComponents()
     {
+#if AUTOCAD
         Text = "批量打印 - AutoCAD";
+#else
+        Text = "批量打印 - ZWCAD";
+#endif
         UiLayout.ConfigureBatchPlotForm(this);
         var tips = new ToolTip
         {

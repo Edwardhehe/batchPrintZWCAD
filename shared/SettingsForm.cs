@@ -1,8 +1,13 @@
 using System;
 using System.Drawing;
 using System.Windows.Forms;
+#if AUTOCAD
+using Autodesk.AutoCAD.ApplicationServices;
+using Autodesk.AutoCAD.DatabaseServices;
+#else
 using ZwSoft.ZwCAD.ApplicationServices;
 using ZwSoft.ZwCAD.DatabaseServices;
+#endif
 
 namespace ZwcadBatchPlot;
 
