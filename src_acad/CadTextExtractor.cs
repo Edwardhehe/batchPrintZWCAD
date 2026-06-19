@@ -22,7 +22,13 @@ public static class CadTextExtractor
 
     public static string GetBlockName(BlockReference blockRef, Transaction tr)
     {
-        var btr = (BlockTableRecord)tr.GetObject(blockRef.BlockTableRecord, OpenMode.ForRead);
+        var definitionId = blockRef.BlockTableRecord;
+        if (blockRef.IsDynamicBlock && !blockRef.DynamicBlockTableRecord.IsNull)
+        {
+            definitionId = blockRef.DynamicBlockTableRecord;
+        }
+
+        var btr = (BlockTableRecord)tr.GetObject(definitionId, OpenMode.ForRead);
         return btr.Name;
     }
 

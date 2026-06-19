@@ -320,7 +320,9 @@ public static class DwgSplitService
                 continue;
             }
 
-            if (string.Equals(owner.Name, spaceName, StringComparison.OrdinalIgnoreCase))
+            var layout = (Layout)tr.GetObject(owner.LayoutId, OpenMode.ForRead);
+            if (string.Equals(owner.Name, spaceName, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(layout.LayoutName, spaceName, StringComparison.OrdinalIgnoreCase))
             {
                 return owner;
             }
@@ -352,8 +354,16 @@ public static class DwgSplitService
 
         var manager = LayoutManager.Current;
         var keepLayout = job.IsPaperSpace
-            ? layoutNames.FirstOrDefault(x => string.Equals(x.BlockRecordName, job.SpaceName, StringComparison.OrdinalIgnoreCase)).LayoutName
+            ? layoutNames.FirstOrDefault(x =>
+                string.Equals(x.BlockRecordName, job.SpaceName, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(x.LayoutName, job.SpaceName, StringComparison.OrdinalIgnoreCase)).LayoutName
             : "Model";
+        if (job.IsPaperSpace && string.IsNullOrWhiteSpace(keepLayout))
+        {
+            throw new InvalidOperationException(
+                $"拆图时未找到目标布局“{job.SpaceName}”，已停止删除其他布局。");
+        }
+
         if (!string.IsNullOrWhiteSpace(keepLayout))
         {
             try
@@ -373,7 +383,9 @@ public static class DwgSplitService
                 continue;
             }
 
-            if (job.IsPaperSpace && string.Equals(layout.BlockRecordName, job.SpaceName, StringComparison.OrdinalIgnoreCase))
+            if (job.IsPaperSpace
+                && (string.Equals(layout.BlockRecordName, job.SpaceName, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(layout.LayoutName, job.SpaceName, StringComparison.OrdinalIgnoreCase)))
             {
                 continue;
             }

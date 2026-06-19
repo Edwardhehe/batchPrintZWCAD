@@ -600,12 +600,14 @@ public sealed class BatchPlotForm : Form
             return;
         }
 
+        var filesToScan = new List<string>();
         foreach (var file in dialog.FileNames)
         {
             var fullPath = Path.GetFullPath(file);
             if (!_selectedDwgFiles.Any(x => string.Equals(x, fullPath, StringComparison.OrdinalIgnoreCase)))
             {
                 _selectedDwgFiles.Add(fullPath);
+                filesToScan.Add(fullPath);
             }
         }
 
@@ -613,7 +615,7 @@ public sealed class BatchPlotForm : Form
         var added = new List<PlotJob>();
         var errors = new List<string>();
 
-        foreach (var file in dialog.FileNames)
+        foreach (var file in filesToScan)
         {
             try
             {
@@ -1001,7 +1003,8 @@ public sealed class BatchPlotForm : Form
     private void ManageLibrary()
     {
         using var form = new TitleBlockLibraryManagerForm();
-        if (form.ShowDialog(this) == DialogResult.OK)
+        form.ShowDialog(this);
+        if (form.LibraryChanged)
         {
             ScanCurrentDrawing();
         }

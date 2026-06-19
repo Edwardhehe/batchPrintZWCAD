@@ -13,7 +13,7 @@ public static class BatchPlotLogger
     public static string SaveRunLog(IEnumerable<string> lines)
     {
         Directory.CreateDirectory(LogDirectory);
-        var path = Path.Combine(LogDirectory, "BatchPlot_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".log");
+        var path = Path.Combine(LogDirectory, "BatchPlot_" + DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".log");
         File.WriteAllLines(path, lines, Encoding.UTF8);
         return path;
     }

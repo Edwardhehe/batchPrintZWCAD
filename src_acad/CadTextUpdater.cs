@@ -89,7 +89,14 @@ public static class CadTextUpdater
         foreach (ObjectId recordId in blockTable)
         {
             var owner = (BlockTableRecord)tr.GetObject(recordId, OpenMode.ForRead);
-            if (owner.IsLayout && string.Equals(owner.Name, spaceName, StringComparison.OrdinalIgnoreCase))
+            if (!owner.IsLayout)
+            {
+                continue;
+            }
+
+            var layout = (Layout)tr.GetObject(owner.LayoutId, OpenMode.ForRead);
+            if (string.Equals(owner.Name, spaceName, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(layout.LayoutName, spaceName, StringComparison.OrdinalIgnoreCase))
             {
                 return owner;
             }
@@ -108,6 +115,9 @@ public static class CadTextUpdater
             .ToList();
 
         var coordinateMode = GetCoordinateMode(definition);
+        var byHandle = matches.FirstOrDefault(blockRef =>
+            !string.IsNullOrWhiteSpace(job.BlockHandle)
+            && string.Equals(blockRef.Handle.ToString(), job.BlockHandle, StringComparison.OrdinalIgnoreCase));
         var byOriginalText = matches.FirstOrDefault(blockRef =>
         {
             var referenceFrame = ResolveReferenceFrame(definition, blockRef);
@@ -117,7 +127,7 @@ public static class CadTextUpdater
                 && string.Equals(CadTextExtractor.ExtractRegionText(tr, blockRef, owner, titleRegion), job.CadTitle, StringComparison.Ordinal);
         });
 
-        return byOriginalText ?? matches.ElementAtOrDefault(job.MatchIndex) ?? matches.FirstOrDefault();
+        return byHandle ?? byOriginalText ?? (matches.Count == 1 ? matches[0] : null);
     }
 
     private static int UpdateRegionText(Transaction tr, BlockTableRecord owner, BlockReference blockRef, LocalRectangle region, string value)

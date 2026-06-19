@@ -43,6 +43,6 @@
       <ExcludeAssets>runtime</ExcludeAssets>
     </PackageReference>
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2535.41" />
-    <PackageReference Include="PDFsharp" Version="1.50.5147" />
+    <PackageReference Include="PDFsharp" Version="6.2.4" />
   </ItemGroup>
 </Project>

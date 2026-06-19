@@ -37,16 +37,28 @@ public static class AppSettingsStore
     {
         try
         {
-            if (!File.Exists(Path))
+            if (File.Exists(Path))
             {
-                return new AppSettings();
+                return LoadFrom(Path);
             }
 
-            var json = File.ReadAllText(Path);
-            return Normalize(JsonConvert.DeserializeObject<AppSettings>(json) ?? new AppSettings());
+            var backupPath = Path + ".bak";
+            return File.Exists(backupPath) ? LoadFrom(backupPath) : new AppSettings();
         }
         catch
         {
+            var backupPath = Path + ".bak";
+            if (File.Exists(backupPath))
+            {
+                try
+                {
+                    return LoadFrom(backupPath);
+                }
+                catch
+                {
+                }
+            }
+
             return new AppSettings();
         }
     }
@@ -55,7 +67,7 @@ public static class AppSettingsStore
     {
         Directory.CreateDirectory(TitleBlockLibraryStore.DefaultDirectory);
         var json = JsonConvert.SerializeObject(settings, Formatting.Indented);
-        File.WriteAllText(Path, json);
+        WriteAtomically(Path, json);
     }
 
     public static AppSettings Default()
@@ -114,5 +126,36 @@ public static class AppSettingsStore
         settings.PdfFileNameSeparator ??= "_";
 
         return settings;
+    }
+
+    private static void WriteAtomically(string path, string contents)
+    {
+        var tempPath = path + ".tmp";
+        var backupPath = path + ".bak";
+        File.WriteAllText(tempPath, contents);
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Replace(tempPath, path, backupPath, true);
+            }
+            else
+            {
+                File.Move(tempPath, path);
+            }
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+            {
+                File.Delete(tempPath);
+            }
+        }
+    }
+
+    private static AppSettings LoadFrom(string path)
+    {
+        var json = File.ReadAllText(path);
+        return Normalize(JsonConvert.DeserializeObject<AppSettings>(json) ?? new AppSettings());
     }
 }

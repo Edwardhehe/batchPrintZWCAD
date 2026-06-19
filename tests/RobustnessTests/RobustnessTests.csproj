@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="..\..\src\Models.cs" Link="Models.cs" />
+    <Compile Include="..\..\src\PaperSizeDetector.cs" Link="PaperSizeDetector.cs" />
+    <Compile Include="..\..\src\FileNameSanitizer.cs" Link="FileNameSanitizer.cs" />
+    <Compile Include="..\..\src\TitleBlockLibraryStore.cs" Link="TitleBlockLibraryStore.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+</Project>

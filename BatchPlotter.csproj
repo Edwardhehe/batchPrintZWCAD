@@ -16,6 +16,8 @@
     <Compile Remove="FileTools\**\*.cs" />
     <Compile Remove="src_acad\**\*.cs" />
     <Compile Remove="local-artifacts\**\*.cs" />
+    <Compile Remove="tests\**\*.cs" />
+    <Compile Remove="tmp\**\*.cs" />
     <Compile Remove="obj\**\*.cs" />
     <Compile Remove="obj*\**\*.cs" />
     <Compile Remove="_tmp*\**\*.cs" />
@@ -23,6 +25,8 @@
     <EmbeddedResource Remove="FileTools\**\*" />
     <EmbeddedResource Remove="src_acad\**\*" />
     <EmbeddedResource Remove="local-artifacts\**\*" />
+    <EmbeddedResource Remove="tests\**\*" />
+    <EmbeddedResource Remove="tmp\**\*" />
     <EmbeddedResource Remove="obj\**\*" />
     <EmbeddedResource Remove="obj*\**\*" />
     <EmbeddedResource Remove="_tmp*\**\*" />
@@ -30,6 +34,8 @@
     <None Remove="FileTools\**\*" />
     <None Remove="src_acad\**\*" />
     <None Remove="local-artifacts\**\*" />
+    <None Remove="tests\**\*" />
+    <None Remove="tmp\**\*" />
     <None Remove="obj\**\*" />
     <None Remove="obj*\**\*" />
     <None Remove="_tmp*\**\*" />

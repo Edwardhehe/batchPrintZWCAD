@@ -58,6 +58,7 @@ public sealed class PlotJob
     public string SpaceName { get; set; } = "";
     public bool IsPaperSpace { get; set; }
     public string BlockName { get; set; } = "";
+    public string BlockHandle { get; set; } = "";
     public int MatchIndex { get; set; }
     public string DrawingNumber { get; set; } = "";
     public string Title { get; set; } = "";

@@ -48,6 +48,7 @@ public static class TitleBlockScanner
     public static List<PlotJob> Scan(Database db, TitleBlockLibrary library, string sourceName, Extents3d? scanWindow, TitleBlockScanScope scope, string? currentSpaceName = null)
     {
         var jobs = new List<PlotJob>();
+        var warnings = new List<string>();
         if (string.IsNullOrWhiteSpace(sourceName))
         {
             sourceName = db.Filename;
@@ -81,7 +82,16 @@ public static class TitleBlockScanner
                     continue;
                 }
 
-                var blockName = CadTextExtractor.GetBlockName(blockRef, tr);
+                string blockName;
+                try
+                {
+                    blockName = CadTextExtractor.GetBlockName(blockRef, tr);
+                }
+                catch (Exception ex)
+                {
+                    warnings.Add($"布局={spaceName} 句柄={blockRef.Handle} 块名读取失败: {ex.Message}");
+                    continue;
+                }
                 var definition = library.Blocks.FirstOrDefault(x =>
                     string.Equals(x.BlockName, blockName, StringComparison.OrdinalIgnoreCase));
                 if (definition == null)
@@ -101,8 +111,9 @@ public static class TitleBlockScanner
                     titleRegion = ResolveLocalRegion(definition.TitleRegion, blockRef.BlockTransform, coordinateMode, referenceFrame);
                     numberRegion = ResolveLocalRegion(definition.DrawingNumberRegion, blockRef.BlockTransform, coordinateMode, referenceFrame);
                 }
-                catch
+                catch (Exception ex)
                 {
+                    warnings.Add($"布局={spaceName} 块={blockName} 句柄={blockRef.Handle} 坐标解析失败: {ex.Message}");
                     continue;
                 }
 
@@ -144,6 +155,7 @@ public static class TitleBlockScanner
                     SpaceName = spaceName,
                     IsPaperSpace = !layout.ModelType,
                     BlockName = blockName,
+                    BlockHandle = blockRef.Handle.ToString(),
                     MatchIndex = matchIndex++,
                     DrawingNumber = number,
                     Title = title,
@@ -165,6 +177,7 @@ public static class TitleBlockScanner
         }
 
         tr.Commit();
+        LogScanWarnings(sourceName, warnings);
         return DeduplicateOverlappingJobs(jobs)
             .OrderBy(x => x.DrawingNumber, NaturalStringComparer.Instance)
             .ThenBy(x => Path.GetFileName(x.SourceFile), StringComparer.OrdinalIgnoreCase)
@@ -528,5 +541,28 @@ public static class TitleBlockScanner
         Local,
         World,
         Frame
+    }
+
+    private static void LogScanWarnings(string sourceName, IReadOnlyCollection<string> warnings)
+    {
+        if (warnings.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            Directory.CreateDirectory(TitleBlockLibraryStore.DefaultDirectory);
+            var path = Path.Combine(TitleBlockLibraryStore.DefaultDirectory, "scan_debug.log");
+            var lines = new List<string>
+            {
+                $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [SCAN_WARN] 文件={sourceName} 跳过对象={warnings.Count}"
+            };
+            lines.AddRange(warnings.Select(x => "  " + x));
+            File.AppendAllLines(path, lines);
+        }
+        catch
+        {
+        }
     }
 }

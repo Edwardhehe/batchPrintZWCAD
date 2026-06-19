@@ -1,5 +1,6 @@
 using System;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Linq;
@@ -12,11 +13,16 @@ public sealed class TitleBlockLibraryManagerForm : Form
     private readonly BindingList<TitleBlockRow> _rows = new();
     private readonly DataGridView _grid = new();
     private readonly Label _status = new();
+    private bool _loading;
+    private bool _dirty;
+
+    public bool LibraryChanged { get; private set; }
 
     public TitleBlockLibraryManagerForm()
     {
         InitializeComponents();
         LoadRows();
+        FormClosing += OnFormClosing;
     }
 
     private void InitializeComponents()
@@ -56,8 +62,15 @@ public sealed class TitleBlockLibraryManagerForm : Form
         var openFolderButton = MakeButton("打开配置目录", 112);
         openFolderButton.Click += (_, _) =>
         {
-            Directory.CreateDirectory(TitleBlockLibraryStore.DefaultDirectory);
-            System.Diagnostics.Process.Start(TitleBlockLibraryStore.DefaultDirectory);
+            ExecuteSafely("打开配置目录", () =>
+            {
+                Directory.CreateDirectory(TitleBlockLibraryStore.DefaultDirectory);
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = TitleBlockLibraryStore.DefaultDirectory,
+                    UseShellExecute = true
+                });
+            });
         };
 
         var closeButton = MakeButton("关闭", 72);
@@ -74,6 +87,19 @@ public sealed class TitleBlockLibraryManagerForm : Form
         UiLayout.StyleGrid(_grid, Font);
         AddColumns();
         _grid.DataSource = _rows;
+        _grid.CellValueChanged += (_, _) => MarkDirty();
+        _grid.CurrentCellDirtyStateChanged += (_, _) =>
+        {
+            if (_grid.IsCurrentCellDirty)
+            {
+                _grid.CommitEdit(DataGridViewDataErrorContexts.Commit);
+            }
+        };
+        _grid.DataError += (_, e) =>
+        {
+            e.ThrowException = false;
+            MessageBox.Show("输入值格式不正确，请输入有效的数字。", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        };
 
         _status.Dock = DockStyle.Bottom;
         _status.Height = Math.Max(UiLayout.Scale(28), Font.Height + UiLayout.Scale(10));
@@ -110,53 +136,48 @@ public sealed class TitleBlockLibraryManagerForm : Form
 
     private void LoadRows()
     {
-        _rows.Clear();
-        foreach (var block in TitleBlockLibraryStore.Load().Blocks.OrderBy(x => x.BlockName, StringComparer.CurrentCultureIgnoreCase))
+        if (_dirty
+            && MessageBox.Show("当前有未保存的修改，确定重新读取并放弃这些修改吗？", Text, MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK)
         {
-            _rows.Add(TitleBlockRow.FromDefinition(block));
+            return;
         }
 
-        RefreshStatus();
+        ExecuteSafely("重新读取图框库", () =>
+        {
+            _loading = true;
+            try
+            {
+                _rows.Clear();
+                foreach (var block in TitleBlockLibraryStore.Load().Blocks.OrderBy(x => x.BlockName, StringComparer.CurrentCultureIgnoreCase))
+                {
+                    _rows.Add(TitleBlockRow.FromDefinition(block));
+                }
+
+                _dirty = false;
+                RefreshStatus();
+            }
+            finally
+            {
+                _loading = false;
+            }
+        });
     }
 
     private void SaveRows()
     {
-        _grid.EndEdit();
-        var invalid = _rows.FirstOrDefault(x => string.IsNullOrWhiteSpace(x.BlockName));
-        if (invalid != null)
+        if (!TryBuildLibrary(out var library))
         {
-            MessageBox.Show("块名不能为空。", "图框信息库管理", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 
-        var invalidPaper = _rows.FirstOrDefault(x =>
-            !string.IsNullOrWhiteSpace(x.PaperName)
-            && (x.PaperWidthMm <= 0 || x.PaperHeightMm <= 0));
-        if (invalidPaper != null)
+        ExecuteSafely("保存图框信息库", () =>
         {
-            MessageBox.Show($"图框 {invalidPaper.BlockName} 设置了图幅，但纸宽/纸高必须大于 0。", "图框信息库管理", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            return;
-        }
-
-        var duplicated = _rows
-            .GroupBy(x => x.BlockName.Trim(), StringComparer.OrdinalIgnoreCase)
-            .FirstOrDefault(g => g.Count() > 1);
-        if (duplicated != null)
-        {
-            MessageBox.Show("存在重复块名: " + duplicated.Key, "图框信息库管理", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            return;
-        }
-
-        var library = new TitleBlockLibrary();
-        foreach (var row in _rows)
-        {
-            library.Blocks.Add(row.ToDefinition());
-        }
-
-        TitleBlockLibraryStore.Save(library);
-        DialogResult = DialogResult.OK;
-        RefreshStatus();
-        MessageBox.Show("图框信息库已保存。", "图框信息库管理", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            TitleBlockLibraryStore.Save(library);
+            LibraryChanged = true;
+            _dirty = false;
+            RefreshStatus();
+            MessageBox.Show("图框信息库已保存。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+        });
     }
 
     private void DeleteSelected()
@@ -182,6 +203,7 @@ public sealed class TitleBlockLibraryManagerForm : Form
             _rows.Remove(row);
         }
 
+        _dirty = true;
         RefreshStatus();
     }
 
@@ -198,9 +220,20 @@ public sealed class TitleBlockLibraryManagerForm : Form
             return;
         }
 
-        var library = TitleBlockLibraryStore.Load(dialog.FileName);
-        TitleBlockLibraryStore.Save(library);
-        LoadRows();
+        if (MessageBox.Show("导入会覆盖当前图框信息库，确定继续吗？", Text, MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK)
+        {
+            return;
+        }
+
+        ExecuteSafely("导入图框库", () =>
+        {
+            var library = TitleBlockLibraryStore.Load(dialog.FileName);
+            TitleBlockLibraryStore.Save(library);
+            LibraryChanged = true;
+            _dirty = false;
+            LoadRows();
+            MessageBox.Show("图框库已导入。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+        });
     }
 
     private void ExportLibrary()
@@ -217,13 +250,121 @@ public sealed class TitleBlockLibraryManagerForm : Form
             return;
         }
 
-        TitleBlockLibraryStore.Save(TitleBlockLibraryStore.Load(), dialog.FileName);
-        MessageBox.Show("图框库已导出。", "图框信息库管理", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        if (!TryBuildLibrary(out var library))
+        {
+            return;
+        }
+
+        ExecuteSafely("导出图框库", () =>
+        {
+            TitleBlockLibraryStore.Save(library, dialog.FileName);
+            MessageBox.Show("图框库已导出。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+        });
     }
 
     private void RefreshStatus()
     {
-        _status.Text = $"共 {_rows.Count} 个图框定义。配置文件: {TitleBlockLibraryStore.DefaultPath}";
+        _status.Text = $"共 {_rows.Count} 个图框定义。{(_dirty ? "有未保存修改。" : "")} 配置文件: {TitleBlockLibraryStore.DefaultPath}";
+    }
+
+    private bool TryBuildLibrary(out TitleBlockLibrary library)
+    {
+        library = new TitleBlockLibrary();
+        _grid.EndEdit();
+
+        var invalid = _rows.FirstOrDefault(x => string.IsNullOrWhiteSpace(x.BlockName));
+        if (invalid != null)
+        {
+            MessageBox.Show("块名不能为空。", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return false;
+        }
+
+        var invalidNumber = _rows.FirstOrDefault(x => !x.HasFiniteNumbers());
+        if (invalidNumber != null)
+        {
+            MessageBox.Show($"图框 {invalidNumber.BlockName} 含有无效数字。", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return false;
+        }
+
+        var invalidPaper = _rows.FirstOrDefault(x =>
+            !string.IsNullOrWhiteSpace(x.PaperName)
+            && (x.PaperWidthMm <= 0 || x.PaperHeightMm <= 0));
+        if (invalidPaper != null)
+        {
+            MessageBox.Show($"图框 {invalidPaper.BlockName} 设置了图幅，但纸宽/纸高必须大于 0。", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return false;
+        }
+
+        var invalidRegion = _rows.FirstOrDefault(x =>
+            x.HasPrintRegion
+            && (Math.Abs(x.PrintMaxX - x.PrintMinX) <= 1e-6 || Math.Abs(x.PrintMaxY - x.PrintMinY) <= 1e-6));
+        if (invalidRegion != null)
+        {
+            MessageBox.Show($"图框 {invalidRegion.BlockName} 的打印边界宽度和高度必须大于 0。", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return false;
+        }
+
+        var duplicated = _rows
+            .GroupBy(x => x.BlockName.Trim(), StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault(g => g.Count() > 1);
+        if (duplicated != null)
+        {
+            MessageBox.Show("存在重复块名: " + duplicated.Key, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return false;
+        }
+
+        foreach (var row in _rows)
+        {
+            library.Blocks.Add(row.ToDefinition());
+        }
+
+        return true;
+    }
+
+    private void MarkDirty()
+    {
+        if (_loading)
+        {
+            return;
+        }
+
+        _dirty = true;
+        RefreshStatus();
+    }
+
+    private void OnFormClosing(object? sender, FormClosingEventArgs e)
+    {
+        if (!_dirty)
+        {
+            return;
+        }
+
+        var result = MessageBox.Show(
+            "当前有未保存的修改。是否先保存？",
+            Text,
+            MessageBoxButtons.YesNoCancel,
+            MessageBoxIcon.Question);
+        if (result == DialogResult.Cancel)
+        {
+            e.Cancel = true;
+        }
+        else if (result == DialogResult.Yes)
+        {
+            SaveRows();
+            e.Cancel = _dirty;
+        }
+    }
+
+    private void ExecuteSafely(string action, Action work)
+    {
+        try
+        {
+            work();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(action + "失败: " + ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
     }
 
     private sealed class TitleBlockRow
@@ -292,6 +433,29 @@ public sealed class TitleBlockLibraryManagerForm : Form
                 CreatedAt = CreatedAt == default ? DateTime.Now : CreatedAt,
                 UpdatedAt = DateTime.Now
             };
+        }
+
+        public bool HasFiniteNumbers()
+        {
+            return IsFinite(PaperWidthMm)
+                && IsFinite(PaperHeightMm)
+                && IsFinite(PrintMinX)
+                && IsFinite(PrintMinY)
+                && IsFinite(PrintMaxX)
+                && IsFinite(PrintMaxY)
+                && IsFinite(TitleMinX)
+                && IsFinite(TitleMinY)
+                && IsFinite(TitleMaxX)
+                && IsFinite(TitleMaxY)
+                && IsFinite(NumberMinX)
+                && IsFinite(NumberMinY)
+                && IsFinite(NumberMaxX)
+                && IsFinite(NumberMaxY);
+        }
+
+        private static bool IsFinite(double value)
+        {
+            return !double.IsNaN(value) && !double.IsInfinity(value);
         }
     }
 }

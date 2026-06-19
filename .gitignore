@@ -59,6 +59,8 @@ obj/
 obj-*/
 _tmp*/
 ._tmp*/
+tmp/
+.bin-fix*/
 release/
 dist/
 local-artifacts/

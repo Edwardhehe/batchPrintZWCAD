@@ -36,7 +36,8 @@ public static class FileNameSanitizer
         while ((avoidExistingFile && File.Exists(path)) || reservedPaths?.Contains(path) == true)
         {
             var suffix = "_" + index;
-            var uniqueName = TrimToLength(clean, Math.Max(1, DefaultMaxFileNameLength - suffix.Length)) + suffix;
+            var maxNameLength = GetMaxFileNameLength(directory);
+            var uniqueName = TrimToLength(clean, Math.Max(1, maxNameLength - suffix.Length)) + suffix;
             path = Path.Combine(directory, uniqueName + ".pdf");
             index++;
         }
@@ -47,13 +48,19 @@ public static class FileNameSanitizer
 
     private static string TrimFileNameForPath(string value, string directory)
     {
-        var maxNameLength = DefaultMaxFileNameLength;
-        if (!string.IsNullOrWhiteSpace(directory))
+        return TrimToLength(value, GetMaxFileNameLength(directory));
+    }
+
+    private static int GetMaxFileNameLength(string directory)
+    {
+        if (string.IsNullOrWhiteSpace(directory))
         {
-            maxNameLength = Math.Min(maxNameLength, Math.Max(20, LegacyMaxPathLength - directory.Length - ".pdf".Length - 1));
+            return DefaultMaxFileNameLength;
         }
 
-        return TrimToLength(value, maxNameLength);
+        return Math.Min(
+            DefaultMaxFileNameLength,
+            Math.Max(1, LegacyMaxPathLength - Path.GetFullPath(directory).Length - ".pdf".Length - 1));
     }
 
     private static string TrimToLength(string value, int maxLength)

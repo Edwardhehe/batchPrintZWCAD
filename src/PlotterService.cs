@@ -7,6 +7,7 @@ using ZwSoft.ZwCAD.ApplicationServices;
 using ZwSoft.ZwCAD.DatabaseServices;
 using ZwSoft.ZwCAD.Geometry;
 using ZwSoft.ZwCAD.PlottingServices;
+using PdfSharp.Pdf.IO;
 using CadApp = ZwSoft.ZwCAD.ApplicationServices.Application;
 
 namespace ZwcadBatchPlot;
@@ -37,37 +38,42 @@ public static class PlotterService
         var results = new List<PlotJobResult>();
         var oldActive = CadApp.DocumentManager.MdiActiveDocument;
 
-        foreach (var group in jobs.GroupBy(job => GetPlotGroupKey(job, currentDocument, settings)))
+        try
         {
-            var groupJobs = group.ToList();
-            try
+            foreach (var group in jobs.GroupBy(job => GetPlotGroupKey(job, currentDocument, settings)))
             {
-                if (group.Key == "__CURRENT__")
+                var groupJobs = group.ToList();
+                try
                 {
-                    PlotCurrentDocumentGroup(groupJobs, currentDocument, deviceName, styleSheet, settings, beforeJob, results);
-                    continue;
-                }
+                    if (group.Key == "__CURRENT__")
+                    {
+                        PlotCurrentDocumentGroup(groupJobs, currentDocument, deviceName, styleSheet, settings, beforeJob, results);
+                        continue;
+                    }
 
-                if (group.Key.StartsWith("__DB__:", StringComparison.OrdinalIgnoreCase))
-                {
-                    PlotSideDatabaseGroup(groupJobs, groupJobs[0].SourceFile, deviceName, styleSheet, settings, beforeJob, results);
-                    continue;
-                }
+                    if (group.Key.StartsWith("__DB__:", StringComparison.OrdinalIgnoreCase))
+                    {
+                        PlotSideDatabaseGroup(groupJobs, groupJobs[0].SourceFile, deviceName, styleSheet, settings, beforeJob, results);
+                        continue;
+                    }
 
-                PlotOpenedDocumentGroup(groupJobs, groupJobs[0].SourceFile, deviceName, styleSheet, settings, beforeJob, results);
-            }
-            catch (Exception ex)
-            {
-                foreach (var job in groupJobs)
+                    PlotOpenedDocumentGroup(groupJobs, groupJobs[0].SourceFile, deviceName, styleSheet, settings, beforeJob, results);
+                }
+                catch (Exception ex)
                 {
-                    results.Add(new PlotJobResult { Job = job, Error = ex });
+                    foreach (var job in groupJobs.Where(job => !results.Any(x => ReferenceEquals(x.Job, job))))
+                    {
+                        results.Add(new PlotJobResult { Job = job, Error = ex });
+                    }
                 }
             }
         }
-
-        if (oldActive != null && !oldActive.IsDisposed)
+        finally
         {
-            CadApp.DocumentManager.MdiActiveDocument = oldActive;
+            if (oldActive != null && !oldActive.IsDisposed)
+            {
+                CadApp.DocumentManager.MdiActiveDocument = oldActive;
+            }
         }
 
         return results;
@@ -130,6 +136,7 @@ public static class PlotterService
                 {
                     ActivateLayout(job);
                     RefreshJobWindowFromOpenedDocument(currentDocument.Database, job);
+                    PrepareEditorViewForPlot(currentDocument, job);
                     PlotDatabase(currentDocument.Database, currentDocument.Name, job, deviceName, styleSheet, settings, currentDocument);
                 }
 
@@ -167,6 +174,7 @@ public static class PlotterService
                     {
                         ActivateLayout(job);
                         RefreshJobWindowFromOpenedDocument(doc.Database, job);
+                        PrepareEditorViewForPlot(doc, job);
                         PlotDatabase(doc.Database, doc.Name, job, deviceName, styleSheet, settings, doc);
                     }
 
@@ -182,7 +190,7 @@ public static class PlotterService
         {
             if (shouldClose)
             {
-                doc.CloseAndDiscard();
+                TryCloseWithoutSave(doc);
             }
         }
     }
@@ -230,6 +238,7 @@ public static class PlotterService
             {
                 ActivateLayout(job);
                 RefreshJobWindowFromOpenedDocument(doc.Database, job);
+                PrepareEditorViewForPlot(doc, job);
                 PlotDatabase(doc.Database, doc.Name, job, deviceName, styleSheet, settings, doc);
             }
         }
@@ -242,7 +251,7 @@ public static class PlotterService
 
             if (shouldClose)
             {
-                doc.CloseAndDiscard();
+                TryCloseWithoutSave(doc);
             }
         }
     }
@@ -258,9 +267,9 @@ public static class PlotterService
         {
             LayoutManager.Current.CurrentLayout = job.SpaceName;
         }
-        catch
+        catch (Exception ex)
         {
-            // Some drawings expose model space/layout names differently; PlotDatabase still targets the layout by name.
+            throw new InvalidOperationException($"无法激活目标布局“{job.SpaceName}”，已停止打印以避免输出错误区域。", ex);
         }
     }
 
@@ -273,14 +282,17 @@ public static class PlotterService
             .ToList();
 
         var refreshed = candidates.FirstOrDefault(x =>
+                !string.IsNullOrWhiteSpace(job.BlockHandle)
+                && string.Equals(x.BlockHandle, job.BlockHandle, StringComparison.OrdinalIgnoreCase))
+            ?? candidates.FirstOrDefault(x =>
                 string.Equals(x.DrawingNumber, job.DrawingNumber, StringComparison.OrdinalIgnoreCase)
                 && string.Equals(x.Title, job.Title, StringComparison.OrdinalIgnoreCase))
-            ?? candidates.ElementAtOrDefault(job.MatchIndex)
-            ?? candidates.FirstOrDefault();
+            ?? candidates.FirstOrDefault(x => x.MatchIndex == job.MatchIndex);
 
         if (refreshed == null)
         {
-            return;
+            throw new InvalidOperationException(
+                $"重新打开图纸后未找到原图框。布局={job.SpaceName}，块={job.BlockName}，句柄={job.BlockHandle}。请重新扫描图纸后再打印。");
         }
 
         job.MinX = refreshed.MinX;
@@ -334,10 +346,7 @@ public static class PlotterService
 
     private static void PlotDatabase(Database db, string documentName, PlotJob job, string deviceName, string styleSheet, AppSettings settings, Document? plotDocument = null)
     {
-        if (PlotFactory.ProcessPlotState != ProcessPlotState.NotPlotting)
-        {
-            throw new InvalidOperationException("CAD 当前正在打印，请稍后再试。");
-        }
+        WaitForPlotIdle();
 
         var oldWorkingDatabase = HostApplicationServices.WorkingDatabase;
         HostApplicationServices.WorkingDatabase = db;
@@ -385,42 +394,12 @@ public static class PlotterService
             };
             plotInfoValidator.Validate(plotInfo);
 
-            Directory.CreateDirectory(Path.GetDirectoryName(job.OutputPath)!);
-
-            using var engine = PlotFactory.CreatePublishEngine();
-            using var progress = new PlotProgressDialog(false, 1, true);
-            progress.set_PlotMsgString(PlotMessageIndex.DialogTitle, "批量打印");
-            progress.set_PlotMsgString(PlotMessageIndex.CancelJobButtonMessage, "取消");
-            progress.set_PlotMsgString(PlotMessageIndex.CancelSheetButtonMessage, "取消当前图纸");
-            progress.set_PlotMsgString(PlotMessageIndex.SheetSetProgressCaption, "批量打印进度");
-            progress.set_PlotMsgString(PlotMessageIndex.SheetProgressCaption, job.DrawingNumber);
-            progress.LowerPlotProgressRange = 0;
-            progress.UpperPlotProgressRange = 100;
-            progress.PlotProgressPos = 0;
-            progress.OnBeginPlot();
-            progress.IsVisible = true;
-
-            engine.BeginPlot(progress, null);
-            engine.BeginDocument(plotInfo, documentName, null, 1, true, job.OutputPath);
-            progress.OnBeginSheet();
-            progress.LowerSheetProgressRange = 0;
-            progress.UpperSheetProgressRange = 100;
-            progress.SheetProgressPos = 0;
-
-            using var pageInfo = new PlotPageInfo();
-            engine.BeginPage(pageInfo, plotInfo, true, null);
-            engine.BeginGenerateGraphics(null);
-            engine.EndGenerateGraphics(null);
-            engine.EndPage(null);
-
-            progress.SheetProgressPos = 100;
-            progress.OnEndSheet();
-            engine.EndDocument(null);
-            progress.PlotProgressPos = 100;
-            progress.OnEndPlot();
-            engine.EndPlot(null);
+            PrepareOutputFile(job.OutputPath);
+            RunPlot(plotInfo, documentName, job.OutputPath, job.DrawingNumber);
 
             tr.Commit();
+            WaitForPlotIdle();
+            ValidatePdfOutput(job.OutputPath);
         }
         finally
         {
@@ -431,7 +410,7 @@ public static class PlotterService
     private static Layout FindLayoutForJob(Transaction tr, Database db, PlotJob job)
     {
         var blockTable = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
-        Layout? firstLayout = null;
+        var availableLayouts = new List<string>();
         foreach (ObjectId recordId in blockTable)
         {
             var owner = (BlockTableRecord)tr.GetObject(recordId, OpenMode.ForRead);
@@ -441,7 +420,7 @@ public static class PlotterService
             }
 
             var layout = (Layout)tr.GetObject(owner.LayoutId, OpenMode.ForRead);
-            firstLayout ??= layout;
+            availableLayouts.Add(layout.LayoutName);
             if (string.Equals(owner.Name, job.SpaceName, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(layout.LayoutName, job.SpaceName, StringComparison.OrdinalIgnoreCase))
             {
@@ -449,12 +428,8 @@ public static class PlotterService
             }
         }
 
-        if (firstLayout != null)
-        {
-            return firstLayout;
-        }
-
-        throw new InvalidOperationException("未找到可打印布局。");
+        throw new InvalidOperationException(
+            $"未找到目标布局“{job.SpaceName}”。可用布局: {string.Join(", ", availableLayouts)}。请重新扫描图纸。");
     }
 
     private static Extents2d GetPlotWindow(PlotJob job, Document? plotDocument)
@@ -499,6 +474,162 @@ public static class PlotterService
         matrix = Matrix3d.Displacement(view.Target - Point3d.Origin) * matrix;
         matrix = Matrix3d.Rotation(-view.ViewTwist, view.ViewDirection, view.Target) * matrix;
         return matrix.Inverse();
+    }
+
+    private static void PrepareEditorViewForPlot(Document doc, PlotJob job)
+    {
+        if (job.IsPaperSpace)
+        {
+            return;
+        }
+
+        var minX = Math.Min(job.MinX, job.MaxX);
+        var minY = Math.Min(job.MinY, job.MaxY);
+        var maxX = Math.Max(job.MinX, job.MaxX);
+        var maxY = Math.Max(job.MinY, job.MaxY);
+        var width = Math.Max(maxX - minX, 1);
+        var height = Math.Max(maxY - minY, 1);
+
+        using var view = doc.Editor.GetCurrentView();
+        view.ViewDirection = Vector3d.ZAxis;
+        view.ViewTwist = 0;
+        view.Target = new Point3d((minX + maxX) / 2d, (minY + maxY) / 2d, 0);
+        view.CenterPoint = Point2d.Origin;
+        view.Width = width * 1.05;
+        view.Height = height * 1.05;
+        doc.Editor.SetCurrentView(view);
+    }
+
+    private static void RunPlot(PlotInfo plotInfo, string documentName, string outputPath, string sheetName)
+    {
+        using var engine = PlotFactory.CreatePublishEngine();
+        using var progress = new PlotProgressDialog(false, 1, true);
+        var plotStarted = false;
+        var documentStarted = false;
+        var sheetStarted = false;
+        var pageStarted = false;
+        var graphicsStarted = false;
+
+        try
+        {
+            progress.set_PlotMsgString(PlotMessageIndex.DialogTitle, "批量打印");
+            progress.set_PlotMsgString(PlotMessageIndex.CancelJobButtonMessage, "取消");
+            progress.set_PlotMsgString(PlotMessageIndex.CancelSheetButtonMessage, "取消当前图纸");
+            progress.set_PlotMsgString(PlotMessageIndex.SheetSetProgressCaption, "批量打印进度");
+            progress.set_PlotMsgString(PlotMessageIndex.SheetProgressCaption, sheetName);
+            progress.LowerPlotProgressRange = 0;
+            progress.UpperPlotProgressRange = 100;
+            progress.PlotProgressPos = 0;
+            progress.OnBeginPlot();
+            progress.IsVisible = true;
+
+            engine.BeginPlot(progress, null);
+            plotStarted = true;
+            engine.BeginDocument(plotInfo, documentName, null, 1, true, outputPath);
+            documentStarted = true;
+            progress.OnBeginSheet();
+            sheetStarted = true;
+
+            using var pageInfo = new PlotPageInfo();
+            engine.BeginPage(pageInfo, plotInfo, true, null);
+            pageStarted = true;
+            engine.BeginGenerateGraphics(null);
+            graphicsStarted = true;
+            engine.EndGenerateGraphics(null);
+            graphicsStarted = false;
+            engine.EndPage(null);
+            pageStarted = false;
+
+            progress.OnEndSheet();
+            sheetStarted = false;
+            engine.EndDocument(null);
+            documentStarted = false;
+            progress.PlotProgressPos = 100;
+            progress.OnEndPlot();
+            engine.EndPlot(null);
+            plotStarted = false;
+        }
+        finally
+        {
+            if (graphicsStarted) TryPlotCleanup(() => engine.EndGenerateGraphics(null));
+            if (pageStarted) TryPlotCleanup(() => engine.EndPage(null));
+            if (sheetStarted) TryPlotCleanup(progress.OnEndSheet);
+            if (documentStarted) TryPlotCleanup(() => engine.EndDocument(null));
+            if (plotStarted)
+            {
+                TryPlotCleanup(progress.OnEndPlot);
+                TryPlotCleanup(() => engine.EndPlot(null));
+            }
+        }
+    }
+
+    private static void PrepareOutputFile(string outputPath)
+    {
+        var directory = Path.GetDirectoryName(outputPath);
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            throw new InvalidOperationException("PDF 输出路径缺少目录: " + outputPath);
+        }
+
+        Directory.CreateDirectory(directory);
+        if (File.Exists(outputPath))
+        {
+            File.Delete(outputPath);
+        }
+    }
+
+    private static void ValidatePdfOutput(string outputPath)
+    {
+        if (!File.Exists(outputPath) || new FileInfo(outputPath).Length == 0)
+        {
+            throw new IOException("打印引擎未生成 PDF 文件: " + outputPath);
+        }
+
+        using var pdf = PdfReader.Open(outputPath, PdfDocumentOpenMode.Import);
+        if (pdf.PageCount == 0 || !pdf.Pages.Cast<PdfSharp.Pdf.PdfPage>().Any(page => page.Contents.Elements.Count > 0))
+        {
+            throw new InvalidDataException("PDF 已生成但页面内容为空，已按打印失败处理: " + outputPath);
+        }
+    }
+
+    private static void WaitForPlotIdle()
+    {
+        const int timeoutMs = 10 * 60 * 1000;
+        var waited = 0;
+        while (PlotFactory.ProcessPlotState != ProcessPlotState.NotPlotting)
+        {
+            if (waited >= timeoutMs)
+            {
+                throw new InvalidOperationException("CAD 当前打印任务长时间未结束。");
+            }
+
+            System.Windows.Forms.Application.DoEvents();
+            System.Threading.Thread.Sleep(250);
+            waited += 250;
+        }
+    }
+
+    private static void TryPlotCleanup(Action action)
+    {
+        try
+        {
+            action();
+        }
+        catch
+        {
+        }
+    }
+
+    private static void TryCloseWithoutSave(Document doc)
+    {
+        try
+        {
+            doc.CloseAndDiscard();
+        }
+        catch
+        {
+            // Printing is already complete. Leave the document open rather than risk saving user data.
+        }
     }
 
     private static MediaSelection? SelectMedia(PlotSettingsValidator validator, PlotSettings plotSettings, PlotJob job, AppSettings settings)

@@ -15,23 +15,44 @@ public static class TitleBlockLibraryStore
     public static TitleBlockLibrary Load(string? path = null)
     {
         path ??= DefaultPath;
-        if (!File.Exists(path))
+        if (File.Exists(path))
         {
-            return new TitleBlockLibrary();
+            try
+            {
+                return Deserialize(path);
+            }
+            catch (Exception primaryError)
+            {
+                var backupPath = path + ".bak";
+                if (File.Exists(backupPath))
+                {
+                    try
+                    {
+                        return Deserialize(backupPath);
+                    }
+                    catch
+                    {
+                    }
+                }
+
+                throw new InvalidDataException("图框库文件损坏，且备份无法恢复: " + path, primaryError);
+            }
         }
 
-        var json = File.ReadAllText(path);
-        var loaded = JsonConvert.DeserializeObject<TitleBlockLibrary>(json) ?? new TitleBlockLibrary();
-        NormalizeFrameCoordinates(loaded);
-        return loaded;
+        var missingPrimaryBackup = path + ".bak";
+        return File.Exists(missingPrimaryBackup)
+            ? Deserialize(missingPrimaryBackup)
+            : new TitleBlockLibrary();
     }
 
     public static void Save(TitleBlockLibrary library, string? path = null)
     {
         path ??= DefaultPath;
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var directory = Path.GetDirectoryName(Path.GetFullPath(path))
+            ?? throw new InvalidOperationException("图框库路径无效: " + path);
+        Directory.CreateDirectory(directory);
         var json = JsonConvert.SerializeObject(library, Formatting.Indented);
-        File.WriteAllText(path, json);
+        WriteAtomically(path, json);
     }
 
     public static bool Upsert(TitleBlockDefinition definition, string? path = null)
@@ -92,5 +113,40 @@ public static class TitleBlockLibraryStore
     {
         return Math.Abs(region.MaxX - region.MinX) > 1e-6
             && Math.Abs(region.MaxY - region.MinY) > 1e-6;
+    }
+
+    private static TitleBlockLibrary Deserialize(string path)
+    {
+        var json = File.ReadAllText(path);
+        var loaded = JsonConvert.DeserializeObject<TitleBlockLibrary>(json) ?? new TitleBlockLibrary();
+        loaded.Blocks ??= new System.Collections.Generic.List<TitleBlockDefinition>();
+        NormalizeFrameCoordinates(loaded);
+        return loaded;
+    }
+
+    private static void WriteAtomically(string path, string contents)
+    {
+        var fullPath = Path.GetFullPath(path);
+        var tempPath = fullPath + ".tmp";
+        var backupPath = fullPath + ".bak";
+        File.WriteAllText(tempPath, contents);
+        try
+        {
+            if (File.Exists(fullPath))
+            {
+                File.Replace(tempPath, fullPath, backupPath, true);
+            }
+            else
+            {
+                File.Move(tempPath, fullPath);
+            }
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+            {
+                File.Delete(tempPath);
+            }
+        }
     }
 }

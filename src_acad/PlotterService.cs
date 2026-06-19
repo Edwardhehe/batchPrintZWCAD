@@ -7,6 +7,7 @@ using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.Geometry;
 using Autodesk.AutoCAD.PlottingServices;
+using PdfSharp.Pdf.IO;
 #if ACAD_CORE
 using CadApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
 #else
@@ -85,7 +86,7 @@ public static class PlotterService
                 }
                 catch (Exception ex)
                 {
-                    foreach (var job in groupJobs)
+                    foreach (var job in groupJobs.Where(job => !results.Any(x => ReferenceEquals(x.Job, job))))
                     {
                         results.Add(new PlotJobResult { Job = job, Error = ex });
                     }
@@ -236,6 +237,7 @@ public static class PlotterService
 
             tr.Commit();
             WaitForPlotIdle();
+            ValidatePdfOutput(job.OutputPath);
         }
         finally
         {
@@ -648,6 +650,7 @@ public static class PlotterService
         Layout? first = null;
         Layout? model = null;
         Layout? firstPaper = null;
+        var availableLayouts = new List<string>();
 
         foreach (ObjectId id in blockTable)
         {
@@ -658,6 +661,7 @@ public static class PlotterService
             }
 
             var layout = (Layout)tr.GetObject(record.LayoutId, OpenMode.ForRead);
+            availableLayouts.Add(layout.LayoutName);
             first ??= layout;
             if (layout.ModelType)
             {
@@ -673,6 +677,12 @@ public static class PlotterService
             {
                 return layout;
             }
+        }
+
+        if (!string.IsNullOrWhiteSpace(job.SpaceName))
+        {
+            throw new InvalidOperationException(
+                $"未找到目标布局“{job.SpaceName}”。可用布局: {string.Join(", ", availableLayouts)}。请重新扫描图纸。");
         }
 
         if (!job.IsPaperSpace && model != null)
@@ -697,8 +707,9 @@ public static class PlotterService
             LayoutManager.Current.CurrentLayout = layout.LayoutName;
             tr.Commit();
         }
-        catch
+        catch (Exception ex)
         {
+            throw new InvalidOperationException($"无法激活目标布局“{job.SpaceName}”，已停止打印以避免输出错误区域。", ex);
         }
     }
 
@@ -720,6 +731,12 @@ public static class PlotterService
                     .Where(x => string.Equals(x.SpaceName, job.SpaceName, StringComparison.OrdinalIgnoreCase)
                         && string.Equals(x.BlockName, job.BlockName, StringComparison.OrdinalIgnoreCase))
                     .FirstOrDefault(x =>
+                        !string.IsNullOrWhiteSpace(job.BlockHandle)
+                        && string.Equals(x.BlockHandle, job.BlockHandle, StringComparison.OrdinalIgnoreCase))
+                    ?? scanned.FirstOrDefault(x =>
+                        string.Equals(x.SpaceName, job.SpaceName, StringComparison.OrdinalIgnoreCase)
+                        && string.Equals(x.BlockName, job.BlockName, StringComparison.OrdinalIgnoreCase)
+                        &&
                         string.Equals(x.DrawingNumber, job.DrawingNumber, StringComparison.OrdinalIgnoreCase)
                         && string.Equals(x.Title, job.Title, StringComparison.OrdinalIgnoreCase))
                     ?? scanned.FirstOrDefault(x =>
@@ -729,7 +746,8 @@ public static class PlotterService
 
                 if (refreshed == null)
                 {
-                    continue;
+                    throw new InvalidOperationException(
+                        $"重新打开图纸后未找到原图框。布局={job.SpaceName}，块={job.BlockName}，句柄={job.BlockHandle}。请重新扫描图纸后再打印。");
                 }
 
                 job.MinX = refreshed.MinX;
@@ -744,13 +762,19 @@ public static class PlotterService
                 job.SizeText = refreshed.SizeText;
             }
         }
-        catch
+        catch (Exception ex)
         {
+            throw new InvalidOperationException("重新扫描已打开图纸失败，已停止打印以避免输出错误窗口。", ex);
         }
     }
 
     private static void PrepareEditorViewForPlot(Document doc, PlotJob job)
     {
+        if (job.IsPaperSpace)
+        {
+            return;
+        }
+
         try
         {
             var minX = Math.Min(job.MinX, job.MaxX);
@@ -771,8 +795,9 @@ public static class PlotterService
             view.Height = height * 1.05;
             doc.Editor.SetCurrentView(view);
         }
-        catch
+        catch (Exception ex)
         {
+            throw new InvalidOperationException("无法规范打印视图，已停止打印以避免输出空白或偏移页面。", ex);
         }
     }
 
@@ -847,9 +872,7 @@ public static class PlotterService
     private static void CloseWithoutSave(Document doc)
     {
 #if ACAD_CORE
-        var close = doc.GetType().GetMethod("CloseAndDiscard")
-            ?? doc.GetType().GetMethod("CloseAndSave")
-            ?? doc.GetType().GetMethod("Close");
+        var close = doc.GetType().GetMethod("CloseAndDiscard");
         if (close == null)
         {
             return;
@@ -928,6 +951,20 @@ public static class PlotterService
         }
         catch
         {
+        }
+    }
+
+    private static void ValidatePdfOutput(string outputPath)
+    {
+        if (!File.Exists(outputPath) || new FileInfo(outputPath).Length == 0)
+        {
+            throw new IOException("打印引擎未生成 PDF 文件: " + outputPath);
+        }
+
+        using var pdf = PdfReader.Open(outputPath, PdfDocumentOpenMode.Import);
+        if (pdf.PageCount == 0 || !pdf.Pages.Cast<PdfSharp.Pdf.PdfPage>().Any(page => page.Contents.Elements.Count > 0))
+        {
+            throw new InvalidDataException("PDF 已生成但页面内容为空，已按打印失败处理: " + outputPath);
         }
     }
 
