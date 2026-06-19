@@ -12,10 +12,12 @@
     <Compile Include="..\..\src\Common\Models.cs" Link="Models.cs" />
     <Compile Include="..\..\src\Common\PaperSizeDetector.cs" Link="PaperSizeDetector.cs" />
     <Compile Include="..\..\src\Common\FileNameSanitizer.cs" Link="FileNameSanitizer.cs" />
+    <Compile Include="..\..\src\Common\PdfDocumentService.cs" Link="PdfDocumentService.cs" />
     <Compile Include="..\..\src\ZWCAD\TitleBlockLibraryStore.cs" Link="TitleBlockLibraryStore.cs" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <PackageReference Include="PDFsharp" Version="6.2.4" />
   </ItemGroup>
 </Project>

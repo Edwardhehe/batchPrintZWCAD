@@ -34,6 +34,7 @@ public sealed class BatchPlotForm : Form
     private readonly TextBox _outputDirectory = new();
     private readonly ComboBox _deviceCombo = new();
     private readonly ComboBox _styleCombo = new();
+    private readonly CheckBox _mergePdfCheckBox = new();
     private readonly Button _printButton = new();
     private readonly Label _statusLabel = new();
     private readonly List<string> _logLines = new();
@@ -42,6 +43,7 @@ public sealed class BatchPlotForm : Form
     private readonly AppSettings _settings;
     private bool _sequenceOverlayFollowsCurrentJobs;
     private string _lastLogPath = "";
+    private string _mergedOutputPath = "";
     public bool HasPendingPrint { get; private set; }
 
     public BatchPlotForm(Document currentDocument)
@@ -236,6 +238,13 @@ public sealed class BatchPlotForm : Form
         _styleCombo.Margin = new Padding(0, UiLayout.Scale(3), 0, UiLayout.Scale(8));
         _styleCombo.DropDownStyle = ComboBoxStyle.DropDownList;
 
+        _mergePdfCheckBox.Text = "合并为单个 PDF";
+        _mergePdfCheckBox.AutoSize = true;
+        _mergePdfCheckBox.Checked = false;
+        _mergePdfCheckBox.TextAlign = ContentAlignment.MiddleLeft;
+        _mergePdfCheckBox.Margin = new Padding(UiLayout.Scale(12), UiLayout.Scale(7), UiLayout.Scale(12), 0);
+        SetTip(_mergePdfCheckBox, "勾选后选择最终文件名；打印过程只使用临时单页，完成后仅保留一个合并 PDF。");
+
         actionRow.Controls.Add(scanButton);
         actionRow.Controls.Add(scanWindowButton);
         actionRow.Controls.Add(addFilesButton);
@@ -274,6 +283,7 @@ public sealed class BatchPlotForm : Form
             TextAlign = ContentAlignment.MiddleLeft,
             Margin = new Padding(0, UiLayout.Scale(8), UiLayout.Scale(8), 0)
         });
+        pathRow.Controls.Add(_mergePdfCheckBox);
         pathRow.Controls.Add(currentFolderButton);
         pathRow.Controls.Add(currentPdfButton);
         pathRow.Controls.Add(specifiedFolderButton);
@@ -283,6 +293,7 @@ public sealed class BatchPlotForm : Form
         AddColumns();
         _grid.DataSource = _jobs;
         _grid.CellEndEdit += GridCellEndEdit;
+        _grid.CellContentClick += GridCellContentClick;
 
         _statusLabel.Dock = DockStyle.Bottom;
         _statusLabel.Height = Math.Max(UiLayout.Scale(28), Font.Height + UiLayout.Scale(10));
@@ -313,6 +324,14 @@ public sealed class BatchPlotForm : Form
 
     private void AddColumns()
     {
+        _grid.Columns.Add(new DataGridViewButtonColumn
+        {
+            Name = "PreviewPdf",
+            HeaderText = "预览",
+            Text = "预览",
+            UseColumnTextForButtonValue = true,
+            Width = UiLayout.Scale(64)
+        });
         _grid.Columns.Add(new DataGridViewCheckBoxColumn { DataPropertyName = nameof(PlotJob.Selected), HeaderText = "打印", Width = UiLayout.Scale(58) });
         _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.DrawingNumber), "图号", 160, readOnly: false));
         _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.Title), "图名", 240, readOnly: false));
@@ -320,18 +339,6 @@ public sealed class BatchPlotForm : Form
         _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.ScaleText), "比例", 82));
         _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.SizeText), "实际尺寸", 150));
         _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.PaperSizeText), "输出纸张", 150));
-        _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.BlockName), "块名", 150));
-        _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.SpaceName), "空间", 110));
-        _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.SourceFile), "文件", 320));
-        _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.OutputPath), "输出PDF", 360));
-        _grid.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            DataPropertyName = nameof(PlotJob.DetectionNote),
-            HeaderText = "识别说明",
-            AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-            MinimumWidth = UiLayout.Scale(220),
-            ReadOnly = true
-        });
 
         static DataGridViewTextBoxColumn MakeTextColumn(string propertyName, string header, int width, bool readOnly = true)
         {
@@ -1143,6 +1150,24 @@ public sealed class BatchPlotForm : Form
             return;
         }
 
+        _mergedOutputPath = "";
+        if (_mergePdfCheckBox.Checked)
+        {
+            using var mergeDialog = new SaveFileDialog
+            {
+                Filter = "PDF 文件 (*.pdf)|*.pdf",
+                InitialDirectory = Directory.Exists(_outputDirectory.Text) ? _outputDirectory.Text : "",
+                FileName = GetDefaultMergedFileName(),
+                Title = "保存合并 PDF"
+            };
+            if (mergeDialog.ShowDialog(this) != DialogResult.OK)
+            {
+                return;
+            }
+
+            _mergedOutputPath = mergeDialog.FileName;
+        }
+
         Directory.CreateDirectory(_outputDirectory.Text);
         SaveCurrentSettings();
         SortAndRefreshOutputPaths();
@@ -1161,6 +1186,10 @@ public sealed class BatchPlotForm : Form
         var selected = _jobs.Where(x => x.Selected).ToList();
         var device = _deviceCombo.SelectedItem?.ToString() ?? "";
         var style = _styleCombo.SelectedItem?.ToString() ?? "";
+        var mergePdf = !string.IsNullOrWhiteSpace(_mergedOutputPath);
+        var originalOutputPaths = selected.ToDictionary(job => job, job => job.OutputPath);
+        string? temporaryDirectory = null;
+        var mergedSuccessfully = false;
 
         ShowSequenceOverlayForPrint(selected);
         _printButton.Enabled = false;
@@ -1174,6 +1203,17 @@ public sealed class BatchPlotForm : Form
         try
         {
             var failed = new List<string>();
+            if (mergePdf)
+            {
+                temporaryDirectory = CreateTemporaryPdfDirectory("Merge");
+                for (var i = 0; i < selected.Count; i++)
+                {
+                    selected[i].OutputPath = Path.Combine(
+                        temporaryDirectory,
+                        (i + 1).ToString("D5") + ".pdf");
+                }
+            }
+
             var results = PlotterService.PlotMany(
                 selected,
                 device,
@@ -1206,16 +1246,36 @@ public sealed class BatchPlotForm : Form
             }
 
             var printed = results.Count(x => x.Succeeded);
+            if (mergePdf && failed.Count == 0 && printed == selected.Count)
+            {
+                try
+                {
+                    PdfDocumentService.Merge(selected.Select(job => job.OutputPath).ToList(), _mergedOutputPath);
+                    mergedSuccessfully = true;
+                    AppendLog("INFO", $"合并 PDF 成功 {_mergedOutputPath}");
+                }
+                catch (Exception ex)
+                {
+                    var message = "合并 PDF 失败: " + ex.Message;
+                    failed.Add(message);
+                    AppendLog("ERROR", ex.ToString());
+                }
+            }
+
             _lastLogPath = BatchPlotLogger.SaveRunLog(_logLines);
-            var summary = $"打印完成: 成功 {printed} 张，失败 {failed.Count} 张。\n日志: {_lastLogPath}";
+            var summary = mergePdf
+                ? mergedSuccessfully
+                    ? $"打印并合并完成: 共 {printed} 张。\n合并文件: {_mergedOutputPath}\n日志: {_lastLogPath}"
+                    : $"打印或合并失败，未生成新的合并 PDF。\n成功打印 {printed} 张，失败 {failed.Count} 项。\n日志: {_lastLogPath}"
+                : $"打印完成: 成功 {printed} 张，失败 {failed.Count} 张。\n日志: {_lastLogPath}";
             if (failed.Count > 0)
             {
                 summary += "\n\n失败项:\n" + string.Join("\n", failed);
             }
 
-            if (printed > 0)
+            if ((!mergePdf && printed > 0) || mergedSuccessfully)
             {
-                OpenOutputDirectoryAfterPrint();
+                OpenOutputDirectoryAfterPrint(mergePdf ? _mergedOutputPath : null);
             }
 
             MessageBox.Show(summary, "批量打印", MessageBoxButtons.OK, failed.Count > 0 ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
@@ -1226,6 +1286,16 @@ public sealed class BatchPlotForm : Form
         }
         finally
         {
+            foreach (var pair in originalOutputPaths)
+            {
+                pair.Key.OutputPath = pair.Value;
+            }
+
+            if (!string.IsNullOrWhiteSpace(temporaryDirectory))
+            {
+                TryDeleteDirectory(temporaryDirectory);
+            }
+
             ClearSequenceOverlay();
             if (wasVisible && !Visible)
             {
@@ -1238,9 +1308,11 @@ public sealed class BatchPlotForm : Form
         }
     }
 
-    private void OpenOutputDirectoryAfterPrint()
+    private void OpenOutputDirectoryAfterPrint(string? outputFile = null)
     {
-        var directory = _outputDirectory.Text.Trim();
+        var directory = !string.IsNullOrWhiteSpace(outputFile)
+            ? Path.GetDirectoryName(outputFile) ?? ""
+            : _outputDirectory.Text.Trim();
         if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
         {
             return;
@@ -1257,6 +1329,118 @@ public sealed class BatchPlotForm : Form
         catch (Exception ex)
         {
             AppendLog("WARN", "打开输出目录失败: " + ex.Message);
+        }
+    }
+
+    private void GridCellContentClick(object? sender, DataGridViewCellEventArgs e)
+    {
+        if (e.RowIndex < 0
+            || e.ColumnIndex < 0
+            || !string.Equals(_grid.Columns[e.ColumnIndex].Name, "PreviewPdf", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        if (_grid.Rows[e.RowIndex].DataBoundItem is PlotJob job)
+        {
+            PreviewJob(job);
+        }
+    }
+
+    private void PreviewJob(PlotJob job)
+    {
+        var device = _deviceCombo.SelectedItem?.ToString() ?? "";
+        var style = _styleCombo.SelectedItem?.ToString() ?? "";
+        if (string.IsNullOrWhiteSpace(device))
+        {
+            MessageBox.Show("请选择 PDF 打印机。", "PDF 预览", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        var temporaryDirectory = CreateTemporaryPdfDirectory("Preview");
+        var temporaryPdf = Path.Combine(temporaryDirectory, "preview.pdf");
+        var originalOutputPath = job.OutputPath;
+        var wasVisible = Visible;
+        try
+        {
+            job.OutputPath = temporaryPdf;
+            Hide();
+            System.Windows.Forms.Application.DoEvents();
+
+            var result = PlotterService.PlotMany(
+                new[] { job },
+                device,
+                style,
+                _currentDocument,
+                _settings,
+                _ => AppendLog("INFO", $"临时预览 {job.DrawingNumber}_{job.Title}"));
+            var error = result.FirstOrDefault()?.Error;
+            if (error != null)
+            {
+                throw error;
+            }
+
+            PdfDocumentService.Validate(temporaryPdf);
+            if (wasVisible)
+            {
+                Show();
+                Activate();
+            }
+
+            using var preview = new PdfPreviewForm(new[] { temporaryPdf });
+            preview.ShowDialog(this);
+        }
+        catch (Exception ex)
+        {
+            AppendLog("ERROR", "PDF 预览失败: " + ex);
+            MessageBox.Show("PDF 预览失败: " + ex.Message, "PDF 预览", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            job.OutputPath = originalOutputPath;
+            TryDeleteDirectory(temporaryDirectory);
+            if (wasVisible && !Visible)
+            {
+                Show();
+                Activate();
+            }
+        }
+    }
+
+    private string GetDefaultMergedFileName()
+    {
+        var source = _jobs
+            .Where(job => job.Selected)
+            .Select(job => job.SourceFile)
+            .FirstOrDefault(path => !string.IsNullOrWhiteSpace(path));
+        var baseName = string.IsNullOrWhiteSpace(source)
+            ? "合并图纸"
+            : Path.GetFileNameWithoutExtension(source);
+        return FileNameSanitizer.Clean(baseName) + "_合并.pdf";
+    }
+
+    private static string CreateTemporaryPdfDirectory(string purpose)
+    {
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            "ZwcadBatchPlot",
+            purpose,
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        return directory;
+    }
+
+    private static void TryDeleteDirectory(string? directory)
+    {
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory))
+            {
+                Directory.Delete(directory, true);
+            }
+        }
+        catch
+        {
         }
     }
 

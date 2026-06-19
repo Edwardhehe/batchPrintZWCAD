@@ -1,4 +1,7 @@
 using ZwcadBatchPlot;
+using PdfSharp.Drawing;
+using PdfSharp.Pdf;
+using PdfSharp.Pdf.IO;
 
 var failures = new List<string>();
 
@@ -10,6 +13,7 @@ CheckLongFileName();
 CheckLongFileNameCollision();
 CheckLibraryRecovery();
 CheckLibraryRecoveryWhenPrimaryIsMissing();
+CheckPdfMerge();
 
 if (failures.Count > 0)
 {
@@ -104,4 +108,42 @@ void CheckLibraryRecoveryWhenPrimaryIsMissing()
     }
 
     Directory.Delete(directory, true);
+}
+
+void CheckPdfMerge()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "ZbpRobustness", Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(directory);
+    var first = Path.Combine(directory, "first.pdf");
+    var second = Path.Combine(directory, "second.pdf");
+    var merged = Path.Combine(directory, "merged.pdf");
+
+    try
+    {
+        CreateTestPdf(first);
+        CreateTestPdf(second);
+        PdfDocumentService.Merge(new[] { first, second }, merged);
+
+        using var document = PdfReader.Open(merged, PdfDocumentOpenMode.Import);
+        if (document.PageCount != 2)
+        {
+            failures.Add($"PDF merge page count is incorrect: expected 2, actual {document.PageCount}.");
+        }
+    }
+    finally
+    {
+        Directory.Delete(directory, true);
+    }
+}
+
+void CreateTestPdf(string path)
+{
+    using var document = new PdfDocument();
+    var page = document.AddPage();
+    using (var graphics = XGraphics.FromPdfPage(page))
+    {
+        graphics.DrawLine(XPens.Black, 10, 10, 100, 100);
+    }
+
+    document.Save(path);
 }
