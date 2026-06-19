@@ -44,6 +44,7 @@ public sealed class BatchPlotForm : Form
     private bool _sequenceOverlayFollowsCurrentJobs;
     private string _lastLogPath = "";
     private string _mergedOutputPath = "";
+    private long _nextSortPriority;
     public bool HasPendingPrint { get; private set; }
 
     public BatchPlotForm(Document currentDocument)
@@ -294,6 +295,8 @@ public sealed class BatchPlotForm : Form
         _grid.DataSource = _jobs;
         _grid.CellEndEdit += GridCellEndEdit;
         _grid.CellContentClick += GridCellContentClick;
+        _grid.CellMouseDown += GridCellMouseDown;
+        _grid.ContextMenuStrip = CreateGridContextMenu();
 
         _statusLabel.Dock = DockStyle.Bottom;
         _statusLabel.Height = Math.Max(UiLayout.Scale(28), Font.Height + UiLayout.Scale(10));
@@ -333,6 +336,7 @@ public sealed class BatchPlotForm : Form
             Width = UiLayout.Scale(64)
         });
         _grid.Columns.Add(new DataGridViewCheckBoxColumn { DataPropertyName = nameof(PlotJob.Selected), HeaderText = "打印", Width = UiLayout.Scale(58) });
+        _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.OutputFileName), "PDF文件名", 220));
         _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.DrawingNumber), "图号", 160, readOnly: false));
         _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.Title), "图名", 240, readOnly: false));
         _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.PaperName), "图幅", 82));
@@ -487,10 +491,10 @@ public sealed class BatchPlotForm : Form
         panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
         var title = new Label { Text = "选择扫描范围", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
-        var layouts = new RadioButton { Text = "扫描全部布局", Dock = DockStyle.Fill, Checked = true };
+        var all = new RadioButton { Text = "扫描本图全部模型和布局", Dock = DockStyle.Fill, Checked = true };
+        var layouts = new RadioButton { Text = "扫描全部布局", Dock = DockStyle.Fill };
         var current = new RadioButton { Text = "扫描当前布局/模型", Dock = DockStyle.Fill };
         var model = new RadioButton { Text = "扫描模型空间", Dock = DockStyle.Fill };
-        var all = new RadioButton { Text = "扫描本图全部模型和布局", Dock = DockStyle.Fill };
 
         var buttons = new FlowLayoutPanel
         {
@@ -506,10 +510,10 @@ public sealed class BatchPlotForm : Form
         buttons.Controls.Add(cancel);
 
         panel.Controls.Add(title, 0, 0);
-        panel.Controls.Add(layouts, 0, 1);
-        panel.Controls.Add(current, 0, 2);
-        panel.Controls.Add(model, 0, 3);
-        panel.Controls.Add(all, 0, 4);
+        panel.Controls.Add(all, 0, 1);
+        panel.Controls.Add(layouts, 0, 2);
+        panel.Controls.Add(current, 0, 3);
+        panel.Controls.Add(model, 0, 4);
         panel.Controls.Add(buttons, 0, 5);
         form.Controls.Add(panel);
         form.AcceptButton = ok;
@@ -520,17 +524,22 @@ public sealed class BatchPlotForm : Form
             return null;
         }
 
+        if (all.Checked)
+        {
+            return TitleBlockScanScope.AllSpaces;
+        }
+
+        if (layouts.Checked)
+        {
+            return TitleBlockScanScope.PaperLayouts;
+        }
+
         if (current.Checked)
         {
             return TitleBlockScanScope.CurrentSpace;
         }
 
-        if (model.Checked)
-        {
-            return TitleBlockScanScope.ModelSpace;
-        }
-
-        return all.Checked ? TitleBlockScanScope.AllSpaces : TitleBlockScanScope.PaperLayouts;
+        return TitleBlockScanScope.ModelSpace;
     }
 
     private void ScanCurrentDrawing()
@@ -691,7 +700,8 @@ public sealed class BatchPlotForm : Form
     private void SortAndRefreshOutputPaths()
     {
         var sorted = _jobs
-            .OrderBy(x => x.DrawingNumber, NaturalStringComparer.Instance)
+            .OrderByDescending(x => x.SortPriority)
+            .ThenBy(x => x.DrawingNumber, NaturalStringComparer.Instance)
             .ThenBy(x => x.Title, StringComparer.CurrentCultureIgnoreCase)
             .ToList();
 
@@ -707,6 +717,51 @@ public sealed class BatchPlotForm : Form
         if (_sequenceOverlayFollowsCurrentJobs)
         {
             ShowSequenceOverlayForCurrentJobs();
+        }
+    }
+
+    private ContextMenuStrip CreateGridContextMenu()
+    {
+        var menu = new ContextMenuStrip();
+        var moveToFirst = new ToolStripMenuItem("移到第一个");
+        moveToFirst.Click += (_, _) => MoveCurrentJobToFirst();
+        menu.Items.Add(moveToFirst);
+        menu.Opening += (_, e) =>
+        {
+            moveToFirst.Enabled = _grid.CurrentRow?.DataBoundItem is PlotJob;
+            e.Cancel = !moveToFirst.Enabled;
+        };
+        return menu;
+    }
+
+    private void GridCellMouseDown(object? sender, DataGridViewCellMouseEventArgs e)
+    {
+        if (e.Button != MouseButtons.Right || e.RowIndex < 0)
+        {
+            return;
+        }
+
+        _grid.ClearSelection();
+        _grid.Rows[e.RowIndex].Selected = true;
+        _grid.CurrentCell = _grid.Rows[e.RowIndex].Cells[Math.Max(e.ColumnIndex, 0)];
+    }
+
+    private void MoveCurrentJobToFirst()
+    {
+        if (_grid.CurrentRow?.DataBoundItem is not PlotJob job)
+        {
+            return;
+        }
+
+        job.SortPriority = ++_nextSortPriority;
+        SortAndRefreshOutputPaths();
+        var row = _grid.Rows
+            .Cast<DataGridViewRow>()
+            .FirstOrDefault(x => ReferenceEquals(x.DataBoundItem, job));
+        if (row != null)
+        {
+            row.Selected = true;
+            _grid.CurrentCell = row.Cells[0];
         }
     }
 
@@ -1273,12 +1328,12 @@ public sealed class BatchPlotForm : Form
                 summary += "\n\n失败项:\n" + string.Join("\n", failed);
             }
 
+            MessageBox.Show(summary, "批量打印", MessageBoxButtons.OK, failed.Count > 0 ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
+
             if ((!mergePdf && printed > 0) || mergedSuccessfully)
             {
                 OpenOutputDirectoryAfterPrint(mergePdf ? _mergedOutputPath : null);
             }
-
-            MessageBox.Show(summary, "批量打印", MessageBoxButtons.OK, failed.Count > 0 ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
         }
         catch (Exception ex)
         {
@@ -1320,9 +1375,22 @@ public sealed class BatchPlotForm : Form
 
         try
         {
+            if (!string.IsNullOrWhiteSpace(outputFile) && File.Exists(outputFile))
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "explorer.exe",
+                    Arguments = "/select,\"" + Path.GetFullPath(outputFile) + "\"",
+                    UseShellExecute = true
+                });
+                return;
+            }
+
             Process.Start(new ProcessStartInfo
             {
-                FileName = directory,
+                FileName = "explorer.exe",
+                Arguments = "\"" + Path.GetFullPath(directory) + "\"",
+                WorkingDirectory = directory,
                 UseShellExecute = true
             });
         }
@@ -1353,52 +1421,25 @@ public sealed class BatchPlotForm : Form
         var style = _styleCombo.SelectedItem?.ToString() ?? "";
         if (string.IsNullOrWhiteSpace(device))
         {
-            MessageBox.Show("请选择 PDF 打印机。", "PDF 预览", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show("请选择打印机。", "打印预览", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 
-        var temporaryDirectory = CreateTemporaryPdfDirectory("Preview");
-        var temporaryPdf = Path.Combine(temporaryDirectory, "preview.pdf");
-        var originalOutputPath = job.OutputPath;
         var wasVisible = Visible;
         try
         {
-            job.OutputPath = temporaryPdf;
             Hide();
             System.Windows.Forms.Application.DoEvents();
-
-            var result = PlotterService.PlotMany(
-                new[] { job },
-                device,
-                style,
-                _currentDocument,
-                _settings,
-                _ => AppendLog("INFO", $"临时预览 {job.DrawingNumber}_{job.Title}"));
-            var error = result.FirstOrDefault()?.Error;
-            if (error != null)
-            {
-                throw error;
-            }
-
-            PdfDocumentService.Validate(temporaryPdf);
-            if (wasVisible)
-            {
-                Show();
-                Activate();
-            }
-
-            using var preview = new PdfPreviewForm(new[] { temporaryPdf });
-            preview.ShowDialog(this);
+            AppendLog("INFO", $"CAD 内部预览 {job.DrawingNumber}_{job.Title}");
+            PlotterService.Preview(job, device, style, _currentDocument);
         }
         catch (Exception ex)
         {
-            AppendLog("ERROR", "PDF 预览失败: " + ex);
-            MessageBox.Show("PDF 预览失败: " + ex.Message, "PDF 预览", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            AppendLog("ERROR", "打印预览失败: " + ex);
+            MessageBox.Show("打印预览失败: " + ex.Message, "打印预览", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
         finally
         {
-            job.OutputPath = originalOutputPath;
-            TryDeleteDirectory(temporaryDirectory);
             if (wasVisible && !Visible)
             {
                 Show();
@@ -1554,12 +1595,12 @@ public sealed class BatchPlotForm : Form
                 summary += "\n\n失败项:\n" + string.Join("\n", failed);
             }
 
+            MessageBox.Show(summary, "批量打印", MessageBoxButtons.OK, failed.Count > 0 ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
+
             if (printed > 0)
             {
                 OpenOutputDirectoryAfterPrint();
             }
-
-            MessageBox.Show(summary, "批量打印", MessageBoxButtons.OK, failed.Count > 0 ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
         }
         catch (Exception ex)
         {

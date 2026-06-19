@@ -79,7 +79,15 @@ public static class TitleBlockScanner
                 continue;
             }
 
-            var ownerTextCache = CadTextExtractor.BuildOwnerTextCache(tr, owner);
+            CadTextExtractor.OwnerTextCache? ownerTextCache = null;
+            try
+            {
+                ownerTextCache = CadTextExtractor.BuildOwnerTextCache(tr, owner);
+            }
+            catch (Exception ex)
+            {
+                warnings.Add($"布局={spaceName} 文字缓存建立失败，将继续逐个扫描图框: {ex.Message}");
+            }
 
             foreach (ObjectId id in owner)
             {
@@ -132,8 +140,19 @@ public static class TitleBlockScanner
                 var height = extents.MaxPoint.Y - extents.MinPoint.Y;
                 var detectedPaper = PaperSizeDetector.Detect(width, height);
                 var paper = ApplyFixedPaper(definition, detectedPaper);
-                var title = CadTextExtractor.ExtractRegionText(tr, blockRef, owner, titleRegion, ownerTextCache);
-                var number = CadTextExtractor.ExtractRegionText(tr, blockRef, owner, numberRegion, ownerTextCache);
+                string title;
+                string number;
+                try
+                {
+                    title = CadTextExtractor.ExtractRegionText(tr, blockRef, owner, titleRegion, ownerTextCache);
+                    number = CadTextExtractor.ExtractRegionText(tr, blockRef, owner, numberRegion, ownerTextCache);
+                }
+                catch (Exception ex)
+                {
+                    warnings.Add($"布局={spaceName} 块={blockName} 句柄={blockRef.Handle} 文字提取失败: {ex.Message}");
+                    title = "";
+                    number = "";
+                }
 
                 if (string.IsNullOrWhiteSpace(title))
                 {
@@ -228,8 +247,9 @@ public static class TitleBlockScanner
             case TitleBlockScanScope.CurrentSpace:
                 return IsCurrentSpace(layout, owner, currentSpaceName);
             case TitleBlockScanScope.AllSpaces:
-            default:
                 return true;
+            default:
+                return false;
         }
     }
 
@@ -383,15 +403,31 @@ public static class TitleBlockScanner
 
     private static LocalRectangle ResolveReferenceFrame(TitleBlockDefinition definition, BlockReference blockRef)
     {
-        var blockFrame = TransformExtents(blockRef.GeometricExtents, blockRef.BlockTransform.Inverse());
-        if (HasArea(definition.PrintRegion))
+        var hasSavedFrame = HasArea(definition.PrintRegion);
+        LocalRectangle blockFrame;
+        try
         {
-            if (HasMeaningfulOverlap(definition.PrintRegion, blockFrame))
+            blockFrame = TransformExtents(blockRef.GeometricExtents, blockRef.BlockTransform.Inverse());
+        }
+        catch
+        {
+            // AutoCAD can throw eInvalidExtents for valid block references whose
+            // graphics extents have not been generated. A manually selected print
+            // boundary is already stored in block-local coordinates and is the
+            // authoritative frame in this case.
+            if (hasSavedFrame)
             {
                 return definition.PrintRegion;
             }
 
-            return blockFrame;
+            throw;
+        }
+
+        if (hasSavedFrame)
+        {
+            return HasMeaningfulOverlap(definition.PrintRegion, blockFrame)
+                ? definition.PrintRegion
+                : blockFrame;
         }
 
         return blockFrame;

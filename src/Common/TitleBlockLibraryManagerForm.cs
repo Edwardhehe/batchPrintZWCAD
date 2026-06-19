@@ -205,6 +205,7 @@ public sealed class TitleBlockLibraryManagerForm : Form
 
         _dirty = true;
         RefreshStatus();
+        SaveRows();
     }
 
     private void ImportLibrary()

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Newtonsoft.Json;
@@ -14,6 +15,9 @@ public static class TitleBlockLibraryStore
 
     private static string ZwcadLibraryPath =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ZwcadBatchPlot", "TitleBlockLibrary.json");
+
+    private static string DeletedBlockNamesPath =>
+        Path.Combine(DefaultDirectory, "DeletedTitleBlockNames.json");
 
     public static TitleBlockLibrary Load(string? path = null)
     {
@@ -50,6 +54,17 @@ public static class TitleBlockLibraryStore
     public static void Save(TitleBlockLibrary library, string? path = null)
     {
         path ??= DefaultPath;
+        var isDefaultPath = string.Equals(Path.GetFullPath(path), Path.GetFullPath(DefaultPath), StringComparison.OrdinalIgnoreCase);
+        if (isDefaultPath)
+        {
+            UpdateDeletedBlockNames(library);
+        }
+
+        SaveDirect(library, path);
+    }
+
+    private static void SaveDirect(TitleBlockLibrary library, string path)
+    {
         var directory = Path.GetDirectoryName(Path.GetFullPath(path))
             ?? throw new InvalidOperationException("图框库路径无效: " + path);
         Directory.CreateDirectory(directory);
@@ -107,10 +122,12 @@ public static class TitleBlockLibraryStore
                 return library;
             }
 
+            var deletedNames = LoadDeletedBlockNames();
             var changed = false;
             foreach (var block in zwcadLibrary.Blocks)
             {
-                if (string.IsNullOrWhiteSpace(block.BlockName))
+                if (string.IsNullOrWhiteSpace(block.BlockName)
+                    || deletedNames.Contains(block.BlockName))
                 {
                     continue;
                 }
@@ -136,7 +153,7 @@ public static class TitleBlockLibraryStore
             {
                 try
                 {
-                    Save(library);
+                    SaveDirect(library, DefaultPath);
                 }
                 catch
                 {
@@ -214,6 +231,73 @@ public static class TitleBlockLibraryStore
             {
                 File.Delete(tempPath);
             }
+        }
+    }
+
+    private static HashSet<string> LoadDeletedBlockNames()
+    {
+        try
+        {
+            if (!File.Exists(DeletedBlockNamesPath))
+            {
+                return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            var names = JsonConvert.DeserializeObject<List<string>>(File.ReadAllText(DeletedBlockNamesPath))
+                ?? new List<string>();
+            return new HashSet<string>(
+                names.Where(name => !string.IsNullOrWhiteSpace(name)),
+                StringComparer.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    private static void UpdateDeletedBlockNames(TitleBlockLibrary library)
+    {
+        if (!File.Exists(ZwcadLibraryPath))
+        {
+            return;
+        }
+
+        try
+        {
+            var zwcadLibrary = JsonConvert.DeserializeObject<TitleBlockLibrary>(File.ReadAllText(ZwcadLibraryPath));
+            if (zwcadLibrary?.Blocks == null)
+            {
+                return;
+            }
+
+            var currentNames = new HashSet<string>(
+                library.Blocks
+                    .Select(block => block.BlockName)
+                    .Where(name => !string.IsNullOrWhiteSpace(name)),
+                StringComparer.OrdinalIgnoreCase);
+            var deletedNames = LoadDeletedBlockNames();
+            foreach (var sourceName in zwcadLibrary.Blocks
+                         .Select(block => block.BlockName)
+                         .Where(name => !string.IsNullOrWhiteSpace(name)))
+            {
+                if (currentNames.Contains(sourceName))
+                {
+                    deletedNames.Remove(sourceName);
+                }
+                else
+                {
+                    deletedNames.Add(sourceName);
+                }
+            }
+
+            Directory.CreateDirectory(DefaultDirectory);
+            var json = JsonConvert.SerializeObject(
+                deletedNames.OrderBy(name => name, StringComparer.OrdinalIgnoreCase).ToList(),
+                Formatting.Indented);
+            WriteAtomically(DeletedBlockNamesPath, json);
+        }
+        catch
+        {
         }
     }
 }

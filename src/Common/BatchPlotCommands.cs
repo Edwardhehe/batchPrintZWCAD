@@ -226,13 +226,11 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
 
             string blockName;
             Matrix3d blockTransform;
-            Extents3d blockExtents;
             using (var tr = doc.Database.TransactionManager.StartTransaction())
             {
                 var blockRef = (BlockReference)tr.GetObject(blockResult.ObjectId, OpenMode.ForRead);
                 blockName = CadTextExtractor.GetBlockName(blockRef, tr);
                 blockTransform = blockRef.BlockTransform;
-                blockExtents = blockRef.GeometricExtents;
                 tr.Commit();
             }
 
@@ -253,6 +251,30 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
             }
 
             var hasPrintRegion = printStatus == OptionalRegionStatus.Selected;
+            Extents3d blockExtents = default;
+            if (!hasPrintRegion && !TryGetBlockExtents(doc.Database, blockResult.ObjectId, out blockExtents))
+            {
+                AddBlockLog("Block geometric extents are invalid; requiring an explicit print boundary.");
+                MessageBox.Show(
+                    "AutoCAD 无法取得该图框块的有效外包框，请手动框选打印边界。",
+                    "批量打印",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+
+                if (!TryGetRegion(
+                        editor,
+                        "\n框选图框打印外边界第一个角点: ",
+                        "\n框选图框打印外边界对角点: ",
+                        inverse,
+                        out printRegion))
+                {
+                    AddBlockLog("Required print boundary selection cancelled.");
+                    return;
+                }
+
+                hasPrintRegion = true;
+            }
+
             AddBlockLog("Has print region: " + hasPrintRegion);
 
             if (!TryGetRegion(editor, "\n框选图名区域第一个角点: ", "\n框选图名区域对角点: ", inverse, out var titleRegion))
@@ -451,6 +473,98 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
         var p2 = second.Value.TransformBy(inverseBlockTransform);
         region = LocalRectangle.FromPoints(p1.X, p1.Y, p2.X, p2.Y);
         return OptionalRegionStatus.Selected;
+    }
+
+    private static bool TryGetBlockExtents(Database database, ObjectId blockReferenceId, out Extents3d extents)
+    {
+        extents = default;
+        using var tr = database.TransactionManager.StartTransaction();
+        var blockRef = (BlockReference)tr.GetObject(blockReferenceId, OpenMode.ForRead);
+
+        try
+        {
+            var direct = blockRef.GeometricExtents;
+            if (HasValidExtents(direct))
+            {
+                extents = direct;
+                return true;
+            }
+        }
+        catch
+        {
+            // AutoCAD can report eInvalidExtents for dynamic blocks or entities
+            // whose graphics extents have not been generated yet.
+        }
+
+        var hasExtents = false;
+        var combined = default(Extents3d);
+        var definition = (BlockTableRecord)tr.GetObject(blockRef.BlockTableRecord, OpenMode.ForRead);
+        foreach (ObjectId entityId in definition)
+        {
+            try
+            {
+                var entity = tr.GetObject(entityId, OpenMode.ForRead) as Entity;
+                if (entity == null)
+                {
+                    continue;
+                }
+
+                var transformed = TransformWorldExtents(entity.GeometricExtents, blockRef.BlockTransform);
+                if (!HasValidExtents(transformed))
+                {
+                    continue;
+                }
+
+                if (!hasExtents)
+                {
+                    combined = transformed;
+                    hasExtents = true;
+                }
+                else
+                {
+                    combined.AddExtents(transformed);
+                }
+            }
+            catch
+            {
+                // Ignore individual entities without valid graphics extents.
+            }
+        }
+
+        if (!hasExtents || !HasValidExtents(combined))
+        {
+            return false;
+        }
+
+        extents = combined;
+        return true;
+    }
+
+    private static bool HasValidExtents(Extents3d extents)
+    {
+        var values = new[]
+        {
+            extents.MinPoint.X, extents.MinPoint.Y,
+            extents.MaxPoint.X, extents.MaxPoint.Y
+        };
+        return values.All(value => !double.IsNaN(value) && !double.IsInfinity(value))
+            && extents.MaxPoint.X - extents.MinPoint.X > 1e-6
+            && extents.MaxPoint.Y - extents.MinPoint.Y > 1e-6;
+    }
+
+    private static Extents3d TransformWorldExtents(Extents3d extents, Matrix3d transform)
+    {
+        var points = new[]
+        {
+            new Point3d(extents.MinPoint.X, extents.MinPoint.Y, extents.MinPoint.Z).TransformBy(transform),
+            new Point3d(extents.MinPoint.X, extents.MaxPoint.Y, extents.MinPoint.Z).TransformBy(transform),
+            new Point3d(extents.MaxPoint.X, extents.MinPoint.Y, extents.MinPoint.Z).TransformBy(transform),
+            new Point3d(extents.MaxPoint.X, extents.MaxPoint.Y, extents.MaxPoint.Z).TransformBy(transform)
+        };
+
+        return new Extents3d(
+            new Point3d(points.Min(p => p.X), points.Min(p => p.Y), points.Min(p => p.Z)),
+            new Point3d(points.Max(p => p.X), points.Max(p => p.Y), points.Max(p => p.Z)));
     }
 
     private static Extents3d TransformRegion(LocalRectangle region, Matrix3d transform)

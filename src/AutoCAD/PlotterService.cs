@@ -113,6 +113,39 @@ public static class PlotterService
         }
     }
 
+    public static void Preview(PlotJob job, string deviceName, string styleSheet, Document currentDocument)
+    {
+        var oldActive = CadApp.DocumentManager.MdiActiveDocument;
+        var doc = IsCurrentDocumentJob(job, currentDocument) ? currentDocument : FindOpenDocument(job.SourceFile);
+        var shouldClose = doc == null;
+        doc ??= OpenDocument(job.SourceFile);
+
+        using var variables = PlotSystemVariables.Apply();
+        try
+        {
+            CadApp.DocumentManager.MdiActiveDocument = doc;
+            using (doc.LockDocument())
+            {
+                RefreshJobsFromDatabase(doc.Database, new[] { job });
+                ActivateLayout(doc.Database, job);
+                PrepareEditorViewForPlot(doc, job);
+                PreviewDatabase(doc.Database, doc.Name, job, deviceName, styleSheet, doc);
+            }
+        }
+        finally
+        {
+            if (shouldClose)
+            {
+                CloseWithoutSave(doc);
+            }
+
+            if (oldActive != null && !oldActive.IsDisposed)
+            {
+                CadApp.DocumentManager.MdiActiveDocument = oldActive;
+            }
+        }
+    }
+
     private static string GetGroupKey(PlotJob job, Document currentDocument, AppSettings settings)
     {
         if (IsCurrentDocumentJob(job, currentDocument))
@@ -768,6 +801,28 @@ public static class PlotterService
         }
     }
 
+    private static void PreviewDatabase(Database db, string documentName, PlotJob job, string deviceName, string styleSheet, Document plotDocument)
+    {
+        WaitForPlotIdle();
+
+        var oldDatabase = HostApplicationServices.WorkingDatabase;
+        HostApplicationServices.WorkingDatabase = db;
+        try
+        {
+            using var tr = db.TransactionManager.StartTransaction();
+            var layout = FindLayoutForJob(tr, db, job);
+            var window = GetPlotWindow(job, plotDocument);
+            using var plot = CreateValidatedPlot(layout, job, window, deviceName, styleSheet);
+            RunPreview(plot.Info, documentName);
+            tr.Commit();
+            WaitForPlotIdle();
+        }
+        finally
+        {
+            HostApplicationServices.WorkingDatabase = oldDatabase;
+        }
+    }
+
     private static void PrepareEditorViewForPlot(Document doc, PlotJob job)
     {
         if (job.IsPaperSpace)
@@ -841,6 +896,43 @@ public static class PlotterService
         matrix = Matrix3d.Displacement(view.Target - Point3d.Origin) * matrix;
         matrix = Matrix3d.Rotation(-view.ViewTwist, view.ViewDirection, view.Target) * matrix;
         return matrix.Inverse();
+    }
+
+    private static void RunPreview(PlotInfo plotInfo, string documentName)
+    {
+        using var engine = PlotFactory.CreatePreviewEngine((int)PreviewEngineFlags.Plot);
+        var plotStarted = false;
+        var documentStarted = false;
+        var pageStarted = false;
+        var graphicsStarted = false;
+
+        try
+        {
+            engine.BeginPlot(null, null);
+            plotStarted = true;
+            engine.BeginDocument(plotInfo, documentName, null, 1, false, null);
+            documentStarted = true;
+            using var pageInfo = new PlotPageInfo();
+            engine.BeginPage(pageInfo, plotInfo, true, null);
+            pageStarted = true;
+            engine.BeginGenerateGraphics(null);
+            graphicsStarted = true;
+            engine.EndGenerateGraphics(null);
+            graphicsStarted = false;
+            engine.EndPage(null);
+            pageStarted = false;
+            engine.EndDocument(null);
+            documentStarted = false;
+            engine.EndPlot(null);
+            plotStarted = false;
+        }
+        finally
+        {
+            if (graphicsStarted) TryPlotCleanup(() => engine.EndGenerateGraphics(null));
+            if (pageStarted) TryPlotCleanup(() => engine.EndPage(null));
+            if (documentStarted) TryPlotCleanup(() => engine.EndDocument(null));
+            if (plotStarted) TryPlotCleanup(() => engine.EndPlot(null));
+        }
     }
 
     private static void PrepareOutputFile(string outputPath)

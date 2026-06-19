@@ -99,6 +99,166 @@ public sealed partial class BatchPlotCommands
         doc.Editor.WriteMessage("\nBatch plot scan diagnostics written to: " + logPath);
     }
 
+    [CommandMethod("ZBP_DIAG_EXTENTS", CommandFlags.Session)]
+    public void DiagnoseBlockExtents()
+    {
+        var doc = CadApp.DocumentManager.MdiActiveDocument;
+        if (doc == null)
+        {
+            return;
+        }
+
+        var lines = new List<string>
+        {
+            "Block extents diagnostics",
+            "Time: " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+            "Document: " + (string.IsNullOrWhiteSpace(doc.Database.Filename) ? doc.Name : doc.Database.Filename)
+        };
+
+        using (var tr = doc.Database.TransactionManager.StartTransaction())
+        {
+            var library = TitleBlockLibraryStore.Load();
+            var names = new HashSet<string>(library.Blocks.Select(x => x.BlockName), StringComparer.OrdinalIgnoreCase);
+            var blockTable = (BlockTable)tr.GetObject(doc.Database.BlockTableId, OpenMode.ForRead);
+            foreach (ObjectId recordId in blockTable)
+            {
+                var owner = (BlockTableRecord)tr.GetObject(recordId, OpenMode.ForRead);
+                if (!owner.IsLayout)
+                {
+                    continue;
+                }
+
+                foreach (ObjectId id in owner)
+                {
+                    if (tr.GetObject(id, OpenMode.ForRead, false) is not BlockReference blockRef)
+                    {
+                        continue;
+                    }
+
+                    var name = CadTextExtractor.GetBlockName(blockRef, tr);
+                    if (!names.Contains(name))
+                    {
+                        continue;
+                    }
+
+                    lines.Add($"BREF\tname={name}\thandle={blockRef.Handle}\tdynamic={blockRef.IsDynamicBlock}\tposition={blockRef.Position}\tscale={blockRef.ScaleFactors}");
+                    try
+                    {
+                        var ext = blockRef.GeometricExtents;
+                        lines.Add($"BREF_EXT\tOK\tmin={ext.MinPoint}\tmax={ext.MaxPoint}");
+                    }
+                    catch (System.Exception ex)
+                    {
+                        lines.Add($"BREF_EXT\tFAIL\t{ex.GetType().FullName}\t{ex.Message}");
+                    }
+
+                    var definitionId = blockRef.IsDynamicBlock && !blockRef.DynamicBlockTableRecord.IsNull
+                        ? blockRef.DynamicBlockTableRecord
+                        : blockRef.BlockTableRecord;
+                    var definition = (BlockTableRecord)tr.GetObject(definitionId, OpenMode.ForRead);
+                    var typeCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+                    var failedTypes = new Dictionary<string, int>(StringComparer.Ordinal);
+                    var entityCount = 0;
+                    var validCount = 0;
+                    foreach (ObjectId entityId in definition)
+                    {
+                        var entity = tr.GetObject(entityId, OpenMode.ForRead, false) as Entity;
+                        if (entity == null)
+                        {
+                            continue;
+                        }
+
+                        entityCount++;
+                        var typeName = entity.GetType().FullName ?? entity.GetType().Name;
+                        typeCounts[typeName] = typeCounts.TryGetValue(typeName, out var typeCount) ? typeCount + 1 : 1;
+                        try
+                        {
+                            var ext = entity.GeometricExtents;
+                            if (IsFinite(ext.MinPoint) && IsFinite(ext.MaxPoint))
+                            {
+                                validCount++;
+                            }
+                        }
+                        catch (System.Exception ex)
+                        {
+                            failedTypes[typeName] = failedTypes.TryGetValue(typeName, out var failCount) ? failCount + 1 : 1;
+                            if (entity is BlockReference nestedBlock)
+                            {
+                                var nestedName = CadTextExtractor.GetBlockName(nestedBlock, tr);
+                                lines.Add($"DEF_FAIL_ENTITY\ttype={typeName}\thandle={entity.Handle}\tname={nestedName}\tposition={nestedBlock.Position}\tscale={nestedBlock.ScaleFactors}\terror={ex.Message}");
+                            }
+                            else
+                            {
+                                lines.Add($"DEF_FAIL_ENTITY\ttype={typeName}\thandle={entity.Handle}\terror={ex.Message}");
+                            }
+                        }
+                    }
+
+                    lines.Add($"DEF\tname={definition.Name}\tentities={entityCount}\tvalidExtents={validCount}\ttypes={string.Join(",", typeCounts.Select(x => x.Key + ":" + x.Value))}");
+                    lines.Add($"DEF_FAIL_TYPES\t{string.Join(",", failedTypes.Select(x => x.Key + ":" + x.Value))}");
+                }
+            }
+
+            tr.Commit();
+        }
+
+        var logDirectory = Path.Combine(TitleBlockLibraryStore.DefaultDirectory, "Logs");
+        Directory.CreateDirectory(logDirectory);
+        var logPath = Path.Combine(logDirectory, "ExtentsDiagnostics_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".txt");
+        File.WriteAllLines(logPath, lines);
+        doc.Editor.WriteMessage("\nBlock extents diagnostics written to: " + logPath);
+    }
+
+    [CommandMethod("ZBP_DIAG_SCAN_SCOPES", CommandFlags.Session)]
+    public void DiagnoseScanScopes()
+    {
+        var doc = CadApp.DocumentManager.MdiActiveDocument;
+        if (doc == null)
+        {
+            return;
+        }
+
+        var library = TitleBlockLibraryStore.Load();
+        var lines = new List<string>
+        {
+            "Scan scope diagnostics",
+            "Time: " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+            "Document: " + (string.IsNullOrWhiteSpace(doc.Database.Filename) ? doc.Name : doc.Database.Filename)
+        };
+
+        foreach (var scope in new[]
+                 {
+                     TitleBlockScanScope.AllSpaces,
+                     TitleBlockScanScope.PaperLayouts,
+                     TitleBlockScanScope.CurrentSpace,
+                     TitleBlockScanScope.ModelSpace
+                 })
+        {
+            try
+            {
+                var jobs = TitleBlockScanner.Scan(doc, library, scope);
+                lines.Add($"{scope}\tcount={jobs.Count}\tspaces={string.Join(",", jobs.GroupBy(x => x.SpaceName).Select(x => x.Key + ":" + x.Count()))}");
+            }
+            catch (System.Exception ex)
+            {
+                lines.Add($"{scope}\tERROR\t{ex}");
+            }
+        }
+
+        var logDirectory = Path.Combine(TitleBlockLibraryStore.DefaultDirectory, "Logs");
+        Directory.CreateDirectory(logDirectory);
+        var logPath = Path.Combine(logDirectory, "ScanScopes_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".txt");
+        File.WriteAllLines(logPath, lines);
+        doc.Editor.WriteMessage("\nScan scope diagnostics written to: " + logPath);
+    }
+
+    private static bool IsFinite(Point3d point)
+    {
+        return !double.IsNaN(point.X) && !double.IsInfinity(point.X)
+            && !double.IsNaN(point.Y) && !double.IsInfinity(point.Y)
+            && !double.IsNaN(point.Z) && !double.IsInfinity(point.Z);
+    }
+
     private static void DumpMatchedFrameCandidates(
         Transaction tr,
         BlockTable blockTable,

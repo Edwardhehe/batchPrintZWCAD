@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 
 namespace ZwcadBatchPlot;
 
@@ -55,6 +56,8 @@ public sealed class PlotJob
 {
     public bool Selected { get; set; } = true;
     public string SourceFile { get; set; } = "";
+    public string OutputFileName => Path.GetFileName(OutputPath);
+    public long SortPriority { get; set; }
     public string SpaceName { get; set; } = "";
     public bool IsPaperSpace { get; set; }
     public string BlockName { get; set; } = "";
@@ -80,10 +83,10 @@ public sealed class PlotJob
 
 public enum TitleBlockScanScope
 {
+    AllSpaces,
     PaperLayouts,
     CurrentSpace,
-    ModelSpace,
-    AllSpaces
+    ModelSpace
 }
 
 public sealed class PaperDetection

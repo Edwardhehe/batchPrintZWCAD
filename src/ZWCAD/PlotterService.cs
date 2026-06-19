@@ -106,6 +106,38 @@ public static class PlotterService
         PlotOpenedDocument(job, deviceName, styleSheet, settings);
     }
 
+    public static void Preview(PlotJob job, string deviceName, string styleSheet, Document currentDocument)
+    {
+        var oldActive = CadApp.DocumentManager.MdiActiveDocument;
+        var doc = IsCurrentDocumentJob(job, currentDocument) ? currentDocument : FindOpenDocument(job.SourceFile);
+        var shouldClose = doc == null;
+        doc ??= CadApp.DocumentManager.Open(job.SourceFile, false);
+
+        try
+        {
+            CadApp.DocumentManager.MdiActiveDocument = doc;
+            using (doc.LockDocument())
+            {
+                ActivateLayout(job);
+                RefreshJobWindowFromOpenedDocument(doc.Database, job);
+                PrepareEditorViewForPlot(doc, job);
+                PreviewDatabase(doc.Database, doc.Name, job, deviceName, styleSheet, doc);
+            }
+        }
+        finally
+        {
+            if (shouldClose)
+            {
+                TryCloseWithoutSave(doc);
+            }
+
+            if (oldActive != null && !oldActive.IsDisposed)
+            {
+                CadApp.DocumentManager.MdiActiveDocument = oldActive;
+            }
+        }
+    }
+
     private static string GetPlotGroupKey(PlotJob job, Document currentDocument, AppSettings settings)
     {
         if (IsCurrentDocumentJob(job, currentDocument))
@@ -560,6 +592,100 @@ public static class PlotterService
                 TryPlotCleanup(progress.OnEndPlot);
                 TryPlotCleanup(() => engine.EndPlot(null));
             }
+        }
+    }
+
+    private static void PreviewDatabase(Database db, string documentName, PlotJob job, string deviceName, string styleSheet, Document plotDocument)
+    {
+        WaitForPlotIdle();
+
+        var oldWorkingDatabase = HostApplicationServices.WorkingDatabase;
+        HostApplicationServices.WorkingDatabase = db;
+        try
+        {
+            using var tr = db.TransactionManager.StartTransaction();
+            var layout = FindLayoutForJob(tr, db, job);
+            using var plotSettings = new PlotSettings(layout.ModelType);
+            plotSettings.CopyFrom(layout);
+
+            var validator = PlotSettingsValidator.Current;
+            validator.SetPlotConfigurationName(plotSettings, deviceName, null);
+            validator.RefreshLists(plotSettings);
+            TrySetPlotPaperUnits(validator, plotSettings, PlotPaperUnit.Millimeters);
+
+            var media = SelectMedia(validator, plotSettings, job, AppSettingsStore.Load());
+            if (media == null)
+            {
+                throw new InvalidOperationException($"未找到匹配 {job.PaperSizeText} 的打印纸张。");
+            }
+
+            validator.SetCanonicalMediaName(plotSettings, media.Name);
+            if (!string.IsNullOrWhiteSpace(styleSheet))
+            {
+                validator.SetCurrentStyleSheet(plotSettings, styleSheet);
+            }
+
+            validator.SetPlotWindowArea(plotSettings, GetPlotWindow(job, plotDocument));
+            validator.SetPlotType(plotSettings, ZwSoft.ZwCAD.DatabaseServices.PlotType.Window);
+            validator.SetUseStandardScale(plotSettings, true);
+            validator.SetStdScaleType(plotSettings, StdScaleType.ScaleToFit);
+            validator.SetPlotCentered(plotSettings, true);
+            validator.SetPlotRotation(plotSettings, DetectRotation(media));
+
+            var plotInfo = new PlotInfo
+            {
+                Layout = layout.ObjectId,
+                OverrideSettings = plotSettings
+            };
+            new PlotInfoValidator
+            {
+                MediaMatchingPolicy = MatchingPolicy.MatchEnabled
+            }.Validate(plotInfo);
+
+            RunPreview(plotInfo, documentName);
+            tr.Commit();
+            WaitForPlotIdle();
+        }
+        finally
+        {
+            HostApplicationServices.WorkingDatabase = oldWorkingDatabase;
+        }
+    }
+
+    private static void RunPreview(PlotInfo plotInfo, string documentName)
+    {
+        using var engine = PlotFactory.CreatePreviewEngine((int)PreviewEngineFlags.Plot);
+        var plotStarted = false;
+        var documentStarted = false;
+        var pageStarted = false;
+        var graphicsStarted = false;
+
+        try
+        {
+            engine.BeginPlot(null, null);
+            plotStarted = true;
+            engine.BeginDocument(plotInfo, documentName, null, 1, false, null);
+            documentStarted = true;
+            using var pageInfo = new PlotPageInfo();
+            engine.BeginPage(pageInfo, plotInfo, true, null);
+            pageStarted = true;
+            engine.BeginGenerateGraphics(null);
+            graphicsStarted = true;
+            engine.EndGenerateGraphics(null);
+            graphicsStarted = false;
+            engine.EndPage(null);
+            pageStarted = false;
+            engine.EndDocument(null);
+            documentStarted = false;
+            engine.EndPlot(null);
+            plotStarted = false;
+        }
+        finally
+        {
+            if (graphicsStarted) TryPlotCleanup(() => engine.EndGenerateGraphics(null));
+            if (pageStarted) TryPlotCleanup(() => engine.EndPage(null));
+            if (documentStarted) TryPlotCleanup(() => engine.EndDocument(null));
+            if (plotStarted) TryPlotCleanup(() => engine.EndPlot(null));
         }
     }
 
