@@ -12,12 +12,12 @@
 
 | CAD 平台 | 适用版本 | 加载 DLL |
 | --- | --- | --- |
-| 中望 CAD | 当前主要面向 ZWCAD 2025 x64 | `BatchPlotter.dll` |
-| AutoCAD | AutoCAD 2019 ~ 2020 x64 | `AcadBatchPlot.dll` |
-| AutoCAD | AutoCAD 2021 ~ 2024 x64 | `AcadBatchPlot.dll` |
+| 中望 CAD | ZWCAD Enterprise x64 | `BatchPlotter.dll` |
+| AutoCAD | AutoCAD 2015 ~ 2024 x64 | `AcadBatchPlot.dll` |
+| AutoCAD | AutoCAD 2019 ~ 2020 x64（精确匹配 SDK） | `AcadBatchPlot.dll` |
 | AutoCAD | AutoCAD 2025 及以后 x64 | `AcadBatchPlot.Core.dll` |
 
-AutoCAD 2019 ~ 2020 使用 .NET Framework 4.7，AutoCAD 2021 ~ 2024 使用 .NET Framework 4.8，AutoCAD 2025 及以后使用 .NET 8，因此需要分别发布 DLL。代码主体复用，但项目文件和 CAD 托管 API 引用不同。
+AutoCAD 2015 ~ 2024 使用 .NET Framework 4.8（AutoCAD.NET 20.0），AutoCAD 2019 ~ 2020 使用 .NET Framework 4.7（AutoCAD.NET 23.0），AutoCAD 2025 及以后使用 .NET 8（AutoCAD.NET.Core 25.0），因此需要分别发布 DLL。代码主体复用，但项目文件和 CAD 托管 API 引用不同。
 
 ## 主要功能
 
@@ -28,46 +28,55 @@ AutoCAD 2019 ~ 2020 使用 .NET Framework 4.7，AutoCAD 2021 ~ 2024 使用 .NET 
 - 比例识别：支持常见比例，如 1:1、1:10、1:100、1:200 等。
 - 批量打印：支持扫描当前图、框选扫描、添加多个 DWG 后跨文件批量打印。
 - 布局打印：跨文件打印时可临时打开 DWG，保证布局视口和外部参照正常加载。
+- PDF 合并：勾选"合并为单个 PDF"后，打印完成的单页 PDF 自动合并为一个文件。
+- CAD 原生预览：在批量打印列表中点击"预览"按钮，使用 CAD PlotEngine 直接预览排版效果，无需生成临时 PDF。
 - PDF 命名：默认 `图号_图名.pdf`，非法文件名字符自动替换为 `_`。
 - 重名处理：默认覆盖，也可在设置中改为自动追加序号。
 - 清单编辑：可在批量打印界面修改图名、图号，并同步回当前打开的 CAD 图纸文字。
-- 图纸目录：根据识别清单在当前 CAD 生成目录表格，表头为“序号、图号、图名、图幅、备注”。
+- 清单排序：右键菜单"移到第一个"可调整打印顺序。
+- 图纸目录：根据识别清单在当前 CAD 生成目录表格，表头为"序号、图号、图名、图幅、备注"。
 - 目录设置：可设置目录列宽、行高、文字高度比例和目录文字样式，也可从 CAD 框选单元格尺寸。
 - 批量 CAD 拆图：按识别清单把图纸拆成单独 DWG，模型空间输出轻量新图，布局空间保留原模型并只清理目标布局。
+- 图框库去重：删除图框后自动记录已删除块名，防止从 ZWCAD 图框库重新导入。
+- 扫描诊断：提供 `ZBP_DIAG_EXTENTS`、`ZBP_DIAG_SCAN_SCOPES`、`ZBP_DIAG_ATTRIBUTES` 命令，用于排查图框识别问题。
 - PDF 工具：可预览当前清单已生成的 PDF，支持上一份、下一份、手动添加 PDF 或文件夹、自然排序、手动调整顺序、合并 PDF、批量加编号、文件名替换和撤回改名。
 - 自动加载：可安装为中望 CAD 启动自动加载，也支持卸载。
-- 菜单栏集成：插件只创建“批量打印”菜单栏入口，不再创建浮动小工具栏。
+- 菜单栏集成：插件只创建"批量打印"菜单栏入口，不再创建浮动小工具栏。
 
 ## 使用方式
 
 ### 方式一：使用发布包
 
-1. 下载 Release 里的 `ZwcadBatchPlot.zip`。
-2. 解压后关闭中望 CAD。
+1. 下载 Release 里对应 CAD 版本的 zip 包。
+2. 解压后关闭 CAD。
 3. 双击 `安装.cmd`。
-4. 重新打开中望 CAD，菜单栏会出现“批量打印”。
+4. 重新打开 CAD，菜单栏会出现"批量打印"。
 
-卸载时关闭中望 CAD，双击 `卸载.cmd`。
+卸载时关闭 CAD，双击 `卸载.cmd`。
 
 ### 方式二：手动加载
 
-在中望 CAD 中执行 `NETLOAD`，选择编译后的 `BatchPlotter.dll`。
+在 CAD 中执行 `NETLOAD`，选择编译后的 DLL：
 
-如果已经加载过旧版本，建议重启 CAD 后再加载新 DLL，或者在菜单里点击“刷新菜单”。
+- 中望 CAD：`BatchPlotter.dll`
+- AutoCAD 2015 ~ 2024：`AcadBatchPlot.dll`
+- AutoCAD 2025 及以后：`AcadBatchPlot.Core.dll`
+
+如果已经加载过旧版本，建议重启 CAD 后再加载新 DLL，或者在菜单里点击"刷新菜单"。
 
 ### AutoCAD 发布包
 
 AutoCAD 版本请下载与本机 AutoCAD 年份对应的发布包，解压后关闭 AutoCAD，双击 `安装.cmd`。安装脚本会复制插件文件、写入自动加载注册表项，并保留 `卸载.cmd` 供以后卸载。安装成功后用户以后不需要每次 `NETLOAD`。
 
-- AutoCAD 2019 ~ 2020：使用 `AcadBatchPlot-AutoCAD2019-2020-*.zip`。
-- AutoCAD 2021 ~ 2024：使用 `AcadBatchPlot-AutoCAD2021-2024-*.zip`。
-- AutoCAD 2025 及以后：使用 `AcadBatchPlot-AutoCAD2025Plus-*.zip`。
+- AutoCAD 2015 ~ 2024：使用 `AcadBatchPlot-AutoCAD2015-2024-*.zip`。
+- AutoCAD 2019 ~ 2020：使用 `AcadBatchPlot-AutoCAD2019-2020-*.zip`（精确匹配 AutoCAD.NET 23.0 SDK）。
+- AutoCAD 2025 及以后：使用 `AcadBatchPlot-AutoCAD2025+-*.zip`。
 
 AutoCAD 包内带有 `LA_pdf.pc3` 和 `LA_pdf.pmp`。插件首次自动加载时会把它们复制到 AutoCAD 的 Plotters 目录，用户不需要手动安装 PDF 绘图仪。
 
 AutoCAD 2025 及以后如果菜单栏未显示，可以执行 `ZBP_SHOW_PANEL` 打开批量打印主界面。
 
-如果 AutoCAD 2019 ~ 2024 点击菜单后提示 `未知命令 "^C^CZBP_..."`，请升级到 v1.5.2 或更新版本。升级后若旧菜单仍存在，执行一次 `ZBP_RELOAD_MENU`，或在菜单中点击“刷新菜单”，让插件重建菜单项。
+如果 AutoCAD 2015 ~ 2024 点击菜单后提示 `未知命令 "^C^CZBP_..."`，请升级到最新版本。升级后若旧菜单仍存在，执行一次 `ZBP_RELOAD_MENU`，或在菜单中点击"刷新菜单"，让插件重建菜单项。
 
 ## 菜单说明
 
@@ -76,19 +85,20 @@ AutoCAD 2025 及以后如果菜单栏未显示，可以执行 `ZBP_SHOW_PANEL` �
 - 批量打印：打开批量打印窗口，扫描图纸、添加 DWG、检查清单并打印 PDF。
 - PDF跨文件阅读：打开 PDF 工具窗口，可手动添加 PDF 或文件夹，并可调整顺序、合并 PDF、批量改名。
 - 设置：管理输出目录、重名处理、跨文件打印方式、目录表格尺寸、目录文字样式等。
-- 安装自动加载：写入当前用户的中望 CAD 自动加载注册表项。
+- 安装自动加载：写入当前用户的 CAD 自动加载注册表项。
 - 卸载自动加载：删除自动加载注册表项。
 - 打开配置目录：打开插件配置文件夹。
 - 刷新菜单：重新安装菜单栏入口，并清理旧版本生成的浮动工具栏。
 
 ## 批量打印流程
 
-1. 先通过“新增图框”把常用图框块加入图框信息库。
-2. 打开“批量打印”窗口。
-3. 点击“扫描当前图”“框选扫描”或“添加 DWG”识别图纸。
+1. 先通过"新增图框"把常用图框块加入图框信息库。
+2. 打开"批量打印"窗口。
+3. 点击"扫描当前图""框选扫描"或"添加 DWG"识别图纸。
 4. 在表格中检查图号、图名、图幅、比例、文件路径和是否打印。
-5. 选择输出目录、PDF 打印机和 CTB。
-6. 点击“开始打印”。
+5. 可选：勾选"合并为单个 PDF"并选择合并输出路径。
+6. 选择输出目录、PDF 打印机和 CTB。
+7. 点击"开始打印"。
 
 输出目录快捷按钮：
 
@@ -98,7 +108,7 @@ AutoCAD 2025 及以后如果菜单栏未显示，可以执行 `ZBP_SHOW_PANEL` �
 
 ## PDF 工具
 
-在批量打印清单生成 PDF 后，可以点击“PDF工具”预览输出文件。也可以从菜单栏打开“PDF跨文件阅读”，手动添加 PDF 文件或文件夹。
+在批量打印清单生成 PDF 后，可以点击"PDF工具"预览输出文件。也可以从菜单栏打开"PDF跨文件阅读"，手动添加 PDF 文件或文件夹。
 
 PDF 工具支持：
 
@@ -108,11 +118,11 @@ PDF 工具支持：
 - 批量给文件名加编号，支持 `_`、空格、无连接符和 `+`。
 - 批量替换文件名文字，并可撤回上一次批量改名。
 
-内嵌预览依赖 Microsoft Edge WebView2 Runtime。若个别电脑无法内嵌预览，仍可使用“外部打开”，或安装 WebView2 Runtime 后重试。
+内嵌预览依赖 Microsoft Edge WebView2 Runtime。若个别电脑无法内嵌预览，仍可使用"外部打开"，或安装 WebView2 Runtime 后重试。
 
 ## 批量 CAD 拆图
 
-在批量打印窗口识别图框后，可以点击“批量拆图”。插件会按当前勾选清单输出单独 DWG 文件，文件名规则沿用设置里的连接符：
+在批量打印窗口识别图框后，可以点击"批量拆图"。插件会按当前勾选清单输出单独 DWG 文件，文件名规则沿用设置里的连接符：
 
 ```text
 图号_图名.dwg
@@ -128,7 +138,7 @@ PDF 工具支持：
 
 ## 图纸目录
 
-在批量打印窗口识别图框后，可以点击“生成目录”。插件会让用户在当前 CAD 中指定目录左上角基点，然后生成目录表格。
+在批量打印窗口识别图框后，可以点击"生成目录"。插件会让用户在当前 CAD 中指定目录左上角基点，然后生成目录表格。
 
 目录列为：
 
@@ -136,7 +146,7 @@ PDF 工具支持：
 序号、图号、图名、图幅、备注
 ```
 
-目录表格尺寸可在“设置 -> 图纸目录”中调整：
+目录表格尺寸可在"设置 -> 图纸目录"中调整：
 
 - 序号列宽
 - 图号列宽
@@ -147,14 +157,15 @@ PDF 工具支持：
 - 文字高度比例
 - 目录文字样式
 
-也可以点击“从 CAD 框选单元格尺寸”，依次框选“序号、图号、图名、图幅、备注”五个单元格。插件会自动保存各列宽度，并以第一个单元格高度作为行高。目录文字高度会根据单元格高度和列宽自动反推。
+也可以点击"从 CAD 框选单元格尺寸"，依次框选"序号、图号、图名、图幅、备注"五个单元格。插件会自动保存各列宽度，并以第一个单元格高度作为行高。目录文字高度会根据单元格高度和列宽自动反推。
 
 ## 用户数据
 
 插件用户数据保存在：
 
 ```text
-%APPDATA%\ZwcadBatchPlot
+%APPDATA%\ZwcadBatchPlot   （中望 CAD）
+%APPDATA%\AcadBatchPlot    （AutoCAD）
 ```
 
 主要文件：
@@ -185,45 +196,35 @@ C:\Program Files\ZWSOFT\ZWCAD Enterprise\
 
 PDF 工具当前使用 WebView2 做内嵌预览、PDFsharp 做 PDF 合并，避免把 x86 PDF 阅读组件加载进中望 CAD x64 进程。
 
-编译日常测试 DLL（固定输出目录，不再每次新建文件夹）：
+编译 ZWCAD 版本：
 
 ```powershell
-.\scripts\build-dll.ps1 -Target Zwcad
+dotnet build BatchPlotter.csproj -c Release
 ```
 
-生成结果固定在 `bin\BatchPlotter.dll`。如果旧 DLL 已经被 CAD 加载，先关闭 CAD 再重新生成；需要清理旧输出时可以加 `-Clean`：
+生成结果在 `bin\BatchPlotter.dll`。
+
+编译全部平台：
 
 ```powershell
-.\scripts\build-dll.ps1 -Target Zwcad -Clean
+dotnet build BatchPlotter.csproj -c Release
+dotnet build AcadBatchPlot.csproj -c Release
+dotnet build AcadBatchPlot.AutoCAD2019.csproj -c Release
+dotnet build AcadBatchPlot.Core.csproj -c Release
 ```
 
-一次生成全部 CAD 版本：
+生成结果：
 
-```powershell
-.\scripts\build-dll.ps1 -Target All
-```
-
-AutoCAD 2021 ~ 2024:
-
-```powershell
-.\scripts\build-dll.ps1 -Target AutoCAD2021
-```
-
-AutoCAD 2019 ~ 2020:
-
-```powershell
-.\scripts\build-dll.ps1 -Target AutoCAD2019
-```
-
-AutoCAD 2025 及以后:
-
-```powershell
-.\scripts\build-dll.ps1 -Target AutoCAD2025
-```
+| 项目 | 输出目录 | 目标 DLL |
+| --- | --- | --- |
+| `BatchPlotter.csproj` | `bin\` | `BatchPlotter.dll` |
+| `AcadBatchPlot.csproj` | `bin-acad\` | `AcadBatchPlot.dll` |
+| `AcadBatchPlot.AutoCAD2019.csproj` | `bin-acad2019\` | `AcadBatchPlot.dll` |
+| `AcadBatchPlot.Core.csproj` | `bin-acad-core\` | `AcadBatchPlot.Core.dll` |
 
 ## 说明
 
-本项目主要面向中望 CAD 2025。其他版本中望 CAD 可能可以运行，但需要自行验证托管 DLL 兼容性。
+本项目支持中望 CAD Enterprise 和 AutoCAD 2015 ~ 2025+。其他版本可能可以运行，但需要自行验证托管 DLL 兼容性。
 
 ## 协议
 
