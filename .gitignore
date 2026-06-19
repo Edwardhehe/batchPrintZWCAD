@@ -3,6 +3,8 @@ bin-acad/
 bin-acad2019/
 bin-acad-core/
 bin-acad-core-publish/
+bin-acad-scanfix/
+bin-library-delete-fix/
 bin-test-acad*/
 bin-addblockfix/
 bin-addblocksavefix/
