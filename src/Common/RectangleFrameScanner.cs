@@ -32,13 +32,34 @@ public static class RectangleFrameScanner
         var rectangles = new List<LocalRectangle>();
 
         using var tr = document.Database.TransactionManager.StartTransaction();
-        var owner = (BlockTableRecord)tr.GetObject(document.Database.CurrentSpaceId, OpenMode.ForRead);
+        BlockTableRecord owner;
+        Layout layout;
+        if (document.Database.TileMode)
+        {
+            var blockTable = (BlockTable)tr.GetObject(document.Database.BlockTableId, OpenMode.ForRead);
+            owner = (BlockTableRecord)tr.GetObject(blockTable[BlockTableRecord.ModelSpace], OpenMode.ForRead);
+            layout = (Layout)tr.GetObject(owner.LayoutId, OpenMode.ForRead);
+        }
+        else
+        {
+            // Always scan the paper-space layout record itself. CurrentSpaceId can
+            // point to model space while the user is editing through a viewport.
+            var currentLayoutName = LayoutManager.Current.CurrentLayout;
+            var layouts = (DBDictionary)tr.GetObject(document.Database.LayoutDictionaryId, OpenMode.ForRead);
+            if (!layouts.Contains(currentLayoutName))
+            {
+                return new List<Result>();
+            }
+
+            layout = (Layout)tr.GetObject(layouts.GetAt(currentLayoutName), OpenMode.ForRead);
+            owner = (BlockTableRecord)tr.GetObject(layout.BlockTableRecordId, OpenMode.ForRead);
+        }
+
         if (!owner.IsLayout || owner.LayoutId.IsNull)
         {
             return new List<Result>();
         }
 
-        var layout = (Layout)tr.GetObject(owner.LayoutId, OpenMode.ForRead);
         var layoutName = layout.LayoutName;
         foreach (ObjectId id in owner)
         {
@@ -217,7 +238,9 @@ public static class RectangleFrameScanner
         foreach (var rectangle in source.OrderByDescending(Area))
         {
             var tolerance = Math.Max(rectangle.MaxX - rectangle.MinX, rectangle.MaxY - rectangle.MinY) * 0.002;
-            if (unique.Any(existing => SameBounds(existing, rectangle, tolerance)))
+            if (unique.Any(existing =>
+                    SameBounds(existing, rectangle, tolerance)
+                    || HasDuplicateOverlap(existing, rectangle)))
             {
                 continue;
             }
@@ -239,6 +262,38 @@ public static class RectangleFrameScanner
             && Math.Abs(a.MinY - b.MinY) <= tolerance
             && Math.Abs(a.MaxX - b.MaxX) <= tolerance
             && Math.Abs(a.MaxY - b.MaxY) <= tolerance;
+    }
+
+    private static bool HasDuplicateOverlap(LocalRectangle a, LocalRectangle b)
+    {
+        var overlapWidth = Math.Max(0, Math.Min(a.MaxX, b.MaxX) - Math.Max(a.MinX, b.MinX));
+        var overlapHeight = Math.Max(0, Math.Min(a.MaxY, b.MaxY) - Math.Max(a.MinY, b.MinY));
+        var overlapArea = overlapWidth * overlapHeight;
+        if (overlapArea <= 0)
+        {
+            return false;
+        }
+
+        var areaA = Area(a);
+        var areaB = Area(b);
+        if (areaA <= 0 || areaB <= 0)
+        {
+            return false;
+        }
+
+        var smallerCoverage = overlapArea / Math.Min(areaA, areaB);
+        var largerCoverage = overlapArea / Math.Max(areaA, areaB);
+        var widthSimilarity = Math.Min(a.MaxX - a.MinX, b.MaxX - b.MinX)
+            / Math.Max(a.MaxX - a.MinX, b.MaxX - b.MinX);
+        var heightSimilarity = Math.Min(a.MaxY - a.MinY, b.MaxY - b.MinY)
+            / Math.Max(a.MaxY - a.MinY, b.MaxY - b.MinY);
+
+        // Treat nearly coincident frames as one drawing, while preserving
+        // genuinely nested or adjacent rectangles with different dimensions.
+        return smallerCoverage >= 0.90
+            && largerCoverage >= 0.82
+            && widthSimilarity >= 0.90
+            && heightSimilarity >= 0.90;
     }
 
     private static bool Contains(LocalRectangle outer, LocalRectangle inner)

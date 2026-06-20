@@ -568,6 +568,27 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
         }
 
         var editor = doc.Editor;
+        if (!doc.Database.TileMode)
+        {
+            try
+            {
+                // A layout viewport makes editor picks use model-space coordinates.
+                // Return to paper space so the scan window and layout entities share
+                // the same coordinate system, and viewport contents are not scanned.
+                editor.SwitchToPaperSpace();
+            }
+            catch
+            {
+                try
+                {
+                    CadApp.SetSystemVariable("CVPORT", 1);
+                }
+                catch
+                {
+                }
+            }
+        }
+
         var first = editor.GetPoint(new PromptPointOptions("\n框选矩形图框扫描范围第一个角点: "));
         if (first.Status != PromptStatus.OK)
         {
