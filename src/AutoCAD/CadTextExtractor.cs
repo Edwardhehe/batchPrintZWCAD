@@ -48,7 +48,7 @@ public static class CadTextExtractor
                 continue;
             }
 
-            if (TryGetText(entity, out var text, out var worldPoint))
+            if (TryGetOwnerSpaceText(entity, out var text, out var worldPoint))
             {
                 var priority = entity is AttributeDefinition or AttributeReference
                     ? TextSourcePriority.Attribute
@@ -58,6 +58,23 @@ public static class CadTextExtractor
         }
 
         return new OwnerTextCache(values);
+    }
+
+    private static bool TryGetOwnerSpaceText(Entity entity, out string text, out Point3d point)
+    {
+        if (entity is AttributeDefinition attributeDefinition)
+        {
+            // A standalone ATTDEF pasted outside the title-block reference is
+            // displayed and edited through its tag. TextString remains the
+            // original template value (for example "图纸名称" or "1").
+            text = string.IsNullOrWhiteSpace(attributeDefinition.Tag)
+                ? GetAttributeText(attributeDefinition)
+                : attributeDefinition.Tag;
+            point = attributeDefinition.Position;
+            return true;
+        }
+
+        return TryGetText(entity, out text, out point);
     }
 
     public static string ExtractRegionText(Transaction tr, BlockReference blockRef, BlockTableRecord owner, LocalRectangle region)
@@ -98,7 +115,7 @@ public static class CadTextExtractor
         foreach (var candidate in ownerTextCache.Candidates)
         {
             var local = candidate.Point.TransformBy(inverse);
-            if (region.Contains(local.X, local.Y))
+            if (IsCandidateInRegion(candidate, inverse, region, local))
             {
                 values.Add(new TextCandidate(candidate.Text, local, candidate.Priority));
             }
@@ -132,12 +149,32 @@ public static class CadTextExtractor
             .ToList()).Trim();
     }
 
-    private static void AddText(ICollection<TextCandidate> values, string? text, Point3d point, TextSourcePriority priority)
+    private static void AddText(
+        ICollection<TextCandidate> values,
+        string? text,
+        Point3d point,
+        TextSourcePriority priority,
+        Entity? sourceEntity = null)
     {
         text = CleanText(text);
         if (!string.IsNullOrWhiteSpace(text))
         {
-            values.Add(new TextCandidate(text, point, priority));
+            Point3d? alignmentPoint = null;
+            LocalRectangle? worldBounds = null;
+            if (sourceEntity != null)
+            {
+                if (TryGetAlignmentPoint(sourceEntity, out var alignment))
+                {
+                    alignmentPoint = alignment;
+                }
+
+                if (TryGetTransformedExtents(sourceEntity, Matrix3d.Identity, out var bounds))
+                {
+                    worldBounds = bounds;
+                }
+            }
+
+            values.Add(new TextCandidate(text, point, priority, alignmentPoint, worldBounds));
         }
     }
 
@@ -208,7 +245,7 @@ public static class CadTextExtractor
             if (tr.GetObject(attributeId, OpenMode.ForRead, false) is AttributeReference attribute
                 && TryGetText(attribute, out var attributeText, out var attributePoint))
             {
-                AddText(values, attributeText, attributePoint, TextSourcePriority.Attribute);
+                AddText(values, attributeText, attributePoint, TextSourcePriority.Attribute, attribute);
             }
         }
 
@@ -384,6 +421,50 @@ public static class CadTextExtractor
         return entity is DBText dbText
             && TryGetEstimatedTextExtents(dbText, entityToLocal, out var estimated)
             && HasMeaningfulOverlap(region, estimated);
+    }
+
+    private static bool IsCandidateInRegion(
+        TextCandidate candidate,
+        Matrix3d worldToLocal,
+        LocalRectangle region,
+        Point3d fallbackPoint)
+    {
+        if (region.Contains(fallbackPoint.X, fallbackPoint.Y))
+        {
+            return true;
+        }
+
+        if (candidate.AlignmentPoint.HasValue)
+        {
+            var localAlignment = candidate.AlignmentPoint.Value.TransformBy(worldToLocal);
+            if (region.Contains(localAlignment.X, localAlignment.Y))
+            {
+                return true;
+            }
+        }
+
+        if (candidate.WorldBounds != null)
+        {
+            var bounds = candidate.WorldBounds;
+            var points = new[]
+            {
+                new Point3d(bounds.MinX, bounds.MinY, 0).TransformBy(worldToLocal),
+                new Point3d(bounds.MinX, bounds.MaxY, 0).TransformBy(worldToLocal),
+                new Point3d(bounds.MaxX, bounds.MinY, 0).TransformBy(worldToLocal),
+                new Point3d(bounds.MaxX, bounds.MaxY, 0).TransformBy(worldToLocal)
+            };
+            var localBounds = LocalRectangle.FromPoints(
+                points.Min(p => p.X),
+                points.Min(p => p.Y),
+                points.Max(p => p.X),
+                points.Max(p => p.Y));
+            if (HasMeaningfulOverlap(region, localBounds))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static string GetAttributeText(Entity attribute)
@@ -619,16 +700,25 @@ public static class CadTextExtractor
 
     internal sealed class TextCandidate
     {
-        public TextCandidate(string text, Point3d point, TextSourcePriority priority)
+        public TextCandidate(
+            string text,
+            Point3d point,
+            TextSourcePriority priority,
+            Point3d? alignmentPoint = null,
+            LocalRectangle? worldBounds = null)
         {
             Text = text;
             Point = point;
             Priority = priority;
+            AlignmentPoint = alignmentPoint;
+            WorldBounds = worldBounds;
         }
 
         public string Text { get; }
         public Point3d Point { get; }
         public TextSourcePriority Priority { get; }
+        public Point3d? AlignmentPoint { get; }
+        public LocalRectangle? WorldBounds { get; }
     }
 
     internal enum TextSourcePriority

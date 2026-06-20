@@ -55,6 +55,7 @@ public sealed class LocalRectangle
 public sealed class PlotJob
 {
     public bool Selected { get; set; } = true;
+    public bool IsManualWindow { get; set; }
     public string SourceFile { get; set; } = "";
     public string OutputFileName => Path.GetFileName(OutputPath);
     public long SortPriority { get; set; }

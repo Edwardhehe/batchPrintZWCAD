@@ -307,6 +307,11 @@ public static class PlotterService
 
     private static void RefreshJobWindowFromOpenedDocument(Database db, PlotJob job)
     {
+        if (job.IsManualWindow)
+        {
+            return;
+        }
+
         var library = TitleBlockLibraryStore.Load();
         var candidates = TitleBlockScanner.Scan(db, library, job.SourceFile)
             .Where(x => string.Equals(x.SpaceName, job.SpaceName, StringComparison.OrdinalIgnoreCase)
@@ -413,7 +418,7 @@ public static class PlotterService
             validator.SetUseStandardScale(plotSettings, true);
             validator.SetStdScaleType(plotSettings, StdScaleType.ScaleToFit);
             validator.SetPlotCentered(plotSettings, true);
-            validator.SetPlotRotation(plotSettings, DetectRotation(media));
+            validator.SetPlotRotation(plotSettings, DetectRotation(media, job, plotWindow));
 
             var plotInfo = new PlotInfo
             {
@@ -466,6 +471,15 @@ public static class PlotterService
 
     private static Extents2d GetPlotWindow(PlotJob job, Document? plotDocument)
     {
+        if (job.IsPaperSpace)
+        {
+            return new Extents2d(
+                Math.Min(job.MinX, job.MaxX),
+                Math.Min(job.MinY, job.MaxY),
+                Math.Max(job.MinX, job.MaxX),
+                Math.Max(job.MinY, job.MaxY));
+        }
+
         if (plotDocument != null)
         {
             try
@@ -625,12 +639,13 @@ public static class PlotterService
                 validator.SetCurrentStyleSheet(plotSettings, styleSheet);
             }
 
-            validator.SetPlotWindowArea(plotSettings, GetPlotWindow(job, plotDocument));
+            var plotWindow = GetPlotWindow(job, plotDocument);
+            validator.SetPlotWindowArea(plotSettings, plotWindow);
             validator.SetPlotType(plotSettings, ZwSoft.ZwCAD.DatabaseServices.PlotType.Window);
             validator.SetUseStandardScale(plotSettings, true);
             validator.SetStdScaleType(plotSettings, StdScaleType.ScaleToFit);
             validator.SetPlotCentered(plotSettings, true);
-            validator.SetPlotRotation(plotSettings, DetectRotation(media));
+            validator.SetPlotRotation(plotSettings, DetectRotation(media, job, plotWindow));
 
             var plotInfo = new PlotInfo
             {
@@ -865,8 +880,30 @@ public static class PlotterService
         return Math.Max(Math.Abs(mediaWidth - targetWidth), Math.Abs(mediaHeight - targetHeight));
     }
 
-    private static PlotRotation DetectRotation(MediaSelection? media)
+    private static PlotRotation DetectRotation(MediaSelection? media, PlotJob job, Extents2d window)
     {
-        return media?.NeedsRotation == true ? PlotRotation.Degrees090 : PlotRotation.Degrees000;
+        var paperRotation = media?.NeedsRotation == true
+            ? PlotRotation.Degrees090
+            : PlotRotation.Degrees000;
+        var paperWidth = job.PaperWidthMm;
+        var paperHeight = job.PaperHeightMm;
+        var windowWidth = Math.Abs(window.MaxPoint.X - window.MinPoint.X);
+        var windowHeight = Math.Abs(window.MaxPoint.Y - window.MinPoint.Y);
+        if (paperWidth <= 1e-9 || paperHeight <= 1e-9
+            || windowWidth <= 1e-9 || windowHeight <= 1e-9)
+        {
+            return paperRotation;
+        }
+
+        var paperIsLandscape = paperWidth >= paperHeight;
+        var windowIsLandscape = windowWidth >= windowHeight;
+        if (paperIsLandscape == windowIsLandscape)
+        {
+            return paperRotation;
+        }
+
+        return paperRotation == PlotRotation.Degrees090
+            ? PlotRotation.Degrees000
+            : PlotRotation.Degrees090;
     }
 }

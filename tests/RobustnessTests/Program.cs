@@ -9,6 +9,7 @@ CheckScale(210, 148.5, "2:1");
 CheckScale(42, 29.7, "10:1");
 CheckScale(840, 594, "1:2");
 CheckScale(420, 297, "1:1");
+CheckPaperCandidates();
 CheckLongFileName();
 CheckLongFileNameCollision();
 CheckLibraryRecovery();
@@ -30,6 +31,16 @@ void CheckScale(double width, double height, string expected)
     if (!string.Equals(detected.ScaleText, expected, StringComparison.Ordinal))
     {
         failures.Add($"Scale {width}x{height}: expected {expected}, actual {detected.ScaleText}");
+    }
+}
+
+void CheckPaperCandidates()
+{
+    var candidates = PaperSizeDetector.DetectCandidates(420, 297);
+    if (!candidates.Any(candidate => candidate.PaperName == "A3" && candidate.ScaleText == "1:1")
+        || !candidates.Any(candidate => candidate.PaperName == "A1" && candidate.ScaleText == "2:1"))
+    {
+        failures.Add("Paper candidate detection did not retain valid alternate paper/scale matches.");
     }
 }
 

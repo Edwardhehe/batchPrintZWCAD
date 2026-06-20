@@ -49,10 +49,40 @@ public static class PaperSizeDetector
 
     public static PaperDetection Detect(double width, double height)
     {
+        var candidates = GetCandidateDetails(width, height);
+        if (candidates.Count == 0)
+        {
+            return FallbackDetect(Math.Abs(width), Math.Abs(height));
+        }
+
+        return ToDetection(candidates[0]);
+    }
+
+    public static IReadOnlyList<PaperDetection> DetectCandidates(double width, double height)
+    {
+        var details = GetCandidateDetails(width, height);
+        if (details.Count == 0)
+        {
+            return Array.Empty<PaperDetection>();
+        }
+
+        var scoreLimit = Math.Min(0.04d, Math.Max(0.015d, details[0].Score + 0.015d));
+        return details
+            .Where(candidate => candidate.Score <= scoreLimit)
+            .GroupBy(
+                candidate => $"{candidate.Paper.Name}|{candidate.IsLong}|{candidate.Scale:0.########}|{candidate.PaperWidthMm:0.##}|{candidate.PaperHeightMm:0.##}",
+                StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .Take(12)
+            .Select(ToDetection)
+            .ToList();
+    }
+
+    private static List<PaperCandidate> GetCandidateDetails(double width, double height)
+    {
         var actualWidth = Math.Abs(width);
         var actualHeight = Math.Abs(height);
         var candidates = new List<PaperCandidate>();
-
         foreach (var paper in Standards)
         {
             foreach (var scale in CommonScales)
@@ -61,18 +91,16 @@ public static class PaperSizeDetector
             }
         }
 
-        var best = candidates
+        return candidates
             .OrderBy(x => x.Score)
             .ThenBy(x => x.IsLong ? 0 : 1)
             .ThenByDescending(x => x.Scale)
             .ThenBy(x => Array.IndexOf(Standards, x.Paper))
-            .FirstOrDefault();
+            .ToList();
+    }
 
-        if (best == null)
-        {
-            return FallbackDetect(actualWidth, actualHeight);
-        }
-
+    private static PaperDetection ToDetection(PaperCandidate best)
+    {
         var paperName = best.IsLong ? best.Paper.Name + "+" : best.Paper.Name;
         var paperSizeText = $"{best.PaperWidthMm:0.##} x {best.PaperHeightMm:0.##} mm";
         return new PaperDetection

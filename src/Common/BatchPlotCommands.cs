@@ -27,6 +27,7 @@ namespace ZwcadBatchPlot;
 public sealed partial class BatchPlotCommands : IExtensionApplication
 {
     private static BatchPlotForm? _batchPlotForm;
+    private static RectangleBatchPlotForm? _rectangleBatchPlotForm;
 
     public void Initialize()
     {
@@ -78,6 +79,30 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
     public void ShowBatchPlotWindowLegacy()
     {
         ShowBatchPlotWindowCore();
+    }
+
+    [CommandMethod("ZBP_SINGLE_PLOT", CommandFlags.Session)]
+    public void SinglePlot()
+    {
+        SinglePlotCore();
+    }
+
+    [CommandMethod("_ZBP_INTERNAL_SINGLE_PLOT", CommandFlags.Session)]
+    public void SinglePlotLegacy()
+    {
+        SinglePlotCore();
+    }
+
+    [CommandMethod("ZBP_RECTANGLE_BATCH_PLOT", CommandFlags.Session)]
+    public void RectangleBatchPlot()
+    {
+        ShowRectangleBatchPlotCore();
+    }
+
+    [CommandMethod("_ZBP_INTERNAL_RECTANGLE_BATCH_PLOT", CommandFlags.Session)]
+    public void RectangleBatchPlotLegacy()
+    {
+        ShowRectangleBatchPlotCore();
     }
 
     [CommandMethod("ZBP_PDF_VIEWER", CommandFlags.Session)]
@@ -397,6 +422,265 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
         };
 
         ShowModelessDialog(form);
+    }
+
+    private static void SinglePlotCore()
+    {
+        var doc = CadApp.DocumentManager.MdiActiveDocument;
+        if (doc == null)
+        {
+            return;
+        }
+
+        var editor = doc.Editor;
+        try
+        {
+            var first = editor.GetPoint(new PromptPointOptions("\n选择图纸外框第一个角点: "));
+            if (first.Status != PromptStatus.OK)
+            {
+                return;
+            }
+
+            var second = editor.GetCorner(new PromptCornerOptions("\n选择图纸外框对角点: ", first.Value));
+            if (second.Status != PromptStatus.OK)
+            {
+                return;
+            }
+
+            var minX = Math.Min(first.Value.X, second.Value.X);
+            var minY = Math.Min(first.Value.Y, second.Value.Y);
+            var maxX = Math.Max(first.Value.X, second.Value.X);
+            var maxY = Math.Max(first.Value.Y, second.Value.Y);
+            var width = maxX - minX;
+            var height = maxY - minY;
+            if (width <= 1e-6 || height <= 1e-6)
+            {
+                MessageBox.Show("选择的图纸外框宽度或高度无效。", "单张打印", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            var candidates = PaperSizeDetector.DetectCandidates(width, height);
+            var paper = candidates.Count > 0
+                ? candidates[0]
+                : PaperSizeDetector.Detect(width, height);
+            if (paper.PaperWidthMm <= 0 || paper.PaperHeightMm <= 0)
+            {
+                MessageBox.Show("无法根据所选外框识别纸张尺寸。", "单张打印", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            if (candidates.Count > 1)
+            {
+                using var paperDialog = new SinglePlotPaperSelectionForm(candidates);
+                if (ShowModalDialog(paperDialog) != DialogResult.OK)
+                {
+                    return;
+                }
+
+                paper = paperDialog.SelectedPaper;
+            }
+
+            var sourceFile = string.IsNullOrWhiteSpace(doc.Database.Filename)
+                ? doc.Name
+                : doc.Database.Filename;
+            var baseName = Path.GetFileNameWithoutExtension(sourceFile);
+            if (string.IsNullOrWhiteSpace(baseName))
+            {
+                baseName = "Drawing";
+            }
+
+            var initialDirectory = Path.GetDirectoryName(sourceFile);
+            if (string.IsNullOrWhiteSpace(initialDirectory) || !Directory.Exists(initialDirectory))
+            {
+                initialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            }
+
+            using var dialog = new SaveFileDialog
+            {
+                AddExtension = true,
+                DefaultExt = "pdf",
+                Filter = "PDF 文件 (*.pdf)|*.pdf",
+                FileName = baseName + ".pdf",
+                InitialDirectory = initialDirectory,
+                OverwritePrompt = true,
+                Title = "选择单张打印 PDF 保存位置"
+            };
+            if (dialog.ShowDialog() != DialogResult.OK)
+            {
+                return;
+            }
+
+            var settings = AppSettingsStore.Load();
+            AcadPlotterInstaller.InstallBundledPlotter();
+            var (deviceName, styleSheet) = ResolveSinglePlotOptions(settings);
+            var layoutName = LayoutManager.Current.CurrentLayout;
+            var isPaperSpace = !doc.Database.TileMode;
+            var job = new PlotJob
+            {
+                IsManualWindow = true,
+                SourceFile = sourceFile,
+                SpaceName = layoutName,
+                IsPaperSpace = isPaperSpace,
+                DrawingNumber = baseName,
+                Title = baseName,
+                PaperName = paper.PaperName,
+                ScaleText = paper.ScaleText,
+                SizeText = $"{width:0.##} x {height:0.##}",
+                PaperSizeText = $"{paper.PaperWidthMm:0.##} x {paper.PaperHeightMm:0.##} mm",
+                DetectionNote = "单张打印：用户框选图纸外框",
+                PaperWidthMm = paper.PaperWidthMm,
+                PaperHeightMm = paper.PaperHeightMm,
+                MinX = minX,
+                MinY = minY,
+                MaxX = maxX,
+                MaxY = maxY,
+                OutputPath = dialog.FileName
+            };
+
+            PlotterService.Plot(job, deviceName, styleSheet, doc, settings);
+            editor.WriteMessage($"\n单张打印完成: {dialog.FileName}");
+            RevealFileInExplorer(dialog.FileName);
+            MessageBox.Show(
+                $"单张打印完成。\n纸张: {paper.PaperName} {paper.PaperWidthMm:0.##} x {paper.PaperHeightMm:0.##} mm\n文件: {dialog.FileName}",
+                "单张打印",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+        catch (System.Exception ex)
+        {
+            editor.WriteMessage("\n单张打印失败: " + ex.Message);
+            MessageBox.Show("单张打印失败: " + ex.Message, "单张打印", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private static void ShowRectangleBatchPlotCore()
+    {
+        var doc = CadApp.DocumentManager.MdiActiveDocument;
+        if (doc == null)
+        {
+            return;
+        }
+
+        if (_rectangleBatchPlotForm is { IsDisposed: false })
+        {
+            _rectangleBatchPlotForm.Activate();
+            return;
+        }
+
+        var editor = doc.Editor;
+        var first = editor.GetPoint(new PromptPointOptions("\n框选矩形图框扫描范围第一个角点: "));
+        if (first.Status != PromptStatus.OK)
+        {
+            return;
+        }
+
+        var second = editor.GetCorner(new PromptCornerOptions("\n框选矩形图框扫描范围对角点: ", first.Value));
+        if (second.Status != PromptStatus.OK)
+        {
+            return;
+        }
+
+        var window = new Extents3d(
+            new Point3d(
+                Math.Min(first.Value.X, second.Value.X),
+                Math.Min(first.Value.Y, second.Value.Y),
+                0),
+            new Point3d(
+                Math.Max(first.Value.X, second.Value.X),
+                Math.Max(first.Value.Y, second.Value.Y),
+                0));
+
+        try
+        {
+            var results = RectangleFrameScanner.ScanWindow(doc, window);
+            if (results.Count == 0)
+            {
+                MessageBox.Show(
+                    "框选范围内没有识别到符合常见纸张比例的矩形框。",
+                    "批量打印(选矩形框)",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            var form = new RectangleBatchPlotForm(doc, window, results);
+            _rectangleBatchPlotForm = form;
+            form.FormClosed += (_, _) =>
+            {
+                if (ReferenceEquals(_rectangleBatchPlotForm, form))
+                {
+                    _rectangleBatchPlotForm = null;
+                }
+                form.Dispose();
+            };
+            ShowModelessDialog(form);
+        }
+        catch (System.Exception ex)
+        {
+            MessageBox.Show(
+                "矩形框识别失败: " + ex.Message,
+                "批量打印(选矩形框)",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+    }
+
+    private static (string DeviceName, string StyleSheet) ResolveSinglePlotOptions(AppSettings settings)
+    {
+        using var plotSettings = new PlotSettings(true);
+        var validator = PlotSettingsValidator.Current;
+        var devices = validator.GetPlotDeviceList()
+            .Cast<object>()
+            .Select(value => value?.ToString() ?? "")
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .ToList();
+        var device = FindPlotOption(devices, AcadPlotterInstaller.PreferredPdfPlotter)
+            ?? FindPlotOption(devices, settings.LastPlotDevice)
+            ?? devices.FirstOrDefault(value => value.IndexOf("PDF", StringComparison.OrdinalIgnoreCase) >= 0)
+            ?? throw new InvalidOperationException("没有找到可用的 PDF 打印机。");
+
+        var styles = validator.GetPlotStyleSheetList()
+            .Cast<object>()
+            .Select(value => value?.ToString() ?? "")
+            .Where(value => value.EndsWith(".ctb", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var style = FindPlotOption(styles, settings.LastStyleSheet)
+            ?? styles.FirstOrDefault(value => value.IndexOf("monochrome", StringComparison.OrdinalIgnoreCase) >= 0)
+            ?? "";
+        return (device, style);
+    }
+
+    private static string? FindPlotOption(System.Collections.Generic.IEnumerable<string> values, string expected)
+    {
+        if (string.IsNullOrWhiteSpace(expected))
+        {
+            return null;
+        }
+
+        return values.FirstOrDefault(value => string.Equals(value, expected, StringComparison.OrdinalIgnoreCase))
+            ?? values.FirstOrDefault(value => value.IndexOf(expected, StringComparison.OrdinalIgnoreCase) >= 0);
+    }
+
+    private static void RevealFileInExplorer(string filePath)
+    {
+        try
+        {
+            if (!File.Exists(filePath))
+            {
+                return;
+            }
+
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "explorer.exe",
+                Arguments = $"/select,\"{Path.GetFullPath(filePath)}\"",
+                UseShellExecute = true
+            });
+        }
+        catch
+        {
+            // PDF 已成功生成；资源管理器打开失败不应把打印标记为失败。
+        }
     }
 
     private static DialogResult ShowModalDialog(Form form)

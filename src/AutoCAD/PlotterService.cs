@@ -289,7 +289,8 @@ public static class PlotterService
         var media = ChooseMedia(validator, layout, deviceName, job);
         var errors = new List<string>();
 
-        foreach (var rotation in RotationOrder(media.PreferredRotation))
+        var preferredRotation = ResolveWindowRotation(media.PreferredRotation, job, window);
+        foreach (var rotation in RotationOrder(preferredRotation))
         {
             var settings = new PlotSettings(layout.ModelType);
             try
@@ -748,7 +749,8 @@ public static class PlotterService
 
     private static void RefreshJobsFromDatabase(Database db, IReadOnlyList<PlotJob> jobs)
     {
-        if (jobs.Count == 0)
+        var refreshableJobs = jobs.Where(job => !job.IsManualWindow).ToList();
+        if (refreshableJobs.Count == 0)
         {
             return;
         }
@@ -756,9 +758,9 @@ public static class PlotterService
         try
         {
             var library = TitleBlockLibraryStore.Load();
-            var scanned = TitleBlockScanner.Scan(db, library, jobs[0].SourceFile);
+            var scanned = TitleBlockScanner.Scan(db, library, refreshableJobs[0].SourceFile);
 
-            foreach (var job in jobs)
+            foreach (var job in refreshableJobs)
             {
                 var refreshed = scanned
                     .Where(x => string.Equals(x.SpaceName, job.SpaceName, StringComparison.OrdinalIgnoreCase)
@@ -799,6 +801,38 @@ public static class PlotterService
         {
             throw new InvalidOperationException("重新扫描已打开图纸失败，已停止打印以避免输出错误窗口。", ex);
         }
+    }
+
+    private static PlotRotation ResolveWindowRotation(
+        PlotRotation paperRotation,
+        PlotJob job,
+        Extents2d window)
+    {
+        var paperWidth = job.PaperWidthMm;
+        var paperHeight = job.PaperHeightMm;
+        var windowWidth = Math.Abs(window.MaxPoint.X - window.MinPoint.X);
+        var windowHeight = Math.Abs(window.MaxPoint.Y - window.MinPoint.Y);
+        if (paperWidth <= 1e-9 || paperHeight <= 1e-9
+            || windowWidth <= 1e-9 || windowHeight <= 1e-9)
+        {
+            return paperRotation;
+        }
+
+        var paperIsLandscape = paperWidth >= paperHeight;
+        var windowIsLandscape = windowWidth >= windowHeight;
+        if (paperIsLandscape == windowIsLandscape)
+        {
+            return paperRotation;
+        }
+
+        return paperRotation switch
+        {
+            PlotRotation.Degrees000 => PlotRotation.Degrees090,
+            PlotRotation.Degrees090 => PlotRotation.Degrees000,
+            PlotRotation.Degrees180 => PlotRotation.Degrees270,
+            PlotRotation.Degrees270 => PlotRotation.Degrees180,
+            _ => paperRotation
+        };
     }
 
     private static void PreviewDatabase(Database db, string documentName, PlotJob job, string deviceName, string styleSheet, Document plotDocument)
@@ -858,6 +892,15 @@ public static class PlotterService
 
     private static Extents2d GetPlotWindow(PlotJob job, Document? plotDocument)
     {
+        if (job.IsPaperSpace)
+        {
+            return new Extents2d(
+                Math.Min(job.MinX, job.MaxX),
+                Math.Min(job.MinY, job.MaxY),
+                Math.Max(job.MinX, job.MaxX),
+                Math.Max(job.MinY, job.MaxY));
+        }
+
         if (plotDocument != null)
         {
             try

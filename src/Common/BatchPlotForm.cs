@@ -61,9 +61,9 @@ public sealed class BatchPlotForm : Form
     private void InitializeComponents()
     {
 #if AUTOCAD
-        Text = "批量打印 - AutoCAD";
+        Text = "批量打印(选图框块) - AutoCAD";
 #else
-        Text = "批量打印 - ZWCAD";
+        Text = "批量打印(选图框块) - ZWCAD";
 #endif
         UiLayout.ConfigureBatchPlotForm(this);
         var tips = new ToolTip
@@ -295,6 +295,14 @@ public sealed class BatchPlotForm : Form
         _grid.DataSource = _jobs;
         _grid.CellEndEdit += GridCellEndEdit;
         _grid.CellContentClick += GridCellContentClick;
+        _grid.CellValueChanged += GridCellValueChanged;
+        _grid.CurrentCellDirtyStateChanged += (_, _) =>
+        {
+            if (_grid.IsCurrentCellDirty)
+            {
+                _grid.CommitEdit(DataGridViewDataErrorContexts.Commit);
+            }
+        };
         _grid.CellMouseDown += GridCellMouseDown;
         _grid.ContextMenuStrip = CreateGridContextMenu();
 
@@ -725,11 +733,20 @@ public sealed class BatchPlotForm : Form
         var menu = new ContextMenuStrip();
         var moveToFirst = new ToolStripMenuItem("移到第一个");
         moveToFirst.Click += (_, _) => MoveCurrentJobToFirst();
+        var markNotPrint = new ToolStripMenuItem("不打印");
+        markNotPrint.Click += (_, _) => MarkHighlightedJobsNotPrint();
+        var delete = new ToolStripMenuItem("删除");
+        delete.Click += (_, _) => RemoveHighlightedJobs();
         menu.Items.Add(moveToFirst);
+        menu.Items.Add(markNotPrint);
+        menu.Items.Add(delete);
         menu.Opening += (_, e) =>
         {
-            moveToFirst.Enabled = _grid.CurrentRow?.DataBoundItem is PlotJob;
-            e.Cancel = !moveToFirst.Enabled;
+            var enabled = _grid.CurrentRow?.DataBoundItem is PlotJob;
+            moveToFirst.Enabled = enabled;
+            markNotPrint.Enabled = enabled;
+            delete.Enabled = enabled;
+            e.Cancel = !enabled;
         };
         return menu;
     }
@@ -741,8 +758,11 @@ public sealed class BatchPlotForm : Form
             return;
         }
 
-        _grid.ClearSelection();
-        _grid.Rows[e.RowIndex].Selected = true;
+        if (!_grid.Rows[e.RowIndex].Selected)
+        {
+            _grid.ClearSelection();
+            _grid.Rows[e.RowIndex].Selected = true;
+        }
         _grid.CurrentCell = _grid.Rows[e.RowIndex].Cells[Math.Max(e.ColumnIndex, 0)];
     }
 
@@ -770,7 +790,7 @@ public sealed class BatchPlotForm : Form
         _sequenceOverlayFollowsCurrentJobs = true;
         try
         {
-            _sequenceOverlay.Show(_jobs.ToList());
+            _sequenceOverlay.Show(_jobs.Where(job => job.Selected && IsCurrentDocumentJob(job)).ToList());
         }
         catch (Exception ex)
         {
@@ -815,6 +835,7 @@ public sealed class BatchPlotForm : Form
 
         _grid.Refresh();
         RefreshStatus();
+        RefreshSelectedOverlay();
     }
 
     private void InvertSelected()
@@ -827,22 +848,41 @@ public sealed class BatchPlotForm : Form
 
         _grid.Refresh();
         RefreshStatus();
+        RefreshSelectedOverlay();
     }
 
-    private void RemoveHighlightedJobs()
+    private void MarkHighlightedJobsNotPrint()
     {
-        _grid.EndEdit();
-        var highlightedJobs = _grid.SelectedRows
+        foreach (var job in GetHighlightedJobs())
+        {
+            job.Selected = false;
+        }
+
+        _grid.Refresh();
+        RefreshStatus();
+        RefreshSelectedOverlay();
+    }
+
+    private List<PlotJob> GetHighlightedJobs()
+    {
+        var jobs = _grid.SelectedRows
             .Cast<DataGridViewRow>()
             .Select(row => row.DataBoundItem)
             .OfType<PlotJob>()
             .Distinct()
             .ToList();
-
-        if (highlightedJobs.Count == 0 && _grid.CurrentRow?.DataBoundItem is PlotJob currentJob)
+        if (jobs.Count == 0 && _grid.CurrentRow?.DataBoundItem is PlotJob current)
         {
-            highlightedJobs.Add(currentJob);
+            jobs.Add(current);
         }
+
+        return jobs;
+    }
+
+    private void RemoveHighlightedJobs()
+    {
+        _grid.EndEdit();
+        var highlightedJobs = GetHighlightedJobs();
 
         if (highlightedJobs.Count == 0)
         {
@@ -856,6 +896,27 @@ public sealed class BatchPlotForm : Form
         }
 
         SortAndRefreshOutputPaths();
+        RefreshSelectedOverlay();
+    }
+
+    private void GridCellValueChanged(object? sender, DataGridViewCellEventArgs e)
+    {
+        if (e.RowIndex < 0 || e.ColumnIndex < 0
+            || _grid.Columns[e.ColumnIndex].DataPropertyName != nameof(PlotJob.Selected))
+        {
+            return;
+        }
+
+        RefreshStatus();
+        RefreshSelectedOverlay();
+    }
+
+    private void RefreshSelectedOverlay()
+    {
+        if (_sequenceOverlayFollowsCurrentJobs)
+        {
+            ShowSequenceOverlayForCurrentJobs();
+        }
     }
 
     private void ClearJobs()

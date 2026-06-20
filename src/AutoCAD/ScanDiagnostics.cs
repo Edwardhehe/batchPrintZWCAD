@@ -17,6 +17,76 @@ namespace ZwcadBatchPlot;
 
 public sealed partial class BatchPlotCommands
 {
+    [CommandMethod("ZBP_DIAG_RECTANGLE_SPACE", CommandFlags.Session)]
+    public void DiagnoseRectangleSpace()
+    {
+        var doc = CadApp.DocumentManager.MdiActiveDocument;
+        if (doc == null)
+        {
+            return;
+        }
+
+        var window = new Extents3d(
+            new Point3d(-1e12, -1e12, 0),
+            new Point3d(1e12, 1e12, 0));
+        var results = RectangleFrameScanner.ScanWindow(doc, window);
+        var lines = new List<string>
+        {
+            "Rectangle space diagnostics",
+            "Time: " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+            "Document: " + (string.IsNullOrWhiteSpace(doc.Database.Filename) ? doc.Name : doc.Database.Filename),
+            "CurrentLayout: " + LayoutManager.Current.CurrentLayout,
+            "TileMode: " + doc.Database.TileMode,
+            "CurrentSpaceId: " + doc.Database.CurrentSpaceId,
+            "Count: " + results.Count
+        };
+        lines.AddRange(results.Select((result, index) =>
+            $"RECT\tindex={index + 1}\tspace={result.Job.SpaceName}\tpaperSpace={result.Job.IsPaperSpace}\twindow=({result.Job.MinX:0.###},{result.Job.MinY:0.###})-({result.Job.MaxX:0.###},{result.Job.MaxY:0.###})\tpaper={result.Job.PaperName}\tscale={result.Job.ScaleText}"));
+
+        var logDirectory = Path.Combine(TitleBlockLibraryStore.DefaultDirectory, "Logs");
+        Directory.CreateDirectory(logDirectory);
+        var logPath = Path.Combine(logDirectory, "RectangleSpace_" + DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".txt");
+        File.WriteAllLines(logPath, lines);
+        doc.Editor.WriteMessage("\nRectangle space diagnostics written to: " + logPath);
+    }
+
+    [CommandMethod("ZBP_DIAG_RECTANGLE_PLOT", CommandFlags.Session)]
+    public void DiagnoseRectanglePlot()
+    {
+        var doc = CadApp.DocumentManager.MdiActiveDocument;
+        if (doc == null)
+        {
+            return;
+        }
+
+        var window = new Extents3d(
+            new Point3d(-1e12, -1e12, 0),
+            new Point3d(1e12, 1e12, 0));
+        var result = RectangleFrameScanner.ScanWindow(doc, window).FirstOrDefault();
+        if (result == null)
+        {
+            doc.Editor.WriteMessage("\nNo rectangle available for diagnostic plot.");
+            return;
+        }
+
+        using var settings = new PlotSettings(true);
+        var validator = PlotSettingsValidator.Current;
+        var devices = validator.GetPlotDeviceList().Cast<string>().ToList();
+        var device = devices.FirstOrDefault(value =>
+                value.IndexOf(AcadPlotterInstaller.PreferredPdfPlotter, StringComparison.OrdinalIgnoreCase) >= 0)
+            ?? devices.FirstOrDefault(value => value.IndexOf("DWG To PDF", StringComparison.OrdinalIgnoreCase) >= 0)
+            ?? devices.FirstOrDefault(value => value.IndexOf("PDF", StringComparison.OrdinalIgnoreCase) >= 0)
+            ?? throw new InvalidOperationException("No PDF plotter is available.");
+        var styles = validator.GetPlotStyleSheetList().Cast<string>().ToList();
+        var style = styles.FirstOrDefault(value => value.IndexOf("monochrome", StringComparison.OrdinalIgnoreCase) >= 0) ?? "";
+        var output = Path.Combine(
+            Path.GetTempPath(),
+            $"RectanglePlot_{(result.Job.IsPaperSpace ? "Paper" : "Model")}_{DateTime.Now:yyyyMMdd_HHmmss_fff}.pdf");
+        result.Job.OutputPath = output;
+        PlotterService.Plot(result.Job, device, style, doc, AppSettingsStore.Load());
+        doc.Editor.WriteMessage("\nRectangle diagnostic PDF: " + output);
+    }
+
     [CommandMethod("ZBP_DIAG_SCAN", CommandFlags.Session)]
     public void DiagnoseScan()
     {
