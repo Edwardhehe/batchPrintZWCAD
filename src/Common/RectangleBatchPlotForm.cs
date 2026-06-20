@@ -62,26 +62,21 @@ public sealed class RectangleBatchPlotForm : Form
     {
         Text = "批量打印(选矩形框)";
         UiLayout.ConfigureBatchPlotForm(this);
+        BackColor = Color.FromArgb(245, 247, 250);
+        var tips = new ToolTip { AutoPopDelay = 8000, InitialDelay = 400, ReshowDelay = 100, ShowAlways = true };
 
         var top = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
-            Height = UiLayout.Scale(176),
+            Height = UiLayout.Scale(202),
             ColumnCount = 1,
-            RowCount = 4,
-            Padding = new Padding(UiLayout.Scale(10), UiLayout.Scale(8), UiLayout.Scale(10), UiLayout.Scale(4))
+            RowCount = 3,
+            Padding = new Padding(UiLayout.Scale(10), UiLayout.Scale(8), UiLayout.Scale(10), UiLayout.Scale(6)),
+            BackColor = Color.FromArgb(245, 247, 250)
         };
-
-        var pathButtons = NewFlow();
-        var sourceButton = UiLayout.CreateButton("源文件路径", 98);
-        sourceButton.Click += (_, _) => SetOutputDirectory(SourceDirectory());
-        var pdfButton = UiLayout.CreateButton("源文件路径/PDF", 126);
-        pdfButton.Click += (_, _) => SetOutputDirectory(Path.Combine(SourceDirectory(), "PDF"));
-        var customButton = UiLayout.CreateButton("指定路径", 88);
-        customButton.Click += (_, _) => ChooseOutputDirectory();
-        pathButtons.Controls.Add(sourceButton);
-        pathButtons.Controls.Add(pdfButton);
-        pathButtons.Controls.Add(customButton);
+        top.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(42)));
+        top.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(76)));
+        top.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(68)));
 
         var actions = NewFlow();
         var selectAll = UiLayout.CreateButton("全选", 64);
@@ -92,93 +87,146 @@ public sealed class RectangleBatchPlotForm : Form
         refresh.Click += (_, _) => ReloadFrames();
         actions.Controls.Add(selectAll);
         actions.Controls.Add(selectNone);
+        actions.Controls.Add(Separator());
         actions.Controls.Add(refresh);
+        actions.Controls.Add(new Label
+        {
+            Text = "右键条目可设为不打印或删除",
+            AutoSize = true,
+            ForeColor = Color.DimGray,
+            Margin = new Padding(UiLayout.Scale(10), UiLayout.Scale(8), 0, 0)
+        });
+        tips.SetToolTip(refresh, "重新扫描最初框选的范围，并刷新矩形框列表。");
 
-        var options = NewFlow();
-        options.Controls.Add(LabelFor("排序:"));
+        var outputGroup = new GroupBox
+        {
+            Text = "PDF 输出位置",
+            Dock = DockStyle.Fill,
+            Padding = new Padding(UiLayout.Scale(10), UiLayout.Scale(5), UiLayout.Scale(10), UiLayout.Scale(5)),
+            Margin = new Padding(0, 0, 0, UiLayout.Scale(5))
+        };
+        var outputLayout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 2,
+            Margin = Padding.Empty
+        };
+        outputLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(27)));
+        outputLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(30)));
+        _outputDirectory.Dock = DockStyle.Fill;
+        _outputDirectory.Text = Path.Combine(SourceDirectory(), "PDF");
+        _outputDirectory.Margin = new Padding(0, 0, 0, UiLayout.Scale(2));
+        _outputDirectory.TextChanged += (_, _) => RefreshOutputPaths();
+        outputLayout.Controls.Add(_outputDirectory, 0, 0);
+
+        var pathButtons = NewFlow();
+        var sourceButton = UiLayout.CreateButton("源文件路径", 98);
+        sourceButton.Click += (_, _) => SetOutputDirectory(SourceDirectory());
+        var pdfButton = UiLayout.CreateButton("源文件路径/PDF", 126);
+        pdfButton.Click += (_, _) => SetOutputDirectory(Path.Combine(SourceDirectory(), "PDF"));
+        var customButton = UiLayout.CreateButton("指定路径...", 88);
+        customButton.Click += (_, _) => ChooseOutputDirectory();
+        pathButtons.Controls.Add(sourceButton);
+        pathButtons.Controls.Add(pdfButton);
+        pathButtons.Controls.Add(customButton);
+        outputLayout.Controls.Add(pathButtons, 0, 1);
+        outputGroup.Controls.Add(outputLayout);
+        tips.SetToolTip(sourceButton, "输出到当前 DWG 所在文件夹。");
+        tips.SetToolTip(pdfButton, "输出到当前 DWG 所在文件夹下的 PDF 子文件夹。");
+        tips.SetToolTip(customButton, "选择其他 PDF 输出文件夹。");
+
+        var printGroup = new GroupBox
+        {
+            Text = "打印设置",
+            Dock = DockStyle.Fill,
+            Padding = new Padding(UiLayout.Scale(10), UiLayout.Scale(5), UiLayout.Scale(10), UiLayout.Scale(5)),
+            Margin = Padding.Empty
+        };
+        var options = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 8, RowCount = 1, Margin = Padding.Empty };
+        options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(42)));
+        options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(205)));
+        options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(128)));
+        options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(58)));
+        options.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55));
+        options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(38)));
+        options.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45));
+        options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(112)));
+
+        options.Controls.Add(LabelFor("排序"), 0, 0);
         _sortOrder.DropDownStyle = ComboBoxStyle.DropDownList;
-        _sortOrder.Width = UiLayout.Scale(220);
+        _sortOrder.Dock = DockStyle.Fill;
+        _sortOrder.Margin = new Padding(0, UiLayout.Scale(3), UiLayout.Scale(8), UiLayout.Scale(4));
         _sortOrder.Items.AddRange(new object[] { "从上到下，从左到右", "从左到右，从上到下" });
         _sortOrder.SelectedIndex = 0;
         _sortOrder.SelectedIndexChanged += (_, _) => SortRows();
-        options.Controls.Add(_sortOrder);
-        _mergePdf.Text = "合并为一个PDF";
+        options.Controls.Add(_sortOrder, 1, 0);
+
+        _mergePdf.Text = "合并为一个 PDF";
         _mergePdf.Checked = true;
         _mergePdf.AutoSize = true;
-        _mergePdf.Margin = new Padding(UiLayout.Scale(12), UiLayout.Scale(7), UiLayout.Scale(12), 0);
-        options.Controls.Add(_mergePdf);
-        options.Controls.Add(LabelFor("打印机:"));
+        _mergePdf.Margin = new Padding(UiLayout.Scale(4), UiLayout.Scale(7), UiLayout.Scale(8), 0);
+        options.Controls.Add(_mergePdf, 2, 0);
+        options.Controls.Add(LabelFor("打印机"), 3, 0);
         _device.DropDownStyle = ComboBoxStyle.DropDownList;
-        _device.Width = UiLayout.Scale(170);
-        options.Controls.Add(_device);
-        options.Controls.Add(LabelFor("CTB:"));
+        _device.Dock = DockStyle.Fill;
+        _device.Margin = new Padding(0, UiLayout.Scale(3), UiLayout.Scale(8), UiLayout.Scale(4));
+        options.Controls.Add(_device, 4, 0);
+        options.Controls.Add(LabelFor("CTB"), 5, 0);
         _style.DropDownStyle = ComboBoxStyle.DropDownList;
-        _style.Width = UiLayout.Scale(135);
-        options.Controls.Add(_style);
+        _style.Dock = DockStyle.Fill;
+        _style.Margin = new Padding(0, UiLayout.Scale(3), UiLayout.Scale(8), UiLayout.Scale(4));
+        options.Controls.Add(_style, 6, 0);
+
         var print = UiLayout.CreateButton("开始打印", 98);
+        print.Dock = DockStyle.Fill;
+        print.Margin = new Padding(UiLayout.Scale(6), UiLayout.Scale(2), 0, UiLayout.Scale(4));
         print.BackColor = Color.FromArgb(0, 120, 215);
         print.ForeColor = Color.White;
+        print.FlatStyle = FlatStyle.Flat;
+        print.FlatAppearance.BorderColor = Color.FromArgb(0, 95, 170);
         print.Click += (_, _) => Print();
-        options.Controls.Add(print);
+        options.Controls.Add(print, 7, 0);
+        printGroup.Controls.Add(options);
+        tips.SetToolTip(_sortOrder, "改变列表、红框编号和最终 PDF 页面的顺序。");
+        tips.SetToolTip(_mergePdf, "勾选后只保留一个合并 PDF；取消后输出每张单独 PDF。");
 
-        var path = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2 };
-        path.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(72)));
-        path.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        path.Controls.Add(LabelFor("PDF路径:"), 0, 0);
-        _outputDirectory.Dock = DockStyle.Fill;
-        _outputDirectory.Text = Path.Combine(SourceDirectory(), "PDF");
-        _outputDirectory.TextChanged += (_, _) => RefreshOutputPaths();
-        path.Controls.Add(_outputDirectory, 1, 0);
-
-        top.Controls.Add(options, 0, 0);
-        top.Controls.Add(path, 0, 1);
-        top.Controls.Add(pathButtons, 0, 2);
-        top.Controls.Add(actions, 0, 3);
+        top.Controls.Add(actions, 0, 0);
+        top.Controls.Add(outputGroup, 0, 1);
+        top.Controls.Add(printGroup, 0, 2);
 
         UiLayout.StyleGrid(_grid, Font);
+        _grid.BorderStyle = BorderStyle.None;
+        _grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
+        _grid.DefaultCellStyle.Padding = new Padding(UiLayout.Scale(3), 0, UiLayout.Scale(3), 0);
         _grid.DataSource = _rows;
         _grid.Columns.Add(new DataGridViewButtonColumn
         {
-            Name = "Preview",
-            HeaderText = "预览",
-            Text = "预览",
-            UseColumnTextForButtonValue = true,
-            Width = UiLayout.Scale(62)
+            Name = "Preview", HeaderText = "预览", Text = "预览", UseColumnTextForButtonValue = true, Width = UiLayout.Scale(62)
         });
         _grid.Columns.Add(new DataGridViewCheckBoxColumn
         {
-            DataPropertyName = nameof(Row.Selected),
-            HeaderText = "是否打印",
-            Width = UiLayout.Scale(78)
+            DataPropertyName = nameof(Row.Selected), HeaderText = "打印", Width = UiLayout.Scale(62)
         });
         _grid.Columns.Add(new DataGridViewTextBoxColumn
         {
-            DataPropertyName = nameof(Row.FileName),
-            HeaderText = "文件名",
-            Width = UiLayout.Scale(230)
+            DataPropertyName = nameof(Row.FileName), HeaderText = "文件名",
+            AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill, FillWeight = 34, MinimumWidth = UiLayout.Scale(170)
         });
         _grid.Columns.Add(new DataGridViewComboBoxColumn
         {
-            Name = "PaperChoice",
-            DataPropertyName = nameof(Row.PaperChoice),
-            HeaderText = "纸张尺寸",
-            Width = UiLayout.Scale(210),
-            DisplayStyle = DataGridViewComboBoxDisplayStyle.DropDownButton,
-            FlatStyle = FlatStyle.Flat
+            Name = "PaperChoice", DataPropertyName = nameof(Row.PaperChoice), HeaderText = "纸张尺寸 / 比例",
+            AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill, FillWeight = 34, MinimumWidth = UiLayout.Scale(200),
+            DisplayStyle = DataGridViewComboBoxDisplayStyle.DropDownButton, FlatStyle = FlatStyle.Flat
         });
         _grid.Columns.Add(new DataGridViewTextBoxColumn
         {
-            DataPropertyName = nameof(Row.Scale),
-            HeaderText = "比例",
-            ReadOnly = true,
-            Width = UiLayout.Scale(95)
+            DataPropertyName = nameof(Row.Scale), HeaderText = "比例", ReadOnly = true, Width = UiLayout.Scale(86)
         });
         _grid.Columns.Add(new DataGridViewTextBoxColumn
         {
-            DataPropertyName = nameof(Row.GraphicSize),
-            HeaderText = "图形尺寸",
-            ReadOnly = true,
-            Width = UiLayout.Scale(165)
+            DataPropertyName = nameof(Row.GraphicSize), HeaderText = "图形尺寸", ReadOnly = true,
+            AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill, FillWeight = 22, MinimumWidth = UiLayout.Scale(130)
         });
         _grid.DataBindingComplete += (_, _) => ConfigurePaperCells();
         _grid.CellValueChanged += GridCellValueChanged;
@@ -191,6 +239,7 @@ public sealed class RectangleBatchPlotForm : Form
         };
         _grid.CellContentClick += GridCellContentClick;
         _grid.CellMouseDown += GridCellMouseDown;
+        _grid.CellFormatting += GridCellFormatting;
         _grid.ContextMenuStrip = CreateContextMenu();
         _grid.DataError += (_, e) => e.ThrowException = false;
 
@@ -198,6 +247,9 @@ public sealed class RectangleBatchPlotForm : Form
         _status.Height = UiLayout.Scale(30);
         _status.TextAlign = ContentAlignment.MiddleLeft;
         _status.Padding = new Padding(UiLayout.Scale(8), 0, 0, 0);
+        _status.BackColor = Color.FromArgb(235, 239, 244);
+        _status.ForeColor = Color.FromArgb(55, 65, 81);
+        _status.BorderStyle = BorderStyle.FixedSingle;
         Controls.Add(_grid);
         Controls.Add(_status);
         Controls.Add(top);
@@ -213,9 +265,17 @@ public sealed class RectangleBatchPlotForm : Form
         static Label LabelFor(string text) => new()
         {
             Text = text,
-            AutoSize = true,
+            Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleLeft,
-            Margin = new Padding(0, UiLayout.Scale(8), UiLayout.Scale(4), 0)
+            Margin = new Padding(0, 0, UiLayout.Scale(4), 0)
+        };
+
+        static Control Separator() => new Label
+        {
+            Width = UiLayout.Scale(1),
+            Height = UiLayout.ButtonHeight() - UiLayout.Scale(8),
+            BackColor = Color.FromArgb(205, 210, 216),
+            Margin = new Padding(UiLayout.Scale(4), UiLayout.Scale(6), UiLayout.Scale(12), UiLayout.Scale(4))
         };
     }
 
@@ -418,6 +478,26 @@ public sealed class RectangleBatchPlotForm : Form
         _grid.CurrentCell = _grid.Rows[e.RowIndex].Cells[Math.Max(e.ColumnIndex, 0)];
     }
 
+    private void GridCellFormatting(object? sender, DataGridViewCellFormattingEventArgs e)
+    {
+        if (e.RowIndex < 0 || _grid.Rows[e.RowIndex].DataBoundItem is not Row row)
+        {
+            return;
+        }
+
+        if (!row.Selected && !_grid.Rows[e.RowIndex].Selected)
+        {
+            var cellStyle = e.CellStyle;
+            if (cellStyle is null)
+            {
+                return;
+            }
+
+            cellStyle.ForeColor = Color.Gray;
+            cellStyle.BackColor = Color.FromArgb(247, 247, 247);
+        }
+    }
+
     private List<Row> HighlightedRows()
     {
         var rows = _grid.SelectedRows.Cast<DataGridViewRow>()
@@ -607,7 +687,9 @@ public sealed class RectangleBatchPlotForm : Form
 
     private void UpdateVisuals()
     {
-        _status.Text = $"识别矩形框 {_rows.Count} 个，勾选 {_rows.Count(row => row.Selected)} 个";
+        var selected = _rows.Count(row => row.Selected);
+        var order = _sortOrder.SelectedIndex == 1 ? "左→右、上→下" : "上→下、左→右";
+        _status.Text = $"识别 {_rows.Count} 个矩形框  |  打印 {selected} 个  |  顺序：{order}  |  输出：{_outputDirectory.Text}";
         try
         {
             _overlay.Show(_rows.Where(row => row.Selected).Select(row => row.Job).ToList());
