@@ -194,18 +194,26 @@ public static class RectangleFrameScanner
     private static bool TryGetRectangle(Polyline polyline, Matrix3d transform, out LocalRectangle rectangle)
     {
         rectangle = new LocalRectangle();
-        if (!polyline.Closed || polyline.NumberOfVertices != 4)
+        if (polyline.NumberOfVertices < 4)
         {
             return false;
         }
 
-        var points = Enumerable.Range(0, 4)
+        for (var index = 0; index < polyline.NumberOfVertices; index++)
+        {
+            if (Math.Abs(polyline.GetBulgeAt(index)) > 1e-9)
+            {
+                return false;
+            }
+        }
+
+        var points = Enumerable.Range(0, polyline.NumberOfVertices)
             .Select(index =>
             {
                 var point = polyline.GetPoint3dAt(index);
                 return point.TransformBy(transform);
             })
-            .ToArray();
+            .ToList();
         var minX = points.Min(point => point.X);
         var minY = points.Min(point => point.Y);
         var maxX = points.Max(point => point.X);
@@ -218,6 +226,23 @@ public static class RectangleFrameScanner
         }
 
         var tolerance = Math.Max(width, height) * 0.001;
+        if (!polyline.Closed && !SamePoint(points[0], points[points.Count - 1], tolerance))
+        {
+            return false;
+        }
+
+        if (points.Count > 1 && SamePoint(points[0], points[points.Count - 1], tolerance))
+        {
+            points.RemoveAt(points.Count - 1);
+        }
+
+        RemoveConsecutiveDuplicatePoints(points, tolerance);
+        RemoveCollinearPoints(points, tolerance);
+        if (points.Count != 4)
+        {
+            return false;
+        }
+
         foreach (var point in points)
         {
             var onVertical = Math.Abs(point.X - minX) <= tolerance || Math.Abs(point.X - maxX) <= tolerance;
@@ -230,6 +255,50 @@ public static class RectangleFrameScanner
 
         rectangle = LocalRectangle.FromPoints(minX, minY, maxX, maxY);
         return true;
+    }
+
+    private static void RemoveConsecutiveDuplicatePoints(IList<Point3d> points, double tolerance)
+    {
+        for (var index = points.Count - 1; index > 0; index--)
+        {
+            if (SamePoint(points[index], points[index - 1], tolerance))
+            {
+                points.RemoveAt(index);
+            }
+        }
+    }
+
+    private static void RemoveCollinearPoints(IList<Point3d> points, double tolerance)
+    {
+        var changed = true;
+        while (changed && points.Count > 4)
+        {
+            changed = false;
+            for (var index = 0; index < points.Count; index++)
+            {
+                var previous = points[(index - 1 + points.Count) % points.Count];
+                var current = points[index];
+                var next = points[(index + 1) % points.Count];
+                var sameX = Math.Abs(previous.X - current.X) <= tolerance
+                    && Math.Abs(current.X - next.X) <= tolerance;
+                var sameY = Math.Abs(previous.Y - current.Y) <= tolerance
+                    && Math.Abs(current.Y - next.Y) <= tolerance;
+                if (!sameX && !sameY)
+                {
+                    continue;
+                }
+
+                points.RemoveAt(index);
+                changed = true;
+                break;
+            }
+        }
+    }
+
+    private static bool SamePoint(Point3d a, Point3d b, double tolerance)
+    {
+        return Math.Abs(a.X - b.X) <= tolerance
+            && Math.Abs(a.Y - b.Y) <= tolerance;
     }
 
     private static List<LocalRectangle> FilterRectangles(IEnumerable<LocalRectangle> source)
