@@ -471,6 +471,17 @@ public static class PlotterService
 
     private static Extents2d GetPlotWindow(PlotJob job, Document? plotDocument)
     {
+        // 单张打印已在 BatchPlotCommands.SinglePlotCore 完成 UCS→DCS 全链路变换
+        // 此处直接返回坐标，跳过 WCS→DCS 二次变换和 GetWorldToDisplayMatrix
+        if (job.IsDcsWindow)
+        {
+            return new Extents2d(
+                Math.Min(job.MinX, job.MaxX),
+                Math.Min(job.MinY, job.MaxY),
+                Math.Max(job.MinX, job.MaxX),
+                Math.Max(job.MinY, job.MaxY));
+        }
+
         if (job.IsPaperSpace)
         {
             return new Extents2d(
@@ -524,7 +535,10 @@ public static class PlotterService
 
     private static void PrepareEditorViewForPlot(Document doc, PlotJob job)
     {
-        if (job.IsPaperSpace)
+        // 图纸空间无视图概念，跳过
+        // IsDcsWindow：单张打印 DCS 是基于用户原始旋转视图计算的，
+        //   强制重置 ViewTwist=0 ViewDirection=ZAxis 会破坏 DCS 坐标系一致性
+        if (job.IsPaperSpace || job.IsDcsWindow)
         {
             return;
         }

@@ -447,10 +447,35 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
                 return;
             }
 
-            var minX = Math.Min(first.Value.X, second.Value.X);
-            var minY = Math.Min(first.Value.Y, second.Value.Y);
-            var maxX = Math.Max(first.Value.X, second.Value.X);
-            var maxY = Math.Max(first.Value.Y, second.Value.Y);
+            // GetPoint 和 GetCorner 返回的是当前 UCS（用户坐标系）下的坐标
+            // 例如：用户设了旋转 30° 的 UCS，框选的角点就是 UCS 坐标
+            // 打印引擎 SetPlotWindowArea 需要的是 DCS（显示坐标系）
+            //
+            // 正确的做法（等价于 ObjectARX 的 acedTrans(UCS→DCS)）：
+            //   UCS 两个对角点 → 展开为 4 个角点 → × UCS→DCS 矩阵 → 取一次 DCS 包围盒
+            //
+            // 错误的做法（会导致旋转 UCS 下窗口偏大）：
+            //   UCS → WCS 包围盒（第一次放大，丢了旋转信息）→ WCS→DCS（第二次放大）
+            var ucsP1 = first.Value;
+            var ucsP2 = second.Value;
+
+            // 构建 UCS → DCS 变换矩阵，等价于 acedTrans(point, UCS, DCS)
+            var ucsToDcs = BuildUcsToDcsMatrix(editor);
+
+            // UCS 矩形四个角点一步到位变换到 DCS，不在中间环节取包围盒
+            var corners = new[]
+            {
+                new Point3d(ucsP1.X, ucsP1.Y, 0).TransformBy(ucsToDcs),
+                new Point3d(ucsP2.X, ucsP1.Y, 0).TransformBy(ucsToDcs),
+                new Point3d(ucsP1.X, ucsP2.Y, 0).TransformBy(ucsToDcs),
+                new Point3d(ucsP2.X, ucsP2.Y, 0).TransformBy(ucsToDcs)
+            };
+
+            // 仅在最终的 DCS 取一次轴对齐包围盒，这是 CAD API 必须的
+            var minX = corners.Min(p => p.X);
+            var minY = corners.Min(p => p.Y);
+            var maxX = corners.Max(p => p.X);
+            var maxY = corners.Max(p => p.Y);
             var width = maxX - minX;
             var height = maxY - minY;
             if (width <= 1e-6 || height <= 1e-6)
@@ -460,64 +485,45 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
             }
 
             var candidates = PaperSizeDetector.DetectCandidates(width, height);
-            var paper = candidates.Count > 0
-                ? candidates[0]
-                : PaperSizeDetector.Detect(width, height);
-            if (paper.PaperWidthMm <= 0 || paper.PaperHeightMm <= 0)
+            if (candidates.Count == 0)
+            {
+                candidates = new List<PaperDetection> { PaperSizeDetector.Detect(width, height) };
+            }
+
+            if (candidates[0].PaperWidthMm <= 0 || candidates[0].PaperHeightMm <= 0)
             {
                 MessageBox.Show("无法根据所选外框识别纸张尺寸。", "单张打印", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
-            if (candidates.Count > 1)
-            {
-                using var paperDialog = new SinglePlotPaperSelectionForm(candidates);
-                if (ShowModalDialog(paperDialog) != DialogResult.OK)
-                {
-                    return;
-                }
-
-                paper = paperDialog.SelectedPaper;
-            }
-
             var sourceFile = string.IsNullOrWhiteSpace(doc.Database.Filename)
                 ? doc.Name
                 : doc.Database.Filename;
-            var baseName = Path.GetFileNameWithoutExtension(sourceFile);
-            if (string.IsNullOrWhiteSpace(baseName))
-            {
-                baseName = "Drawing";
-            }
 
-            var initialDirectory = Path.GetDirectoryName(sourceFile);
-            if (string.IsNullOrWhiteSpace(initialDirectory) || !Directory.Exists(initialDirectory))
-            {
-                initialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-            }
-
-            using var dialog = new SaveFileDialog
-            {
-                AddExtension = true,
-                DefaultExt = "pdf",
-                Filter = "PDF 文件 (*.pdf)|*.pdf",
-                FileName = baseName + ".pdf",
-                InitialDirectory = initialDirectory,
-                OverwritePrompt = true,
-                Title = "选择单张打印 PDF 保存位置"
-            };
-            if (dialog.ShowDialog() != DialogResult.OK)
+            using var form = new SinglePlotForm(sourceFile, width, height, candidates);
+            if (ShowModalDialog(form) != DialogResult.OK)
             {
                 return;
             }
+
+            var paper = form.SelectedPaper;
+            var outputPath = form.OutputPath;
 
             var settings = AppSettingsStore.Load();
             AcadPlotterInstaller.InstallBundledPlotter();
             var (deviceName, styleSheet) = ResolveSinglePlotOptions(settings);
             var layoutName = LayoutManager.Current.CurrentLayout;
             var isPaperSpace = !doc.Database.TileMode;
+            var baseName = Path.GetFileNameWithoutExtension(sourceFile);
+            if (string.IsNullOrWhiteSpace(baseName))
+            {
+                baseName = "Drawing";
+            }
+
             var job = new PlotJob
             {
                 IsManualWindow = true,
+                IsDcsWindow = true,
                 SourceFile = sourceFile,
                 SpaceName = layoutName,
                 IsPaperSpace = isPaperSpace,
@@ -534,17 +540,25 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
                 MinY = minY,
                 MaxX = maxX,
                 MaxY = maxY,
-                OutputPath = dialog.FileName
+                OutputPath = outputPath
             };
 
-            PlotterService.Plot(job, deviceName, styleSheet, doc, settings);
-            editor.WriteMessage($"\n单张打印完成: {dialog.FileName}");
-            RevealFileInExplorer(dialog.FileName);
-            MessageBox.Show(
-                $"单张打印完成。\n纸张: {paper.PaperName} {paper.PaperWidthMm:0.##} x {paper.PaperHeightMm:0.##} mm\n文件: {dialog.FileName}",
-                "单张打印",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information);
+            if (form.IsPreview)
+            {
+                PlotterService.Preview(job, deviceName, styleSheet, doc);
+                editor.WriteMessage("\n单张打印预览已打开。");
+            }
+            else
+            {
+                PlotterService.Plot(job, deviceName, styleSheet, doc, settings);
+                editor.WriteMessage($"\n单张打印完成: {outputPath}");
+                RevealFileInExplorer(outputPath);
+                MessageBox.Show(
+                    $"单张打印完成。\n纸张: {paper.PaperName} {paper.PaperWidthMm:0.##} x {paper.PaperHeightMm:0.##} mm\n文件: {outputPath}",
+                    "单张打印",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
         }
         catch (System.Exception ex)
         {
@@ -680,6 +694,61 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
 
         return values.FirstOrDefault(value => string.Equals(value, expected, StringComparison.OrdinalIgnoreCase))
             ?? values.FirstOrDefault(value => value.IndexOf(expected, StringComparison.OrdinalIgnoreCase) >= 0);
+    }
+
+    /// <summary>构建 UCS → DCS 变换矩阵：等价于 acedTrans(UCS, DCS)。</summary>
+    /// <summary>
+    /// 构建 UCS → DCS 变换矩阵，等价于 ObjectARX 的 acedTrans(point, 1, 2)。
+    ///
+    /// 原理：
+    ///   UCS→DCS = UCS→WCS × WCS→DCS
+    ///
+    ///   UCS→WCS 直接从编辑器取 CurrentUserCoordinateSystem。
+    ///   WCS→DCS 通过 GetCurrentView 获取当前视图的方向(VectorDirection)、
+    ///   目标点(Target)和扭转角(ViewTwist)构造，和 PlotterService.GetWorldToDisplayMatrix
+    ///   逻辑完全一致（官方 Autodesk 文档推荐的矩阵构造方式）。
+    ///
+    ///   图纸空间没有视图旋转概念，直接返回 UCS→WCS 即可。
+    /// </summary>
+    private static Matrix3d BuildUcsToDcsMatrix(Editor editor)
+    {
+        // 第一步：UCS → WCS
+        // CurrentUserCoordinateSystem 是 CAD 原生维护的 UCS→WCS 矩阵
+        // UCS=WCS 时此矩阵为单位矩阵，TransformBy 不起作用
+        var ucsToWcs = editor.CurrentUserCoordinateSystem;
+
+        // 第二步：WCS → DCS（仅模型空间需要，图纸空间无视图变换）
+        var doc = editor.Document;
+        if (doc.Database.TileMode)
+        {
+            try
+            {
+                var view = editor.GetCurrentView();
+
+                // 按官方文档构造 DCS→WCS 矩阵（显示坐标系到世界坐标系）
+                // PlaneToWorld: 将 DCS 的 XY 平面法线对齐到 ViewDirection
+                var wcsToDcs = Matrix3d.PlaneToWorld(view.ViewDirection);
+                // Displacement: 平移使 Target 为原点
+                wcsToDcs = Matrix3d.Displacement(view.Target - Point3d.Origin) * wcsToDcs;
+                // Rotation: 绕 ViewDirection 旋转 ViewTwist 角度
+                wcsToDcs = Matrix3d.Rotation(-view.ViewTwist, view.ViewDirection, view.Target) * wcsToDcs;
+                // 取逆得到 WCS→DCS
+                wcsToDcs = wcsToDcs.Inverse();
+
+                // 合并两个变换：UCS→WCS→DCS
+                // PreMultiplyBy(A) = A × this，最终矩阵 = wcsToDcs × ucsToWcs
+                return ucsToWcs.PreMultiplyBy(wcsToDcs);
+            }
+            catch (System.Exception ex)
+            {
+                // 老版本 CAD 或某些状态下 GetCurrentView 可能抛异常
+                // 此时退回 UCS→WCS，打印窗口可能偏大但不影响输出
+                editor.WriteMessage($"\n单张打印 UCS→DCS 变换失败，退回 UCS→WCS：{ex.Message}");
+            }
+        }
+
+        // 图纸空间：DCS = UCS（没有视图旋转概念）
+        return ucsToWcs;
     }
 
     private static void RevealFileInExplorer(string filePath)

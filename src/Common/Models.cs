@@ -80,6 +80,9 @@ public sealed class PlotJob
     public double MaxX { get; set; }
     public double MaxY { get; set; }
     public string OutputPath { get; set; } = "";
+
+    /// <summary>MinX/Y/MaxX/MaxY 已经是 DCS 坐标，GetPlotWindow 跳过 WCS→DCS 变换。</summary>
+    public bool IsDcsWindow { get; set; }
 }
 
 public enum TitleBlockScanScope

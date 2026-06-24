@@ -859,7 +859,9 @@ public static class PlotterService
 
     private static void PrepareEditorViewForPlot(Document doc, PlotJob job)
     {
-        if (job.IsPaperSpace)
+        // 图纸空间无视图概念，跳过
+        // IsDcsWindow：DCS 基于用户原始旋转视图计算，重置视图会破坏坐标系一致性
+        if (job.IsPaperSpace || job.IsDcsWindow)
         {
             return;
         }
@@ -892,6 +894,16 @@ public static class PlotterService
 
     private static Extents2d GetPlotWindow(PlotJob job, Document? plotDocument)
     {
+        // 单张打印已在 BatchPlotCommands.SinglePlotCore 完成 UCS→DCS 全链路变换，直接使用
+        if (job.IsDcsWindow)
+        {
+            return new Extents2d(
+                Math.Min(job.MinX, job.MaxX),
+                Math.Min(job.MinY, job.MaxY),
+                Math.Max(job.MinX, job.MaxX),
+                Math.Max(job.MinY, job.MaxY));
+        }
+
         if (job.IsPaperSpace)
         {
             return new Extents2d(
