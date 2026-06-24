@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Windows.Forms;
@@ -30,6 +29,8 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
     private static BatchPlotForm? _batchPlotForm;
     private static RectangleBatchPlotForm? _rectangleBatchPlotForm;
 
+    // ---- 插件生命周期 ----
+
     public void Initialize()
     {
         if (IsCoreConsole())
@@ -58,53 +59,31 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
         }
     }
 
+    // ---- 命令入口 ----
+
     [CommandMethod("ZBP_ADD_TITLE_BLOCK")]
-    public void AddTitleBlock()
-    {
-        AddTitleBlockCore();
-    }
+    public void AddTitleBlock() => AddTitleBlockCore();
 
     [CommandMethod("_ZBP_INTERNAL_ADD_TITLE_BLOCK")]
-    public void AddTitleBlockLegacy()
-    {
-        AddTitleBlockCore();
-    }
+    public void AddTitleBlockLegacy() => AddTitleBlockCore();
 
     [CommandMethod("ZBP_SHOW_PANEL", CommandFlags.Session)]
-    public void ShowBatchPlotWindow()
-    {
-        ShowBatchPlotWindowCore();
-    }
+    public void ShowBatchPlotWindow() => ShowBatchPlotWindowCore();
 
     [CommandMethod("_ZBP_INTERNAL_SHOW_PANEL", CommandFlags.Session)]
-    public void ShowBatchPlotWindowLegacy()
-    {
-        ShowBatchPlotWindowCore();
-    }
+    public void ShowBatchPlotWindowLegacy() => ShowBatchPlotWindowCore();
 
     [CommandMethod("ZBP_SINGLE_PLOT", CommandFlags.Session)]
-    public void SinglePlot()
-    {
-        SinglePlotCore();
-    }
+    public void SinglePlot() => SinglePlotCore();
 
     [CommandMethod("_ZBP_INTERNAL_SINGLE_PLOT", CommandFlags.Session)]
-    public void SinglePlotLegacy()
-    {
-        SinglePlotCore();
-    }
+    public void SinglePlotLegacy() => SinglePlotCore();
 
     [CommandMethod("ZBP_RECTANGLE_BATCH_PLOT", CommandFlags.Session)]
-    public void RectangleBatchPlot()
-    {
-        ShowRectangleBatchPlotCore();
-    }
+    public void RectangleBatchPlot() => ShowRectangleBatchPlotCore();
 
     [CommandMethod("_ZBP_INTERNAL_RECTANGLE_BATCH_PLOT", CommandFlags.Session)]
-    public void RectangleBatchPlotLegacy()
-    {
-        ShowRectangleBatchPlotCore();
-    }
+    public void RectangleBatchPlotLegacy() => ShowRectangleBatchPlotCore();
 
     [CommandMethod("ZBP_OPEN_CONFIG")]
     public void OpenConfigDirectory()
@@ -114,10 +93,7 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
     }
 
     [CommandMethod("_ZBP_INTERNAL_OPEN_CONFIG")]
-    public void OpenConfigDirectoryLegacy()
-    {
-        OpenConfigDirectory();
-    }
+    public void OpenConfigDirectoryLegacy() => OpenConfigDirectory();
 
     [CommandMethod("ZBP_MANAGE_LIBRARY", CommandFlags.Session)]
     public void ManageLibrary()
@@ -127,10 +103,7 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
     }
 
     [CommandMethod("_ZBP_INTERNAL_MANAGE_LIBRARY", CommandFlags.Session)]
-    public void ManageLibraryLegacy()
-    {
-        ManageLibrary();
-    }
+    public void ManageLibraryLegacy() => ManageLibrary();
 
     [CommandMethod("ZBP_SETTINGS", CommandFlags.Session)]
     public void ShowSettings()
@@ -146,22 +119,13 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
     }
 
     [CommandMethod("_ZBP_INTERNAL_SETTINGS", CommandFlags.Session)]
-    public void ShowSettingsLegacy()
-    {
-        ShowSettings();
-    }
+    public void ShowSettingsLegacy() => ShowSettings();
 
     [CommandMethod("ZBP_RELOAD_MENU")]
-    public void ReloadMenu()
-    {
-        CadMenuInstaller.Install(force: true);
-    }
+    public void ReloadMenu() => CadMenuInstaller.Install(force: true);
 
     [CommandMethod("_ZBP_INTERNAL_RELOAD_MENU")]
-    public void ReloadMenuLegacy()
-    {
-        ReloadMenu();
-    }
+    public void ReloadMenuLegacy() => ReloadMenu();
 
     [CommandMethod("ZBP_INSTALL_AUTOLOAD")]
     public void InstallAutoload()
@@ -182,10 +146,7 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
     }
 
     [CommandMethod("_ZBP_INTERNAL_INSTALL_AUTOLOAD")]
-    public void InstallAutoloadLegacy()
-    {
-        InstallAutoload();
-    }
+    public void InstallAutoloadLegacy() => InstallAutoload();
 
     [CommandMethod("ZBP_UNINSTALL_AUTOLOAD")]
     public void UninstallAutoload()
@@ -208,182 +169,16 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
     }
 
     [CommandMethod("_ZBP_INTERNAL_UNINSTALL_AUTOLOAD")]
-    public void UninstallAutoloadLegacy()
-    {
-        UninstallAutoload();
-    }
+    public void UninstallAutoloadLegacy() => UninstallAutoload();
 
-    private static void AddTitleBlockCore()
-    {
-        var doc = CadApp.DocumentManager.MdiActiveDocument;
-        if (doc == null)
-        {
-            AddBlockLog("No active document.");
-            return;
-        }
+    // 以下核心方法已拆分到 partial class 文件：
+    //   AddTitleBlockCore     → AddTitleBlockCommands.cs
+    //   SinglePlotCore        → SinglePlotCommands.cs
+    //   TransformPlotWindow   → CoordinateUtils.cs
+    //   BuildWcsToDcsMatrix   → CoordinateUtils.cs
+    //   BuildUcsToDcsMatrix   → CoordinateUtils.cs
 
-        var editor = doc.Editor;
-        AddBlockLog("Add title block command started.");
-
-        try
-        {
-            var blockOptions = new PromptEntityOptions("\n选择要加入图框库的图框块: ");
-            blockOptions.SetRejectMessage("\n请选择普通块参照。");
-            blockOptions.AddAllowedClass(typeof(BlockReference), exactMatch: false);
-            var blockResult = editor.GetEntity(blockOptions);
-            AddBlockLog("Block prompt status: " + blockResult.Status);
-            if (blockResult.Status != PromptStatus.OK)
-            {
-                return;
-            }
-
-            string blockName;
-            Matrix3d blockTransform;
-            Matrix3d inverse;
-            string? nestedBlockName = null;
-            using (var tr = doc.Database.TransactionManager.StartTransaction())
-            {
-                var blockRef = (BlockReference)tr.GetObject(blockResult.ObjectId, OpenMode.ForRead);
-                blockName = CadTextExtractor.GetBlockName(blockRef, tr);
-                blockTransform = blockRef.BlockTransform;
-
-                // Detect dynamic block with visibility states: use the visible inner block's name.
-                if (TryGetVisibleNestedBlock(tr, blockRef, out var innerName, out var innerTransform))
-                {
-                    nestedBlockName = innerName;
-                    blockName = innerName;
-                    blockTransform = innerTransform * blockRef.BlockTransform;
-                    AddBlockLog($"Dynamic block detected: outer={CadTextExtractor.GetBlockName(blockRef, tr)}, inner={innerName}");
-                }
-
-                tr.Commit();
-            }
-
-            AddBlockLog("Selected block: " + blockName);
-            inverse = blockTransform.Inverse();
-
-            var printStatus = TryGetOptionalRegion(
-                editor,
-                "\n框选图框打印外边界第一个角点，或回车使用块外包框: ",
-                "\n框选图框打印外边界对角点: ",
-                inverse,
-                out var printRegion);
-
-            if (printStatus == OptionalRegionStatus.Cancel)
-            {
-                AddBlockLog("Print boundary selection cancelled.");
-                return;
-            }
-
-            var hasPrintRegion = printStatus == OptionalRegionStatus.Selected;
-            Extents3d blockExtents = default;
-            if (!hasPrintRegion && !TryGetBlockExtents(doc.Database, blockResult.ObjectId, out blockExtents))
-            {
-                AddBlockLog("Block geometric extents are invalid; requiring an explicit print boundary.");
-                MessageBox.Show(
-                    "AutoCAD 无法取得该图框块的有效外包框，请手动框选打印边界。",
-                    "批量打印",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
-
-                if (!TryGetRegion(
-                        editor,
-                        "\n框选图框打印外边界第一个角点: ",
-                        "\n框选图框打印外边界对角点: ",
-                        inverse,
-                        out printRegion))
-                {
-                    AddBlockLog("Required print boundary selection cancelled.");
-                    return;
-                }
-
-                hasPrintRegion = true;
-            }
-
-            AddBlockLog("Has print region: " + hasPrintRegion);
-
-            if (!TryGetRegion(editor, "\n框选图名区域第一个角点: ", "\n框选图名区域对角点: ", inverse, out var titleRegion))
-            {
-                AddBlockLog("Title region selection cancelled.");
-                return;
-            }
-
-            if (!TryGetRegion(editor, "\n框选图号区域第一个角点: ", "\n框选图号区域对角点: ", inverse, out var numberRegion))
-            {
-                AddBlockLog("Drawing number region selection cancelled.");
-                return;
-            }
-
-            var printExtents = hasPrintRegion
-                ? TransformRegion(printRegion, blockTransform)
-                : blockExtents;
-            var referenceFrame = hasPrintRegion
-                ? printRegion
-                : TransformExtents(blockExtents, inverse);
-
-            var detected = PaperSizeDetector.Detect(
-                printExtents.MaxPoint.X - printExtents.MinPoint.X,
-                printExtents.MaxPoint.Y - printExtents.MinPoint.Y);
-
-            AddBlockLog($"Detected paper: {detected.PaperName}, {detected.PaperWidthMm:0.##} x {detected.PaperHeightMm:0.##}");
-
-            using var paperForm = new PaperSizeSelectionForm(detected);
-            var paperResult = ShowModalDialog(paperForm);
-            AddBlockLog("Paper dialog result: " + paperResult);
-            if (paperResult != DialogResult.OK)
-            {
-                return;
-            }
-
-            var now = DateTime.Now;
-            var definition = new TitleBlockDefinition
-            {
-                BlockName = blockName,
-                HasPrintRegion = hasPrintRegion,
-                CoordinateMode = "Frame",
-                PrintRegion = referenceFrame,
-                PaperName = paperForm.PaperName,
-                PaperWidthMm = paperForm.PaperWidthMm,
-                PaperHeightMm = paperForm.PaperHeightMm,
-                TitleRegion = ToFrameRelative(titleRegion, referenceFrame),
-                DrawingNumberRegion = ToFrameRelative(numberRegion, referenceFrame),
-                CreatedAt = now,
-                UpdatedAt = now
-            };
-
-            var inserted = TitleBlockLibraryStore.Upsert(definition);
-            var saved = TitleBlockLibraryStore.Load();
-            var savedDefinition = saved.Blocks.FirstOrDefault(x =>
-                string.Equals(x.BlockName, blockName, StringComparison.OrdinalIgnoreCase));
-
-            AddBlockLog($"Saved. inserted={inserted}, libraryCount={saved.Blocks.Count}, verifyFound={savedDefinition != null}, path={TitleBlockLibraryStore.DefaultPath}");
-            if (savedDefinition == null)
-            {
-                throw new InvalidOperationException("图框库保存后回读验证失败，请检查配置文件权限。");
-            }
-
-            editor.WriteMessage(inserted
-                ? $"\n已新增图框块: {blockName}"
-                : $"\n已更新已有图框块: {blockName}");
-            editor.WriteMessage($"\n固定输出纸张: {definition.PaperName} {definition.PaperWidthMm:0.##} x {definition.PaperHeightMm:0.##} mm");
-            editor.WriteMessage(hasPrintRegion
-                ? "\n已保存图框打印边界。"
-                : "\n未保存打印边界，打印时使用块外包框。");
-            editor.WriteMessage($"\n图框库: {TitleBlockLibraryStore.DefaultPath}");
-
-            MessageBox.Show(
-                $"图框已保存: {blockName}\n纸张: {definition.PaperName} {definition.PaperWidthMm:0.##} x {definition.PaperHeightMm:0.##} mm",
-                "批量打印",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information);
-        }
-        catch (System.Exception ex)
-        {
-            AddBlockLog("Failed: " + ex);
-            editor.WriteMessage("\n新增图框失败: " + ex.Message);
-            MessageBox.Show("新增图框失败: " + ex.Message, "批量打印", MessageBoxButtons.OK, MessageBoxIcon.Error);
-        }
-    }
+    // ---- 批量打印面板（图框库匹配） ----
 
     private static void ShowBatchPlotWindowCore()
     {
@@ -424,148 +219,7 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
         ShowModelessDialog(form);
     }
 
-    private static void SinglePlotCore()
-    {
-        var doc = CadApp.DocumentManager.MdiActiveDocument;
-        if (doc == null)
-        {
-            return;
-        }
-
-        var editor = doc.Editor;
-        try
-        {
-            var first = editor.GetPoint(new PromptPointOptions("\n选择图纸外框第一个角点: "));
-            if (first.Status != PromptStatus.OK)
-            {
-                return;
-            }
-
-            var second = editor.GetCorner(new PromptCornerOptions("\n选择图纸外框对角点: ", first.Value));
-            if (second.Status != PromptStatus.OK)
-            {
-                return;
-            }
-
-            // GetPoint 和 GetCorner 返回的是当前 UCS（用户坐标系）下的坐标
-            // 例如：用户设了旋转 30° 的 UCS，框选的角点就是 UCS 坐标
-            // 打印引擎 SetPlotWindowArea 需要的是 DCS（显示坐标系）
-            //
-            // 正确的做法（等价于 ObjectARX 的 acedTrans(UCS→DCS)）：
-            //   UCS 两个对角点 → 展开为 4 个角点 → × UCS→DCS 矩阵 → 取一次 DCS 包围盒
-            //
-            // 错误的做法（会导致旋转 UCS 下窗口偏大）：
-            //   UCS → WCS 包围盒（第一次放大，丢了旋转信息）→ WCS→DCS（第二次放大）
-            var ucsP1 = first.Value;
-            var ucsP2 = second.Value;
-
-            // 构建 UCS → DCS 变换矩阵，等价于 acedTrans(point, UCS, DCS)
-            var ucsToDcs = BuildUcsToDcsMatrix(editor);
-
-            // UCS 矩形四个角点一步到位变换到 DCS，不在中间环节取包围盒
-            var corners = new[]
-            {
-                new Point3d(ucsP1.X, ucsP1.Y, 0).TransformBy(ucsToDcs),
-                new Point3d(ucsP2.X, ucsP1.Y, 0).TransformBy(ucsToDcs),
-                new Point3d(ucsP1.X, ucsP2.Y, 0).TransformBy(ucsToDcs),
-                new Point3d(ucsP2.X, ucsP2.Y, 0).TransformBy(ucsToDcs)
-            };
-
-            // 仅在最终的 DCS 取一次轴对齐包围盒，这是 CAD API 必须的
-            var minX = corners.Min(p => p.X);
-            var minY = corners.Min(p => p.Y);
-            var maxX = corners.Max(p => p.X);
-            var maxY = corners.Max(p => p.Y);
-            var width = maxX - minX;
-            var height = maxY - minY;
-            if (width <= 1e-6 || height <= 1e-6)
-            {
-                MessageBox.Show("选择的图纸外框宽度或高度无效。", "单张打印", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-
-            var candidates = PaperSizeDetector.DetectCandidates(width, height);
-            if (candidates.Count == 0)
-            {
-                candidates = new List<PaperDetection> { PaperSizeDetector.Detect(width, height) };
-            }
-
-            if (candidates[0].PaperWidthMm <= 0 || candidates[0].PaperHeightMm <= 0)
-            {
-                MessageBox.Show("无法根据所选外框识别纸张尺寸。", "单张打印", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-
-            var sourceFile = string.IsNullOrWhiteSpace(doc.Database.Filename)
-                ? doc.Name
-                : doc.Database.Filename;
-
-            using var form = new SinglePlotForm(sourceFile, width, height, candidates);
-            if (ShowModalDialog(form) != DialogResult.OK)
-            {
-                return;
-            }
-
-            var paper = form.SelectedPaper;
-            var outputPath = form.OutputPath;
-
-            var settings = AppSettingsStore.Load();
-            AcadPlotterInstaller.InstallBundledPlotter();
-            var (deviceName, styleSheet) = ResolveSinglePlotOptions(settings);
-            var layoutName = LayoutManager.Current.CurrentLayout;
-            var isPaperSpace = !doc.Database.TileMode;
-            var baseName = Path.GetFileNameWithoutExtension(sourceFile);
-            if (string.IsNullOrWhiteSpace(baseName))
-            {
-                baseName = "Drawing";
-            }
-
-            var job = new PlotJob
-            {
-                IsManualWindow = true,
-                IsDcsWindow = true,
-                SourceFile = sourceFile,
-                SpaceName = layoutName,
-                IsPaperSpace = isPaperSpace,
-                DrawingNumber = baseName,
-                Title = baseName,
-                PaperName = paper.PaperName,
-                ScaleText = paper.ScaleText,
-                SizeText = $"{width:0.##} x {height:0.##}",
-                PaperSizeText = $"{paper.PaperWidthMm:0.##} x {paper.PaperHeightMm:0.##} mm",
-                DetectionNote = "单张打印：用户框选图纸外框",
-                PaperWidthMm = paper.PaperWidthMm,
-                PaperHeightMm = paper.PaperHeightMm,
-                MinX = minX,
-                MinY = minY,
-                MaxX = maxX,
-                MaxY = maxY,
-                OutputPath = outputPath
-            };
-
-            if (form.IsPreview)
-            {
-                PlotterService.Preview(job, deviceName, styleSheet, doc);
-                editor.WriteMessage("\n单张打印预览已打开。");
-            }
-            else
-            {
-                PlotterService.Plot(job, deviceName, styleSheet, doc, settings);
-                editor.WriteMessage($"\n单张打印完成: {outputPath}");
-                RevealFileInExplorer(outputPath);
-                MessageBox.Show(
-                    $"单张打印完成。\n纸张: {paper.PaperName} {paper.PaperWidthMm:0.##} x {paper.PaperHeightMm:0.##} mm\n文件: {outputPath}",
-                    "单张打印",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
-            }
-        }
-        catch (System.Exception ex)
-        {
-            editor.WriteMessage("\n单张打印失败: " + ex.Message);
-            MessageBox.Show("单张打印失败: " + ex.Message, "单张打印", MessageBoxButtons.OK, MessageBoxIcon.Error);
-        }
-    }
+    // ---- 矩形框批量打印 ----
 
     private static void ShowRectangleBatchPlotCore()
     {
@@ -586,9 +240,6 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
         {
             try
             {
-                // A layout viewport makes editor picks use model-space coordinates.
-                // Return to paper space so the scan window and layout entities share
-                // the same coordinate system, and viewport contents are not scanned.
                 editor.SwitchToPaperSpace();
             }
             catch
@@ -615,14 +266,20 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
             return;
         }
 
+        // 用户框选的是 UCS 坐标 → 转为 WCS 后传给 Scanner
+        // Scanner 内部 Polyline 坐标全链路是 WCS，扫描窗口必须一致
+        var ucsToWcs = editor.CurrentUserCoordinateSystem;
+        var wcsP1 = first.Value.TransformBy(ucsToWcs);
+        var wcsP2 = second.Value.TransformBy(ucsToWcs);
+
         var window = new Extents3d(
             new Point3d(
-                Math.Min(first.Value.X, second.Value.X),
-                Math.Min(first.Value.Y, second.Value.Y),
+                Math.Min(wcsP1.X, wcsP2.X),
+                Math.Min(wcsP1.Y, wcsP2.Y),
                 0),
             new Point3d(
-                Math.Max(first.Value.X, second.Value.X),
-                Math.Max(first.Value.Y, second.Value.Y),
+                Math.Max(wcsP1.X, wcsP2.X),
+                Math.Max(wcsP1.Y, wcsP2.Y),
                 0));
 
         try
@@ -636,6 +293,21 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
                 return;
+            }
+
+            // 扫描得到的矩形坐标是 WCS，转换为 DCS 后打印
+            // 和单张打印 UCS→DCS 同理，但这里输入已是 WCS
+            try
+            {
+                var wcsToDcs = BuildWcsToDcsMatrix(editor);
+                foreach (var result in results)
+                {
+                    TransformPlotWindow(result.Job, wcsToDcs);
+                }
+            }
+            catch (System.Exception ex)
+            {
+                editor.WriteMessage($"\n矩形框 WCS→DCS 变换失败，使用 WCS 坐标：{ex.Message}");
             }
 
             var form = new RectangleBatchPlotForm(doc, window, results);
@@ -660,96 +332,7 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
         }
     }
 
-    private static (string DeviceName, string StyleSheet) ResolveSinglePlotOptions(AppSettings settings)
-    {
-        using var plotSettings = new PlotSettings(true);
-        var validator = PlotSettingsValidator.Current;
-        var devices = validator.GetPlotDeviceList()
-            .Cast<object>()
-            .Select(value => value?.ToString() ?? "")
-            .Where(value => !string.IsNullOrWhiteSpace(value))
-            .ToList();
-        var device = FindPlotOption(devices, AcadPlotterInstaller.PreferredPdfPlotter)
-            ?? FindPlotOption(devices, settings.LastPlotDevice)
-            ?? devices.FirstOrDefault(value => value.IndexOf("PDF", StringComparison.OrdinalIgnoreCase) >= 0)
-            ?? throw new InvalidOperationException("没有找到可用的 PDF 打印机。");
-
-        var styles = validator.GetPlotStyleSheetList()
-            .Cast<object>()
-            .Select(value => value?.ToString() ?? "")
-            .Where(value => value.EndsWith(".ctb", StringComparison.OrdinalIgnoreCase))
-            .ToList();
-        var style = FindPlotOption(styles, settings.LastStyleSheet)
-            ?? styles.FirstOrDefault(value => value.IndexOf("monochrome", StringComparison.OrdinalIgnoreCase) >= 0)
-            ?? "";
-        return (device, style);
-    }
-
-    private static string? FindPlotOption(System.Collections.Generic.IEnumerable<string> values, string expected)
-    {
-        if (string.IsNullOrWhiteSpace(expected))
-        {
-            return null;
-        }
-
-        return values.FirstOrDefault(value => string.Equals(value, expected, StringComparison.OrdinalIgnoreCase))
-            ?? values.FirstOrDefault(value => value.IndexOf(expected, StringComparison.OrdinalIgnoreCase) >= 0);
-    }
-
-    /// <summary>构建 UCS → DCS 变换矩阵：等价于 acedTrans(UCS, DCS)。</summary>
-    /// <summary>
-    /// 构建 UCS → DCS 变换矩阵，等价于 ObjectARX 的 acedTrans(point, 1, 2)。
-    ///
-    /// 原理：
-    ///   UCS→DCS = UCS→WCS × WCS→DCS
-    ///
-    ///   UCS→WCS 直接从编辑器取 CurrentUserCoordinateSystem。
-    ///   WCS→DCS 通过 GetCurrentView 获取当前视图的方向(VectorDirection)、
-    ///   目标点(Target)和扭转角(ViewTwist)构造，和 PlotterService.GetWorldToDisplayMatrix
-    ///   逻辑完全一致（官方 Autodesk 文档推荐的矩阵构造方式）。
-    ///
-    ///   图纸空间没有视图旋转概念，直接返回 UCS→WCS 即可。
-    /// </summary>
-    private static Matrix3d BuildUcsToDcsMatrix(Editor editor)
-    {
-        // 第一步：UCS → WCS
-        // CurrentUserCoordinateSystem 是 CAD 原生维护的 UCS→WCS 矩阵
-        // UCS=WCS 时此矩阵为单位矩阵，TransformBy 不起作用
-        var ucsToWcs = editor.CurrentUserCoordinateSystem;
-
-        // 第二步：WCS → DCS（仅模型空间需要，图纸空间无视图变换）
-        var doc = editor.Document;
-        if (doc.Database.TileMode)
-        {
-            try
-            {
-                var view = editor.GetCurrentView();
-
-                // 按官方文档构造 DCS→WCS 矩阵（显示坐标系到世界坐标系）
-                // PlaneToWorld: 将 DCS 的 XY 平面法线对齐到 ViewDirection
-                var wcsToDcs = Matrix3d.PlaneToWorld(view.ViewDirection);
-                // Displacement: 平移使 Target 为原点
-                wcsToDcs = Matrix3d.Displacement(view.Target - Point3d.Origin) * wcsToDcs;
-                // Rotation: 绕 ViewDirection 旋转 ViewTwist 角度
-                wcsToDcs = Matrix3d.Rotation(-view.ViewTwist, view.ViewDirection, view.Target) * wcsToDcs;
-                // 取逆得到 WCS→DCS
-                wcsToDcs = wcsToDcs.Inverse();
-
-                // 合并两个变换：UCS→WCS→DCS
-                // PreMultiplyBy(A) = A × this，最终矩阵 = wcsToDcs × ucsToWcs
-                return ucsToWcs.PreMultiplyBy(wcsToDcs);
-            }
-            catch (System.Exception ex)
-            {
-                // 老版本 CAD 或某些状态下 GetCurrentView 可能抛异常
-                // 此时退回 UCS→WCS，打印窗口可能偏大但不影响输出
-                editor.WriteMessage($"\n单张打印 UCS→DCS 变换失败，退回 UCS→WCS：{ex.Message}");
-            }
-        }
-
-        // 图纸空间：DCS = UCS（没有视图旋转概念）
-        return ucsToWcs;
-    }
+    // ---- 通用工具方法 ----
 
     private static void RevealFileInExplorer(string filePath)
     {
@@ -769,7 +352,7 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
         }
         catch
         {
-            // PDF 已成功生成；资源管理器打开失败不应把打印标记为失败。
+            // PDF 已成功生成；资源管理器打开失败不应把打印标记为失败
         }
     }
 
@@ -866,8 +449,6 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
         }
         catch
         {
-            // AutoCAD can report eInvalidExtents for dynamic blocks or entities
-            // whose graphics extents have not been generated yet.
         }
 
         var hasExtents = false;
@@ -901,7 +482,6 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
             }
             catch
             {
-                // Ignore individual entities without valid graphics extents.
             }
         }
 
@@ -995,94 +575,6 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
         }
         catch
         {
-        }
-    }
-
-    /// <summary>
-    /// When <paramref name="blockRef"/> is a container block whose definition contains
-    /// nested block references (e.g. a dynamic block with visibility states), resolve
-    /// the visible inner block's effective name and its transform relative to the outer block.
-    /// Returns false if no nested blocks are found on visible layers.
-    /// </summary>
-    private static bool TryGetVisibleNestedBlock(
-        Transaction tr,
-        BlockReference blockRef,
-        out string innerBlockName,
-        out Matrix3d innerTransform)
-    {
-        innerBlockName = "";
-        innerTransform = Matrix3d.Identity;
-
-        // 只针对动态块：普通块即使内有嵌套块也不深入，保持原有行为
-        if (!blockRef.IsDynamicBlock)
-        {
-            return false;
-        }
-
-        var definitionId = blockRef.BlockTableRecord;
-        if (definitionId.IsNull)
-        {
-            return false;
-        }
-
-        var definition = (BlockTableRecord)tr.GetObject(definitionId, OpenMode.ForRead);
-        var nestedBlocks = new List<(string Name, Matrix3d Transform)>();
-
-        foreach (ObjectId id in definition)
-        {
-            if (tr.GetObject(id, OpenMode.ForRead, false) is not BlockReference nested)
-            {
-                continue;
-            }
-
-            if (!IsEntityVisible(nested))
-            {
-                continue;
-            }
-
-            var nestedName = CadTextExtractor.GetBlockName(nested, tr);
-            if (!string.IsNullOrWhiteSpace(nestedName))
-            {
-                nestedBlocks.Add((nestedName, nested.BlockTransform));
-            }
-        }
-
-        if (nestedBlocks.Count == 0)
-        {
-            return false;
-        }
-
-        // Dynamic block visibility states typically leave exactly one nested block visible.
-        // If multiple are on visible layers, pick the one with the largest bounding area.
-        var selected = nestedBlocks[0];
-        if (nestedBlocks.Count > 1)
-        {
-            double bestArea = 0;
-            foreach (var block in nestedBlocks)
-            {
-                var area = Math.Abs(block.Transform[0, 0] * block.Transform[1, 1]);
-                if (area > bestArea)
-                {
-                    bestArea = area;
-                    selected = block;
-                }
-            }
-        }
-
-        innerBlockName = selected.Name;
-        innerTransform = selected.Transform;
-        return true;
-    }
-
-    private static bool IsEntityVisible(Entity entity)
-    {
-        try
-        {
-            return entity.Visible;
-        }
-        catch
-        {
-            return true;
         }
     }
 

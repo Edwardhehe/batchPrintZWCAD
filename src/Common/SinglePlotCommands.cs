@@ -1,0 +1,209 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Windows.Forms;
+#if AUTOCAD
+using Autodesk.AutoCAD.ApplicationServices;
+using Autodesk.AutoCAD.DatabaseServices;
+using Autodesk.AutoCAD.EditorInput;
+using Autodesk.AutoCAD.Geometry;
+#if ACAD_CORE
+using CadApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
+#else
+using CadApp = Autodesk.AutoCAD.ApplicationServices.Application;
+#endif
+#else
+using ZwSoft.ZwCAD.ApplicationServices;
+using ZwSoft.ZwCAD.DatabaseServices;
+using ZwSoft.ZwCAD.EditorInput;
+using ZwSoft.ZwCAD.Geometry;
+using CadApp = ZwSoft.ZwCAD.ApplicationServices.Application;
+#endif
+
+namespace ZwcadBatchPlot;
+
+public sealed partial class BatchPlotCommands
+{
+    private static void SinglePlotCore()
+    {
+        var doc = CadApp.DocumentManager.MdiActiveDocument;
+        if (doc == null)
+        {
+            return;
+        }
+
+        var editor = doc.Editor;
+        try
+        {
+            var first = editor.GetPoint(new PromptPointOptions("\n选择图纸外框第一个角点: "));
+            if (first.Status != PromptStatus.OK)
+            {
+                return;
+            }
+
+            var second = editor.GetCorner(new PromptCornerOptions("\n选择图纸外框对角点: ", first.Value));
+            if (second.Status != PromptStatus.OK)
+            {
+                return;
+            }
+
+            // GetPoint 和 GetCorner 返回的是当前 UCS（用户坐标系）下的坐标
+            // 打印引擎 SetPlotWindowArea 需要的是 DCS（显示坐标系）
+            //
+            // 正确的做法（等价于 ObjectARX 的 acedTrans(UCS→DCS)）：
+            //   UCS 两个对角点 → 展开为 4 个角点 → × UCS→DCS 矩阵 → 取一次 DCS 包围盒
+            //
+            // 错误的做法（会导致旋转 UCS 下窗口偏大）：
+            //   UCS → WCS 包围盒（第一次放大，丢了旋转信息）→ WCS→DCS（第二次放大）
+            var ucsP1 = first.Value;
+            var ucsP2 = second.Value;
+
+            // 构建 UCS → DCS 变换矩阵，等价于 acedTrans(point, UCS, DCS)
+            var ucsToDcs = BuildUcsToDcsMatrix(editor);
+
+            // UCS 矩形四个角点一步到位变换到 DCS，不在中间环节取包围盒
+            var corners = new[]
+            {
+                new Point3d(ucsP1.X, ucsP1.Y, 0).TransformBy(ucsToDcs),
+                new Point3d(ucsP2.X, ucsP1.Y, 0).TransformBy(ucsToDcs),
+                new Point3d(ucsP1.X, ucsP2.Y, 0).TransformBy(ucsToDcs),
+                new Point3d(ucsP2.X, ucsP2.Y, 0).TransformBy(ucsToDcs)
+            };
+
+            // 仅在最终的 DCS 取一次轴对齐包围盒，这是 CAD API 必须的
+            var minX = corners.Min(p => p.X);
+            var minY = corners.Min(p => p.Y);
+            var maxX = corners.Max(p => p.X);
+            var maxY = corners.Max(p => p.Y);
+            var width = maxX - minX;
+            var height = maxY - minY;
+            if (width <= 1e-6 || height <= 1e-6)
+            {
+                MessageBox.Show("选择的图纸外框宽度或高度无效。", "单张打印", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            var candidates = PaperSizeDetector.DetectCandidates(width, height);
+            if (candidates.Count == 0)
+            {
+                candidates = new List<PaperDetection> { PaperSizeDetector.Detect(width, height) };
+            }
+
+            if (candidates[0].PaperWidthMm <= 0 || candidates[0].PaperHeightMm <= 0)
+            {
+                MessageBox.Show("无法根据所选外框识别纸张尺寸。", "单张打印", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            var sourceFile = string.IsNullOrWhiteSpace(doc.Database.Filename)
+                ? doc.Name
+                : doc.Database.Filename;
+
+            using var form = new SinglePlotForm(sourceFile, width, height, candidates);
+            if (ShowModalDialog(form) != DialogResult.OK)
+            {
+                return;
+            }
+
+            var paper = form.SelectedPaper;
+            var outputPath = form.OutputPath;
+
+            var settings = AppSettingsStore.Load();
+            AcadPlotterInstaller.InstallBundledPlotter();
+            var (deviceName, styleSheet) = ResolveSinglePlotOptions(settings);
+            var layoutName = LayoutManager.Current.CurrentLayout;
+            var isPaperSpace = !doc.Database.TileMode;
+            var baseName = Path.GetFileNameWithoutExtension(sourceFile);
+            if (string.IsNullOrWhiteSpace(baseName))
+            {
+                baseName = "Drawing";
+            }
+
+            var job = new PlotJob
+            {
+                IsManualWindow = true,
+                IsDcsWindow = true,
+                SourceFile = sourceFile,
+                SpaceName = layoutName,
+                IsPaperSpace = isPaperSpace,
+                DrawingNumber = baseName,
+                Title = baseName,
+                PaperName = paper.PaperName,
+                ScaleText = paper.ScaleText,
+                SizeText = $"{width:0.##} x {height:0.##}",
+                PaperSizeText = $"{paper.PaperWidthMm:0.##} x {paper.PaperHeightMm:0.##} mm",
+                DetectionNote = "单张打印：用户框选图纸外框",
+                PaperWidthMm = paper.PaperWidthMm,
+                PaperHeightMm = paper.PaperHeightMm,
+                MinX = minX,
+                MinY = minY,
+                MaxX = maxX,
+                MaxY = maxY,
+                OutputPath = outputPath
+            };
+
+            if (form.IsPreview)
+            {
+                PlotterService.Preview(job, deviceName, styleSheet, doc);
+                editor.WriteMessage("\n单张打印预览已打开。");
+            }
+            else
+            {
+                PlotterService.Plot(job, deviceName, styleSheet, doc, settings);
+                editor.WriteMessage($"\n单张打印完成: {outputPath}");
+                RevealFileInExplorer(outputPath);
+                MessageBox.Show(
+                    $"单张打印完成。\n纸张: {paper.PaperName} {paper.PaperWidthMm:0.##} x {paper.PaperHeightMm:0.##} mm\n文件: {outputPath}",
+                    "单张打印",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+        }
+        catch (System.Exception ex)
+        {
+            editor.WriteMessage("\n单张打印失败: " + ex.Message);
+            MessageBox.Show("单张打印失败: " + ex.Message, "单张打印", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    /// <summary>
+    /// 选择单张打印使用的 PDF 打印机和打印样式表。
+    /// 优先使用捆绑的 LA_pdf 打印机和 monochrome.ctb 样式。
+    /// </summary>
+    private static (string DeviceName, string StyleSheet) ResolveSinglePlotOptions(AppSettings settings)
+    {
+        using var plotSettings = new PlotSettings(true);
+        var validator = PlotSettingsValidator.Current;
+        var devices = validator.GetPlotDeviceList()
+            .Cast<object>()
+            .Select(value => value?.ToString() ?? "")
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .ToList();
+        var device = FindPlotOption(devices, AcadPlotterInstaller.PreferredPdfPlotter)
+            ?? FindPlotOption(devices, settings.LastPlotDevice)
+            ?? devices.FirstOrDefault(value => value.IndexOf("PDF", StringComparison.OrdinalIgnoreCase) >= 0)
+            ?? throw new InvalidOperationException("没有找到可用的 PDF 打印机。");
+
+        var styles = validator.GetPlotStyleSheetList()
+            .Cast<object>()
+            .Select(value => value?.ToString() ?? "")
+            .Where(value => value.EndsWith(".ctb", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var style = FindPlotOption(styles, settings.LastStyleSheet)
+            ?? styles.FirstOrDefault(value => value.IndexOf("monochrome", StringComparison.OrdinalIgnoreCase) >= 0)
+            ?? "";
+        return (device, style);
+    }
+
+    private static string? FindPlotOption(System.Collections.Generic.IEnumerable<string> values, string expected)
+    {
+        if (string.IsNullOrWhiteSpace(expected))
+        {
+            return null;
+        }
+
+        return values.FirstOrDefault(value => string.Equals(value, expected, StringComparison.OrdinalIgnoreCase))
+            ?? values.FirstOrDefault(value => value.IndexOf(expected, StringComparison.OrdinalIgnoreCase) >= 0);
+    }
+}
