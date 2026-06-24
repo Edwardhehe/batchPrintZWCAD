@@ -10,11 +10,12 @@
 2. [流程一：新增图框](#2-流程一新增图框)
 3. [流程二：扫描图框（图框库匹配）](#3-流程二扫描图框图框库匹配)
 4. [流程三：扫描矩形框](#4-流程三扫描矩形框)
-5. [打印引擎](#5-打印引擎)
-6. [PDF 合并](#6-pdf-合并)
-7. [动态块处理](#7-动态块处理)
-8. [ZWCAD vs AutoCAD 差异](#8-zwcad-vs-autocad-差异)
-9. [项目文件结构](#9-项目文件结构)
+5. [流程四：单张打印](#5-流程四单张打印)
+6. [打印引擎](#6-打印引擎)
+7. [PDF 合并](#7-pdf-合并)
+8. [动态块处理](#8-动态块处理)
+9. [ZWCAD vs AutoCAD 差异](#9-zwcad-vs-autocad-差异)
+10. [项目文件结构](#10-项目文件结构)
 
 ---
 
@@ -370,11 +371,94 @@ CollectEntityRectangles(BlockRef*U12, Identity):
 
 ---
 
-## 5. 打印引擎
+## 5. 流程四：单张打印
 
-**触发**：用户在 `BatchPlotForm` 或 `RectangleBatchPlotForm` 中点击"打印"。
+**触发**：用户运行 `ZBP_SINGLE_PLOT`，手动框选图纸外框 → 自动识别纸张 → 直接输出 PDF。
 
 ### 5.1 整体流程
+
+```
+用户框选两个角点
+  │
+  ├─ ① editor.GetPoint("\n选择图纸外框第一个角点: ")
+  │     // 用户点击图纸外框的左上/左下角
+  ├─ ② editor.GetCorner("\n选择图纸外框对角点: ", firstPoint)
+  │     // 用户点击对角点，CAD 自动计算矩形
+  │
+  ├─ ③ 计算世界坐标矩形
+  │     minX = Min(p1.X, p2.X)
+  │     minY = Min(p1.Y, p2.Y)
+  │     maxX = Max(p1.X, p2.X)
+  │     maxY = Max(p1.Y, p2.Y)
+  │     width = maxX - minX
+  │     height = maxY - minY
+  │     // 宽高 ≤ 1e-6 → 无效，提示用户重新选择
+  │
+  ├─ ④ PaperSizeDetector.DetectCandidates(width, height)
+  │     // 用世界坐标下的实际宽高匹配常见纸张 × 常用比例
+  │     // 例: 59400×42000 → A2 × 100 → 1:100
+  │     // 如果只有一个候选: 直接使用
+  │     // 如果有多个候选: 弹出 SinglePlotPaperSelectionForm 让用户选择
+  │
+  ├─ ⑤ 选择输出路径
+  │     SaveFileDialog:
+  │       默认文件名 = DWG文件名.pdf
+  │       默认目录 = DWG 所在目录
+  │       筛选器 = "PDF 文件 (*.pdf)|*.pdf"
+  │
+  ├─ ⑥ 组装 PlotJob
+  │     {
+  │       IsManualWindow = true,
+  │       SourceFile = 当前DWG路径,
+  │       SpaceName = 当前布局名,
+  │       IsPaperSpace = !TileMode,
+  │       DrawingNumber = 文件名（无扩展名）,
+  │       Title = 文件名,
+  │       PaperName/Width/Height = 纸张检测结果,
+  │       MinX/Y/MaxX/Y = 用户框选的世界坐标矩形,
+  │       OutputPath = 用户选择的PDF路径
+  │     }
+  │
+  ├─ ⑦ PlotterService.Plot(job, deviceName, styleSheet, doc, settings)
+  │     // 直接调用单 Job 打印，不走 PlotMany 分组逻辑
+  │     // 和批量打印用的是同一个引擎（见第6章）
+  │
+  └─ ⑧ 完成提示
+        MessageBox: "单张打印完成。纸张: A2 594×420mm"
+        editor.WriteMessage → CAD 命令行输出文件路径
+        RevealFileInExplorer → 打开资源管理器定位到 PDF
+```
+
+### 5.2 关键代码路径
+
+| 步骤 | 代码位置 |
+|------|---------|
+| 命令入口 | `BatchPlotCommands.SinglePlotCore()` — [line 427](src/Common/BatchPlotCommands.cs#L427) |
+| 用户框选 | `editor.GetPoint()` + `editor.GetCorner()` — CAD 原生交互 |
+| 纸张检测 | `PaperSizeDetector.DetectCandidates()` — 返回候选列表 |
+| 纸张选择 | `SinglePlotPaperSelectionForm` — 仅在多候选时弹出 |
+| 输出路径 | `SaveFileDialog` — 系统原生保存对话框 |
+| 打印机选择 | `ResolveSinglePlotOptions()` — 复用批打的选择逻辑 |
+| 打印 | `PlotterService.Plot()` — [ZWCAD](src/ZWCAD/PlotterService.cs) / [AutoCAD](src/AutoCAD/PlotterService.cs) |
+
+### 5.3 与批量打印的差异
+
+| 方面 | 单张打印 | 批量打印（图框库/矩形框） |
+|------|---------|------------------------|
+| 扫描方式 | 用户手动框选两个角点 | 自动扫描图纸中所有匹配的块/矩形 |
+| 纸张确认 | 多候选时弹窗选择 | 默认用第一个候选，用户可在面板中调整 |
+| 输出路径 | 每次弹 SaveFileDialog | 统一输出目录 + 自动命名 |
+| 多文件处理 | 只处理当前 DWG | 可跨 DWG 文件扫描和打印 |
+| 图名图号 | 使用文件名 | 从图框块中自动提取文字 |
+| 合并 PDF | 不支持 | 支持（PdfDocumentService.Merge） |
+
+---
+
+## 6. 打印引擎
+
+**触发**：用户在 `BatchPlotForm` 或 `RectangleBatchPlotForm` 中点击"打印"，或运行单张打印。
+
+### 6.1 打印整体流程
 
 ```
 PlotterService.PlotMany(Jobs, deviceName, styleSheet, settings)
@@ -437,7 +521,7 @@ PlotterService.PlotMany(Jobs, deviceName, styleSheet, settings)
                            // 验证失败 → 标记为失败，不阻塞后续 Job
 ```
 
-### 5.2 关键代码路径
+### 6.2 关键代码路径
 
 | 组件 | 文件 |
 |------|------|
@@ -449,7 +533,7 @@ PlotterService.PlotMany(Jobs, deviceName, styleSheet, settings)
 | 打印机安装 | `AcadPlotterInstaller.InstallBundledPlotter()` — 复制 LA_pdf.* 到 CAD 目录 |
 | PDF 合并 | `PdfDocumentService.Merge()` — [PdfDocumentService.cs](src/Common/PdfDocumentService.cs) |
 
-### 5.3 输出文件命名
+### 6.3 输出文件命名
 
 ```
 {OutputDirectory}\{DrawingNumber} {Title}.pdf
@@ -464,7 +548,7 @@ PlotterService.PlotMany(Jobs, deviceName, styleSheet, settings)
 
 ---
 
-## 6. PDF 合并
+## 7. PDF 合并
 
 **触发**：打印时勾选"合并 PDF"，或在 `BatchPlotForm` / `RectangleBatchPlotForm` 中生成 PDF 后自动合并。
 
@@ -485,11 +569,11 @@ PdfDocumentService.Merge(pdfFiles, outputPath)
 
 ---
 
-## 7. 动态块处理
+## 8. 动态块处理
 
 > 动态块（Dynamic Block）是具有可见性状态、拉伸等参数化行为的块参照。
 
-### 7.1 核心原则
+### 8.1 核心原则
 
 **不使用名字猜测，不使用图层猜测。直接问 CAD 引擎。**
 
@@ -504,7 +588,7 @@ private static bool IsEntityVisible(Entity entity)
 }
 ```
 
-### 7.2 涉及的三处位置
+### 8.2 涉及的三处位置
 
 | 位置 | 文件:方法 | 作用 | 守卫条件 |
 |------|----------|------|---------|
@@ -512,7 +596,7 @@ private static bool IsEntityVisible(Entity entity)
 | 新增图框 | `BatchPlotCommands.TryGetVisibleNestedBlock` | 定位当前可见嵌套块名入库 | `IsDynamicBlock` — 普通块直接返回 false |
 | 图框库扫描 | `TitleBlockScanner.ResolveNestedLibraryMatch` | 深入动态块找可见嵌套块的库匹配 | 仅 `definition==null` 时触发 |
 
-### 7.3 GetBlockName 的行为
+### 8.3 GetBlockName 的行为
 
 ```csharp
 // CadTextExtractor.GetBlockName:
@@ -524,7 +608,7 @@ private static bool IsEntityVisible(Entity entity)
 //        避免把 *U12 泄露给图框库或用户界面
 ```
 
-### 7.4 新增图框时的完整链路
+### 8.4 新增图框时的完整链路
 
 ```
 用户选择动态块 "【地铁院】图框"
@@ -550,9 +634,9 @@ private static bool IsEntityVisible(Entity entity)
 
 ---
 
-## 8. ZWCAD vs AutoCAD 差异
+## 9. ZWCAD vs AutoCAD 差异
 
-### 8.1 条件编译
+### 9.1 条件编译
 
 ```csharp
 #if AUTOCAD
@@ -564,7 +648,7 @@ private static bool IsEntityVisible(Entity entity)
 
 所有 `src/Common/` 下的文件使用 `#if AUTOCAD` 条件编译，共享逻辑不变，仅切换命名空间。
 
-### 8.2 平台差异清单
+### 9.2 平台差异清单
 
 | 方面 | AutoCAD | ZWCAD |
 |------|---------|-------|
@@ -578,7 +662,7 @@ private static bool IsEntityVisible(Entity entity)
 | 图框库迁移 | 首次加载时自动从 ZWCAD 路径导入 | 无迁移逻辑 |
 | 动态块 API | `IsDynamicBlock` / `DynamicBlockTableRecord` 稳定 | 老版本可能异常 → 已用 try/catch 保护 |
 
-### 8.3 编译项目对应
+### 9.3 编译项目对应
 
 | .csproj | 平台 | Target | Output |
 |---------|------|--------|--------|
@@ -592,7 +676,7 @@ private static bool IsEntityVisible(Entity entity)
 
 ---
 
-## 9. 项目文件结构
+## 10. 项目文件结构
 
 ```
 批量打印/
