@@ -944,6 +944,12 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
         innerBlockName = "";
         innerTransform = Matrix3d.Identity;
 
+        // 只针对动态块：普通块即使内有嵌套块也不深入，保持原有行为
+        if (!blockRef.IsDynamicBlock)
+        {
+            return false;
+        }
+
         var definitionId = blockRef.BlockTableRecord;
         if (definitionId.IsNull)
         {
