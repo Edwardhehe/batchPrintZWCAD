@@ -73,7 +73,6 @@ public static class CadMenuInstaller
             AddMenuItem(menu, "批量打印(选图框块)", "ZBP_SHOW_PANEL ");
             AddMenuItem(menu, "批量打印(选矩形框)", "ZBP_RECTANGLE_BATCH_PLOT ");
             AddMenuItem(menu, "单张打印", "ZBP_SINGLE_PLOT ");
-            AddMenuItem(menu, "PDF跨文件阅读", "ZBP_PDF_VIEWER ");
             AddSeparator(menu);
             AddMenuItem(menu, "设置", "ZBP_SETTINGS ");
             AddMenuItem(menu, "安装自动加载", "ZBP_INSTALL_AUTOLOAD ");

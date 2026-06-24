@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Windows.Forms;
@@ -103,19 +104,6 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
     public void RectangleBatchPlotLegacy()
     {
         ShowRectangleBatchPlotCore();
-    }
-
-    [CommandMethod("ZBP_PDF_VIEWER", CommandFlags.Session)]
-    public void ShowPdfViewer()
-    {
-        using var form = new PdfPreviewForm(Array.Empty<string>());
-        ShowModalDialog(form);
-    }
-
-    [CommandMethod("_ZBP_INTERNAL_PDF_VIEWER", CommandFlags.Session)]
-    public void ShowPdfViewerLegacy()
-    {
-        ShowPdfViewer();
     }
 
     [CommandMethod("ZBP_OPEN_CONFIG")]
@@ -251,16 +239,28 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
 
             string blockName;
             Matrix3d blockTransform;
+            Matrix3d inverse;
+            string? nestedBlockName = null;
             using (var tr = doc.Database.TransactionManager.StartTransaction())
             {
                 var blockRef = (BlockReference)tr.GetObject(blockResult.ObjectId, OpenMode.ForRead);
                 blockName = CadTextExtractor.GetBlockName(blockRef, tr);
                 blockTransform = blockRef.BlockTransform;
+
+                // Detect dynamic block with visibility states: use the visible inner block's name.
+                if (TryGetVisibleNestedBlock(tr, blockRef, out var innerName, out var innerTransform))
+                {
+                    nestedBlockName = innerName;
+                    blockName = innerName;
+                    blockTransform = innerTransform * blockRef.BlockTransform;
+                    AddBlockLog($"Dynamic block detected: outer={CadTextExtractor.GetBlockName(blockRef, tr)}, inner={innerName}");
+                }
+
                 tr.Commit();
             }
 
             AddBlockLog("Selected block: " + blockName);
-            var inverse = blockTransform.Inverse();
+            inverse = blockTransform.Inverse();
 
             var printStatus = TryGetOptionalRegion(
                 editor,
@@ -926,6 +926,88 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
         }
         catch
         {
+        }
+    }
+
+    /// <summary>
+    /// When <paramref name="blockRef"/> is a container block whose definition contains
+    /// nested block references (e.g. a dynamic block with visibility states), resolve
+    /// the visible inner block's effective name and its transform relative to the outer block.
+    /// Returns false if no nested blocks are found on visible layers.
+    /// </summary>
+    private static bool TryGetVisibleNestedBlock(
+        Transaction tr,
+        BlockReference blockRef,
+        out string innerBlockName,
+        out Matrix3d innerTransform)
+    {
+        innerBlockName = "";
+        innerTransform = Matrix3d.Identity;
+
+        var definitionId = blockRef.BlockTableRecord;
+        if (definitionId.IsNull)
+        {
+            return false;
+        }
+
+        var definition = (BlockTableRecord)tr.GetObject(definitionId, OpenMode.ForRead);
+        var nestedBlocks = new List<(string Name, Matrix3d Transform)>();
+
+        foreach (ObjectId id in definition)
+        {
+            if (tr.GetObject(id, OpenMode.ForRead, false) is not BlockReference nested)
+            {
+                continue;
+            }
+
+            if (!IsEntityVisible(nested))
+            {
+                continue;
+            }
+
+            var nestedName = CadTextExtractor.GetBlockName(nested, tr);
+            if (!string.IsNullOrWhiteSpace(nestedName))
+            {
+                nestedBlocks.Add((nestedName, nested.BlockTransform));
+            }
+        }
+
+        if (nestedBlocks.Count == 0)
+        {
+            return false;
+        }
+
+        // Dynamic block visibility states typically leave exactly one nested block visible.
+        // If multiple are on visible layers, pick the one with the largest bounding area.
+        var selected = nestedBlocks[0];
+        if (nestedBlocks.Count > 1)
+        {
+            double bestArea = 0;
+            foreach (var block in nestedBlocks)
+            {
+                var area = Math.Abs(block.Transform[0, 0] * block.Transform[1, 1]);
+                if (area > bestArea)
+                {
+                    bestArea = area;
+                    selected = block;
+                }
+            }
+        }
+
+        innerBlockName = selected.Name;
+        innerTransform = selected.Transform;
+        return true;
+    }
+
+    private static bool IsEntityVisible(Entity entity)
+    {
+        try
+        {
+            return entity.Visible;
+        }
+        catch
+        {
+            return true;
         }
     }
 

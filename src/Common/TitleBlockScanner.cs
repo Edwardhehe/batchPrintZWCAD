@@ -106,8 +106,25 @@ public static class TitleBlockScanner
                     warnings.Add($"布局={spaceName} 句柄={blockRef.Handle} 块名读取失败: {ex.Message}");
                     continue;
                 }
+
                 var definition = library.Blocks.FirstOrDefault(x =>
                     string.Equals(x.BlockName, blockName, StringComparison.OrdinalIgnoreCase));
+
+                // If no direct match, peek one level deeper: the outer block may be a
+                // dynamic-block container whose visible inner block was registered instead.
+                Matrix3d effectiveBlockTransform = blockRef.BlockTransform;
+                string effectiveBlockName = blockName;
+                if (definition == null)
+                {
+                    definition = ResolveNestedLibraryMatch(
+                        tr, blockRef, library, out var nestedTransform);
+                    if (definition != null)
+                    {
+                        effectiveBlockTransform = nestedTransform * blockRef.BlockTransform;
+                        effectiveBlockName = definition.BlockName;
+                    }
+                }
+
                 if (definition == null)
                 {
                     continue;
@@ -122,8 +139,8 @@ public static class TitleBlockScanner
                     coordinateMode = GetCoordinateMode(definition);
                     var referenceFrame = ResolveReferenceFrame(definition, blockRef);
                     extents = ResolveWorldExtents(definition, blockRef, coordinateMode, referenceFrame);
-                    titleRegion = ResolveLocalRegion(definition.TitleRegion, blockRef.BlockTransform, coordinateMode, referenceFrame);
-                    numberRegion = ResolveLocalRegion(definition.DrawingNumberRegion, blockRef.BlockTransform, coordinateMode, referenceFrame);
+                    titleRegion = ResolveLocalRegion(definition.TitleRegion, effectiveBlockTransform, coordinateMode, referenceFrame);
+                    numberRegion = ResolveLocalRegion(definition.DrawingNumberRegion, effectiveBlockTransform, coordinateMode, referenceFrame);
                 }
                 catch (Exception ex)
                 {
@@ -179,7 +196,7 @@ public static class TitleBlockScanner
                     SourceFile = sourceName,
                     SpaceName = spaceName,
                     IsPaperSpace = !layout.ModelType,
-                    BlockName = blockName,
+                    BlockName = effectiveBlockName,
                     BlockHandle = blockRef.Handle.ToString(),
                     MatchIndex = matchIndex++,
                     DrawingNumber = number,
@@ -605,6 +622,74 @@ public static class TitleBlockScanner
         }
         catch
         {
+        }
+    }
+
+    /// <summary>
+    /// When a top-level block reference doesn't directly match the library, peek one level
+    /// deeper into its definition for nested block references that do match (e.g. the visible
+    /// inner block of a dynamic-block container with visibility states).
+    /// </summary>
+    private static TitleBlockDefinition? ResolveNestedLibraryMatch(
+        Transaction tr,
+        BlockReference outerRef,
+        TitleBlockLibrary library,
+        out Matrix3d nestedTransform)
+    {
+        nestedTransform = Matrix3d.Identity;
+
+        var definitionId = outerRef.BlockTableRecord;
+        if (definitionId.IsNull)
+        {
+            return null;
+        }
+
+        var definition = (BlockTableRecord)tr.GetObject(definitionId, OpenMode.ForRead);
+
+        foreach (ObjectId id in definition)
+        {
+            if (tr.GetObject(id, OpenMode.ForRead, false) is not BlockReference nested)
+            {
+                continue;
+            }
+
+            // Skip nested blocks hidden by dynamic-block visibility states.
+            if (!IsEntityVisible(nested))
+            {
+                continue;
+            }
+
+            string nestedName;
+            try
+            {
+                nestedName = CadTextExtractor.GetBlockName(nested, tr);
+            }
+            catch
+            {
+                continue;
+            }
+
+            var match = library.Blocks.FirstOrDefault(x =>
+                string.Equals(x.BlockName, nestedName, StringComparison.OrdinalIgnoreCase));
+            if (match != null)
+            {
+                nestedTransform = nested.BlockTransform;
+                return match;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsEntityVisible(Entity entity)
+    {
+        try
+        {
+            return entity.Visible;
+        }
+        catch
+        {
+            return true;
         }
     }
 }

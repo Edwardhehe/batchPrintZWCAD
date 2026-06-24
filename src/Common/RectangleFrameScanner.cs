@@ -156,10 +156,25 @@ public static class RectangleFrameScanner
             var nestedTransform = blockReference.BlockTransform * transform;
             foreach (ObjectId id in definition)
             {
-                if (tr.GetObject(id, OpenMode.ForRead, false) is Entity nested)
+                if (tr.GetObject(id, OpenMode.ForRead, false) is not Entity nested)
                 {
-                    CollectEntityRectangles(tr, nested, nestedTransform, rectangles, visitedDefinitions, depth + 1);
+                    continue;
                 }
+
+                if (!IsEntityLayerScannable(tr, nested))
+                {
+                    continue;
+                }
+
+                // Let the CAD engine tell us whether the entity is currently visible.
+                // This correctly handles dynamic-block visibility states, hidden
+                // entities, and any other visibility mechanism — without guessing names.
+                if (!IsEntityVisible(nested))
+                {
+                    continue;
+                }
+
+                CollectEntityRectangles(tr, nested, nestedTransform, rectangles, visitedDefinitions, depth + 1);
             }
         }
         catch
@@ -168,6 +183,19 @@ public static class RectangleFrameScanner
         finally
         {
             visitedDefinitions.Remove(definitionId);
+        }
+    }
+
+    private static bool IsEntityVisible(Entity entity)
+    {
+        try
+        {
+            return entity.Visible;
+        }
+        catch
+        {
+            // If the property is unavailable (older API), err on the side of inclusion.
+            return true;
         }
     }
 
