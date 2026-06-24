@@ -50,7 +50,8 @@
   │   // 匿名块名 (*U12) 不会暴露给调用方
   │
   ├─ TryGetVisibleNestedBlock(tr, blockRef)
-  │   │ // 针对动态块：深入一层找到当前可见的内层嵌套块
+  │   │ // 守卫: IsDynamicBlock=false → 直接返回 false，不干扰普通块
+  │   │ // 只针对动态块：深入一层找到当前可见的内层嵌套块
   │   ├─ 进入匿名块定义 (*U12)
   │   ├─ 遍历所有嵌套 BlockReference
   │   ├─ entity.Visible == true? → CAD 引擎原生判断可见性
@@ -78,7 +79,7 @@
 | 步骤 | 代码位置 |
 |------|---------|
 | 获取块名 | `CadTextExtractor.GetBlockName()` — [ZWCAD](src/ZWCAD/CadTextExtractor.cs#L23) / [AutoCAD](src/AutoCAD/CadTextExtractor.cs#L23) |
-| 深入动态块 | `BatchPlotCommands.TryGetVisibleNestedBlock()` — [line 951](src/Common/BatchPlotCommands.cs#L951) |
+| 深入动态块 | `BatchPlotCommands.TryGetVisibleNestedBlock()` — [line 951](src/Common/BatchPlotCommands.cs#L951)，入口有 `IsDynamicBlock` 守卫 |
 | 可见性判断 | `IsEntityVisible()` — 调用 `entity.Visible` 属性，try/catch 兜底 |
 | 坐标变换 | `BatchPlotCommands.TransformRegion/TransformExtents/ToFrameRelative` |
 | 纸张检测 | `PaperSizeDetector.Detect()` — [PaperSizeDetector.cs](src/Common/PaperSizeDetector.cs) |
@@ -505,11 +506,11 @@ private static bool IsEntityVisible(Entity entity)
 
 ### 7.2 涉及的三处位置
 
-| 位置 | 文件:方法 | 作用 |
-|------|----------|------|
-| 矩形框扫描 | `RectangleFrameScanner.CollectEntityRectangles` | 遍历子实体时过滤隐藏状态 |
-| 新增图框 | `BatchPlotCommands.TryGetVisibleNestedBlock` | 定位当前可见嵌套块名入库 |
-| 图框库扫描 | `TitleBlockScanner.ResolveNestedLibraryMatch` | 深入动态块找可见嵌套块的库匹配 |
+| 位置 | 文件:方法 | 作用 | 守卫条件 |
+|------|----------|------|---------|
+| 矩形框扫描 | `RectangleFrameScanner.CollectEntityRectangles` | 遍历子实体时过滤隐藏状态 | 无守卫，所有实体通用 |
+| 新增图框 | `BatchPlotCommands.TryGetVisibleNestedBlock` | 定位当前可见嵌套块名入库 | `IsDynamicBlock` — 普通块直接返回 false |
+| 图框库扫描 | `TitleBlockScanner.ResolveNestedLibraryMatch` | 深入动态块找可见嵌套块的库匹配 | 仅 `definition==null` 时触发 |
 
 ### 7.3 GetBlockName 的行为
 
@@ -528,9 +529,16 @@ private static bool IsEntityVisible(Entity entity)
 ```
 用户选择动态块 "【地铁院】图框"
   → GetBlockName → "【地铁院】图框"
-  → TryGetVisibleNestedBlock → 深入匿名定义
+  → TryGetVisibleNestedBlock:
+      IsDynamicBlock? → true ✅ → 深入匿名定义
       entity.Visible 过滤 → 找到内层可见块 → "A2"
   → 库 key = "A2"
+
+用户选择普通块 "MyFrame" (内有嵌套块)
+  → GetBlockName → "MyFrame"
+  → TryGetVisibleNestedBlock:
+      IsDynamicBlock? → false ❌ → 直接返回 false，不走嵌套逻辑
+  → 库 key = "MyFrame"（普通块行为，不受影响）
 
 下次扫描该图纸时:
   → 图纸中有 BlockRef → "【地铁院】图框"
