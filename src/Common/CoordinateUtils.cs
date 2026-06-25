@@ -16,7 +16,7 @@ public sealed partial class BatchPlotCommands
     /// 将 PlotJob 的矩形窗口四个角点按矩阵变换到目标坐标系，重新取包围盒。
     /// 同时标记 IsDcsWindow=true，下游 GetPlotWindow 和 PrepareEditorViewForPlot 识别此标记。
     /// </summary>
-    private static void TransformPlotWindow(PlotJob job, Matrix3d toTarget)
+    internal static void TransformPlotWindow(PlotJob job, Matrix3d toTarget)
     {
         var corners = new[]
         {
@@ -37,7 +37,7 @@ public sealed partial class BatchPlotCommands
     /// 模型空间根据当前视图的 ViewDirection/Target/ViewTwist 构造；
     /// 图纸空间没有视图变换，返回单位矩阵。
     /// </summary>
-    private static Matrix3d BuildWcsToDcsMatrix(Editor editor)
+    internal static Matrix3d BuildWcsToDcsMatrix(Editor editor)
     {
         // 图纸空间：DCS = WCS，无视图旋转
         if (!editor.Document.Database.TileMode)

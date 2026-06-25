@@ -336,6 +336,7 @@ public static class PlotterService
         job.MinY = refreshed.MinY;
         job.MaxX = refreshed.MaxX;
         job.MaxY = refreshed.MaxY;
+        job.IsDcsWindow = false;  // 重新扫描后坐标回到 WCS，清除 DCS 标记
         job.PaperName = refreshed.PaperName;
         job.ScaleText = refreshed.ScaleText;
         job.SizeText = refreshed.SizeText;

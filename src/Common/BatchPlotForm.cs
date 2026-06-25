@@ -563,7 +563,12 @@ public sealed class BatchPlotForm : Form
         }
 
         _jobs.Clear();
-        foreach (var job in TitleBlockScanner.Scan(_currentDocument, library, scope.Value))
+        var scannedJobs = TitleBlockScanner.Scan(_currentDocument, library, scope.Value);
+
+        // 扫描结果坐标是 WCS，转为 DCS 后打印（和矩形框批量打印同理）
+        TransformScannedJobsToDcs(scannedJobs);
+
+        foreach (var job in scannedJobs)
         {
             _jobs.Add(job);
         }
@@ -600,12 +605,22 @@ public sealed class BatchPlotForm : Form
                 return;
             }
 
+            // 用户框选的是 UCS 坐标 → 转为 WCS 后传给 Scanner
+            var ucsToWcs = editor.CurrentUserCoordinateSystem;
+            var wcsP1 = first.Value.TransformBy(ucsToWcs);
+            var wcsP2 = second.Value.TransformBy(ucsToWcs);
+
             var window = new Extents3d(
-                new Point3d(Math.Min(first.Value.X, second.Value.X), Math.Min(first.Value.Y, second.Value.Y), 0),
-                new Point3d(Math.Max(first.Value.X, second.Value.X), Math.Max(first.Value.Y, second.Value.Y), 0));
+                new Point3d(Math.Min(wcsP1.X, wcsP2.X), Math.Min(wcsP1.Y, wcsP2.Y), 0),
+                new Point3d(Math.Max(wcsP1.X, wcsP2.X), Math.Max(wcsP1.Y, wcsP2.Y), 0));
 
             _jobs.Clear();
-            foreach (var job in TitleBlockScanner.Scan(_currentDocument, library, window))
+            var scannedJobs = TitleBlockScanner.Scan(_currentDocument, library, window);
+
+            // 扫描结果坐标是 WCS，转为 DCS 后打印
+            TransformScannedJobsToDcs(scannedJobs);
+
+            foreach (var job in scannedJobs)
             {
                 _jobs.Add(job);
             }
@@ -618,6 +633,38 @@ public sealed class BatchPlotForm : Form
         {
             Show();
             Activate();
+        }
+    }
+
+    /// <summary>扫描得到的 Job 坐标是 WCS，转换为 DCS 后打印（和矩形框批量打印同理）。</summary>
+    private void TransformScannedJobsToDcs(List<PlotJob> jobs)
+    {
+        try
+        {
+            var wcsToDcs = BatchPlotCommands.BuildWcsToDcsMatrix(_currentDocument.Editor);
+            foreach (var job in jobs)
+            {
+                // 和矩形框扫描完全一样的算法：4 个 WCS 角点 × WCS→DCS → 取一次包围盒
+                // 视图旋转时包围盒会变大——这是打印引擎需要的，PlotRotation 回正时光靠小窗口盖不住
+                var corners = new[]
+                {
+                    new Point3d(job.MinX, job.MinY, 0).TransformBy(wcsToDcs),
+                    new Point3d(job.MaxX, job.MinY, 0).TransformBy(wcsToDcs),
+                    new Point3d(job.MaxX, job.MaxY, 0).TransformBy(wcsToDcs),
+                    new Point3d(job.MinX, job.MaxY, 0).TransformBy(wcsToDcs)
+                };
+                job.MinX = corners.Min(p => p.X);
+                job.MinY = corners.Min(p => p.Y);
+                job.MaxX = corners.Max(p => p.X);
+                job.MaxY = corners.Max(p => p.Y);
+                job.IsDcsWindow = true;
+                // 阻止 PlotterService 重新扫描 DWG 刷新坐标（和矩形框批量打印同理）
+                job.IsManualWindow = true;
+            }
+        }
+        catch (System.Exception ex)
+        {
+            AppendLog("WARN", $"图框扫描 WCS→DCS 变换失败，使用 WCS 坐标：{ex.Message}");
         }
     }
 

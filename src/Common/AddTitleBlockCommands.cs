@@ -34,6 +34,15 @@ public sealed partial class BatchPlotCommands
         }
 
         var editor = doc.Editor;
+
+        // 新增图框必须在 WCS 下操作，避免 UCS 旋转导致存储的坐标区域与后续扫描不匹配
+        if (!editor.CurrentUserCoordinateSystem.IsEqualTo(Matrix3d.Identity))
+        {
+            MessageBox.Show("新增图框前请先将 UCS 切换为世界坐标系（WCS）。\n命令行输入 UCS 然后回车即可。",
+                "批量打印", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
         AddBlockLog("Add title block command started.");
 
         try

@@ -789,6 +789,7 @@ public static class PlotterService
                 job.MinY = refreshed.MinY;
                 job.MaxX = refreshed.MaxX;
                 job.MaxY = refreshed.MaxY;
+                job.IsDcsWindow = false;  // 重新扫描后坐标回到 WCS
                 job.PaperName = refreshed.PaperName;
                 job.PaperWidthMm = refreshed.PaperWidthMm;
                 job.PaperHeightMm = refreshed.PaperHeightMm;
