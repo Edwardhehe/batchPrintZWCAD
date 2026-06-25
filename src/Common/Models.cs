@@ -32,6 +32,13 @@ public sealed class LocalRectangle
     public double MaxX { get; set; }
     public double MaxY { get; set; }
 
+    /// <summary>矩形实际宽度（旋转 UCS 下与包围盒宽度不同），0 表示用 MaxX-MinX。</summary>
+    public double ActualWidth { get; set; }
+    /// <summary>矩形实际高度，同上。</summary>
+    public double ActualHeight { get; set; }
+    /// <summary>矩形 4 个实际角点（WCS），格式 [x0,y0,x1,y1,x2,y2,x3,y3]。null 表示无。</summary>
+    public double[]? CornerPoints { get; set; }
+
     public static LocalRectangle FromPoints(double x1, double y1, double x2, double y2)
     {
         return new LocalRectangle

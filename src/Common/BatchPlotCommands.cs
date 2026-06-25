@@ -302,7 +302,30 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
                 var wcsToDcs = BuildWcsToDcsMatrix(editor);
                 foreach (var result in results)
                 {
-                    TransformPlotWindow(result.Job, wcsToDcs);
+                    var job = result.Job;
+
+                    if (result.CornerPoints != null)
+                    {
+                        // 和单张打印完全一样的算法：
+                        // 4 个实际角点（WCS）→ WCS→DCS 变换 → 取一次包围盒
+                        var corners = new[]
+                        {
+                            new Point3d(result.CornerPoints[0], result.CornerPoints[1], 0).TransformBy(wcsToDcs),
+                            new Point3d(result.CornerPoints[2], result.CornerPoints[3], 0).TransformBy(wcsToDcs),
+                            new Point3d(result.CornerPoints[4], result.CornerPoints[5], 0).TransformBy(wcsToDcs),
+                            new Point3d(result.CornerPoints[6], result.CornerPoints[7], 0).TransformBy(wcsToDcs)
+                        };
+                        job.MinX = corners.Min(p => p.X);
+                        job.MinY = corners.Min(p => p.Y);
+                        job.MaxX = corners.Max(p => p.X);
+                        job.MaxY = corners.Max(p => p.Y);
+                    }
+                    else
+                    {
+                        TransformPlotWindow(job, wcsToDcs);
+                    }
+
+                    job.IsDcsWindow = true;
                 }
             }
             catch (System.Exception ex)

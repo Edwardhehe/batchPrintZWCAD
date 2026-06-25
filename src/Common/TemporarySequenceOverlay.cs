@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 #if AUTOCAD
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.Colors;
@@ -38,10 +39,32 @@ public sealed class TemporarySequenceOverlay
         var db = _document.Database;
         var layerId = EnsureLayer(tr, db);
 
+        // 单张打印和矩形框批量的 Job 坐标是 DCS，绘制到图纸前需回退到 WCS
+        // DCS→WCS：绘制前回退坐标
+        var dcsToWcs = Matrix3d.Identity;
+        // UCS X 轴在 WCS 中的角度 — 红框和数字按此旋转，保证 UCS 视图中显示为正
+        var ucsAngle = 0d;
+        try
+        {
+            if (_document.Database.TileMode)
+            {
+                var view = _document.Editor.GetCurrentView();
+                dcsToWcs = Matrix3d.PlaneToWorld(view.ViewDirection);
+                dcsToWcs = Matrix3d.Displacement(view.Target - Point3d.Origin) * dcsToWcs;
+                dcsToWcs = Matrix3d.Rotation(-view.ViewTwist, view.ViewDirection, view.Target) * dcsToWcs;
+
+                var ucs = _document.Editor.CurrentUserCoordinateSystem;
+                ucsAngle = Math.Atan2(ucs[1, 0], ucs[0, 0]);
+            }
+        }
+        catch
+        {
+        }
+
         for (var i = 0; i < jobs.Count; i++)
         {
             var job = jobs[i];
-            if (!TryGetBounds(job, out var minX, out var minY, out var maxX, out var maxY))
+            if (!TryGetBounds(job, dcsToWcs, out var minX, out var minY, out var maxX, out var maxY))
             {
                 continue;
             }
@@ -61,6 +84,18 @@ public sealed class TemporarySequenceOverlay
             }
 
             var owner = (BlockTableRecord)tr.GetObject(ownerId, OpenMode.ForWrite);
+
+            // 红框按 UCS 角度旋转后绘制到 WCS，保证用户在 UCS 视图中看是正的
+            var cosA = Math.Cos(ucsAngle);
+            var sinA = Math.Sin(ucsAngle);
+            var cx = (minX + maxX) / 2d;
+            var cy = (minY + maxY) / 2d;
+            var hw = (maxX - minX) / 2d + padding;
+            var hh = (maxY - minY) / 2d + padding;
+
+            Point2d Rot(double dx, double dy) =>
+                new(cx + dx * cosA - dy * sinA, cy + dx * sinA + dy * cosA);
+
             var frame = new Polyline(4)
             {
                 Closed = true,
@@ -69,14 +104,14 @@ public sealed class TemporarySequenceOverlay
                 LineWeight = GetLineWeight(minSide),
                 ConstantWidth = frameWidth
             };
-            frame.AddVertexAt(0, new Point2d(minX - padding, minY - padding), 0, 0, 0);
-            frame.AddVertexAt(1, new Point2d(maxX + padding, minY - padding), 0, 0, 0);
-            frame.AddVertexAt(2, new Point2d(maxX + padding, maxY + padding), 0, 0, 0);
-            frame.AddVertexAt(3, new Point2d(minX - padding, maxY + padding), 0, 0, 0);
+            frame.AddVertexAt(0, Rot(-hw, -hh), 0, 0, 0);
+            frame.AddVertexAt(1, Rot(+hw, -hh), 0, 0, 0);
+            frame.AddVertexAt(2, Rot(+hw, +hh), 0, 0, 0);
+            frame.AddVertexAt(3, Rot(-hw, +hh), 0, 0, 0);
             AddEntity(tr, owner, frame);
 
             var center = new Point3d((minX + maxX) / 2d, (minY + maxY) / 2d, 0);
-            AddBoldLabel(tr, owner, layerId, color, center, (i + 1).ToString(), textHeight);
+            AddBoldLabel(tr, owner, layerId, color, center, (i + 1).ToString(), textHeight, ucsAngle);
         }
 
         tr.Commit();
@@ -175,10 +210,12 @@ public sealed class TemporarySequenceOverlay
         }
     }
 
-    private void AddBoldLabel(Transaction tr, BlockTableRecord owner, ObjectId layerId, Color color, Point3d center, string text, double height)
+    private void AddBoldLabel(Transaction tr, BlockTableRecord owner, ObjectId layerId, Color color, Point3d center, string text, double height, double rotation)
     {
         var stroke = Math.Max(height * 0.035, 2d);
-        var offsets = new[]
+        var cosR = Math.Cos(rotation);
+        var sinR = Math.Sin(rotation);
+        var offsets = new (double X, double Y)[]
         {
             (0d, 0d),
             (-stroke, 0d),
@@ -193,13 +230,17 @@ public sealed class TemporarySequenceOverlay
 
         foreach (var (dx, dy) in offsets)
         {
-            var point = new Point3d(center.X + dx, center.Y + dy, center.Z);
+            // 描边偏移按 UCS 角度旋转，和红框方向一致
+            var rx = dx * cosR - dy * sinR;
+            var ry = dx * sinR + dy * cosR;
+            var point = new Point3d(center.X + rx, center.Y + ry, center.Z);
             var label = new DBText
             {
                 TextString = text,
                 Color = color,
                 LayerId = layerId,
                 Height = height,
+                Rotation = rotation,
                 HorizontalMode = TextHorizontalMode.TextCenter,
                 VerticalMode = TextVerticalMode.TextVerticalMid,
                 Position = point,
@@ -221,12 +262,27 @@ public sealed class TemporarySequenceOverlay
         }
     }
 
-    private static bool TryGetBounds(PlotJob job, out double minX, out double minY, out double maxX, out double maxY)
+    private static bool TryGetBounds(PlotJob job, Matrix3d dcsToWcs, out double minX, out double minY, out double maxX, out double maxY)
     {
         minX = Math.Min(job.MinX, job.MaxX);
         minY = Math.Min(job.MinY, job.MaxY);
         maxX = Math.Max(job.MinX, job.MaxX);
         maxY = Math.Max(job.MinY, job.MaxY);
+
+        // IsDcsWindow：坐标是 DCS，只转中心点到 WCS，尺寸直接使用（DCS 尺寸 = 实际尺寸）
+        // 不能四个角转 WCS 再取包围盒——那会二次放大
+        if (job.IsDcsWindow)
+        {
+            var halfW = (maxX - minX) / 2d;
+            var halfH = (maxY - minY) / 2d;
+            var dcsCenter = new Point3d((minX + maxX) / 2d, (minY + maxY) / 2d, 0);
+            var wcsCenter = dcsCenter.TransformBy(dcsToWcs);
+            minX = wcsCenter.X - halfW;
+            minY = wcsCenter.Y - halfH;
+            maxX = wcsCenter.X + halfW;
+            maxY = wcsCenter.Y + halfH;
+        }
+
         return maxX - minX > 1e-6 && maxY - minY > 1e-6;
     }
 
