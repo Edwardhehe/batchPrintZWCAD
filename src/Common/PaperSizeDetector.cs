@@ -37,7 +37,8 @@ public static class PaperSizeDetector
         new("A0", 841, 1189),
         new("A1", 594, 841),
         new("A2", 420, 594),
-        new("A3", 297, 420)
+        new("A3", 297, 420),
+        new("A4", 210, 297)
     };
 
     private static readonly double[] CommonScales =
@@ -217,7 +218,7 @@ public static class PaperSizeDetector
         var longSide = Math.Max(actualWidth, actualHeight);
         return new PaperDetection
         {
-            Note = $"未匹配到 A0/A1/A2/A3，实际尺寸 {longSide:0.##} x {shortSide:0.##}"
+            Note = $"未匹配到 A0~A4，实际尺寸 {longSide:0.##} x {shortSide:0.##}"
         };
     }
 
