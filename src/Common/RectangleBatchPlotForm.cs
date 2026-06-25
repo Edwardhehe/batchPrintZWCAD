@@ -21,7 +21,7 @@ public sealed class RectangleBatchPlotForm : Form
     private sealed class Row
     {
         public PlotJob Job { get; set; } = new();
-        public IReadOnlyList<PaperDetection> Options { get; set; } = Array.Empty<PaperDetection>();
+        public IReadOnlyList<PaperDetection> Options { get; set; } = new PaperDetection[0];
         public bool Selected { get => Job.Selected; set => Job.Selected = value; }
         public string FileName { get; set; } = "";
         public string PaperChoice { get; set; } = "";

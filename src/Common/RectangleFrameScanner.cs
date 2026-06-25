@@ -32,7 +32,7 @@ public static class RectangleFrameScanner
     public sealed class Result
     {
         public PlotJob Job { get; set; } = new();
-        public IReadOnlyList<PaperDetection> PaperOptions { get; set; } = Array.Empty<PaperDetection>();
+        public IReadOnlyList<PaperDetection> PaperOptions { get; set; } = new PaperDetection[0];
         /// <summary>矩形 4 个实际角点（WCS 坐标），格式 [x0,y0,x1,y1,x2,y2,x3,y3]。
         /// 用于 DCS 变换（4 点→DCS→取包围盒，和单张打印同理）。null 时用 Job 的包围盒。</summary>
         public double[]? CornerPoints { get; set; }

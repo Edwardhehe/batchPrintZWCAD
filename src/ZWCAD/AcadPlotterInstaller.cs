@@ -93,12 +93,12 @@ public static class AcadPlotterInstaller
     {
         var assemblyPath = Assembly.GetExecutingAssembly().Location;
         var assemblyDirectory = string.IsNullOrWhiteSpace(assemblyPath)
-            ? AppContext.BaseDirectory
-            : Path.GetDirectoryName(assemblyPath) ?? AppContext.BaseDirectory;
+            ? AppDomain.CurrentDomain.BaseDirectory
+            : Path.GetDirectoryName(assemblyPath) ?? AppDomain.CurrentDomain.BaseDirectory;
 
         return new[]
         {
-            AppContext.BaseDirectory,
+            AppDomain.CurrentDomain.BaseDirectory,
             assemblyDirectory,
             Directory.GetCurrentDirectory()
         };

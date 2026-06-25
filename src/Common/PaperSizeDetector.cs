@@ -63,7 +63,7 @@ public static class PaperSizeDetector
         var details = GetCandidateDetails(width, height);
         if (details.Count == 0)
         {
-            return Array.Empty<PaperDetection>();
+            return new PaperDetection[0];
         }
 
         var scoreLimit = Math.Min(0.04d, Math.Max(0.015d, details[0].Score + 0.015d));
