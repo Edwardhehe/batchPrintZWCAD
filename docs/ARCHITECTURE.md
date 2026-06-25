@@ -1,6 +1,6 @@
 # 批量打印插件架构文档
 
-> 覆盖 ZWCAD 和 AutoCAD 双平台，版本 1.9.1
+> 覆盖 ZWCAD 和 AutoCAD 双平台，版本 1.10.0
 
 ---
 
@@ -13,9 +13,10 @@
 5. [流程四：单张打印](#5-流程四单张打印)
 6. [打印引擎](#6-打印引擎)
 7. [PDF 合并](#7-pdf-合并)
-8. [动态块处理](#8-动态块处理)
-9. [ZWCAD vs AutoCAD 差异](#9-zwcad-vs-autocad-差异)
-10. [项目文件结构](#10-项目文件结构)
+8. [UCS 坐标变换](#8-ucs-坐标变换)
+9. [动态块处理](#9-动态块处理)
+10. [ZWCAD vs AutoCAD 差异](#10-zwcad-vs-autocad-差异)
+11. [项目文件结构](#11-项目文件结构)
 
 ---
 
@@ -569,11 +570,61 @@ PdfDocumentService.Merge(pdfFiles, outputPath)
 
 ---
 
-## 8. 动态块处理
+## 8. UCS 坐标变换
+
+v1.10.0 全面支持用户坐标系（UCS）。三个打印功能共用同一套变换链路。
+
+### 10.1 核心原则
+
+**四点变换，一次包围盒。** 将实际角点一步变换到 DCS，只取一次包围盒。避免中间取 WCS 包围盒导致的重复放大。
+
+### 10.2 变换矩阵
+
+```
+BuildUcsToDcsMatrix = UCS→WCS × WCS→DCS
+BuildWcsToDcsMatrix = PlaneToWorld × Displacement × Rotation → Inverse
+
+UCS=WCS 时所有矩阵退化为单位矩阵，行为不变。
+```
+
+两个方法在 [CoordinateUtils.cs](src/Common/CoordinateUtils.cs)。
+
+### 10.3 三个功能的变换路径
+
+| 功能 | 输入坐标系 | 变换 | 输出 |
+|------|-----------|------|------|
+| 单张打印 | UCS 角点 | `BuildUcsToDcsMatrix` | DCS 包围盒 → PlotJob |
+| 矩形框批量 | WCS 角点 (CornerPoints) | `BuildWcsToDcsMatrix` | DCS 包围盒 → PlotJob |
+| 图框块批量 | WCS 角点 (ComputeWcsCorners) | `BuildWcsToDcsMatrix` | DCS 包围盒 → PlotJob |
+
+三条路径殊途同归：`IsDcsWindow=true` → `GetPlotWindow` 跳过 → `PrepareEditorViewForPlot` 跳过。
+
+### 10.4 图框块 vs 矩形框的关键差异
+
+| | 图框块 | 矩形框 |
+|--|-------|-------|
+| 角点来源 | 图框库参考框 4 角 × BlockTransform | 多段线实际顶点 |
+| 存储 | `PlotJob.CornerPoints` | `LocalRectangle.CornerPoints` |
+| 世界坐标获取 | `ComputeWcsCorners`（不取包围盒） | `TryGetRectangle`（实际顶点） |
+| BlockTransform 影响 | 缩放、旋转自动跟随 | N/A（多段线已在 WCS） |
+
+两者最终都是四点 × `WCS→DCS` 取一次包围盒。
+
+### 10.5 框选范围 UCS 处理
+
+所有 `GetPoint/GetCorner` 框选均用四点法：UCS 两个对角点展开为四个角点 × `UCS→WCS` 取一次包围盒，不在中间用 `Math.Min/Max` 放大。
+
+### 10.6 Overlay UCS 跟随
+
+红框和数字按 UCS X 轴角度旋转后绘制到 WCS，保证任何 UCS 视图下显示为正。
+
+---
+
+## 9. 动态块处理
 
 > 动态块（Dynamic Block）是具有可见性状态、拉伸等参数化行为的块参照。
 
-### 8.1 核心原则
+### 10.1 核心原则
 
 **不使用名字猜测，不使用图层猜测。直接问 CAD 引擎。**
 
@@ -588,7 +639,7 @@ private static bool IsEntityVisible(Entity entity)
 }
 ```
 
-### 8.2 涉及的三处位置
+### 10.2 涉及的三处位置
 
 | 位置 | 文件:方法 | 作用 | 守卫条件 |
 |------|----------|------|---------|
@@ -596,7 +647,7 @@ private static bool IsEntityVisible(Entity entity)
 | 新增图框 | `BatchPlotCommands.TryGetVisibleNestedBlock` | 定位当前可见嵌套块名入库 | `IsDynamicBlock` — 普通块直接返回 false |
 | 图框库扫描 | `TitleBlockScanner.ResolveNestedLibraryMatch` | 深入动态块找可见嵌套块的库匹配 | 仅 `definition==null` 时触发 |
 
-### 8.3 GetBlockName 的行为
+### 10.3 GetBlockName 的行为
 
 ```csharp
 // CadTextExtractor.GetBlockName:
@@ -608,7 +659,7 @@ private static bool IsEntityVisible(Entity entity)
 //        避免把 *U12 泄露给图框库或用户界面
 ```
 
-### 8.4 新增图框时的完整链路
+### 10.4 新增图框时的完整链路
 
 ```
 用户选择动态块 "【地铁院】图框"
@@ -634,9 +685,9 @@ private static bool IsEntityVisible(Entity entity)
 
 ---
 
-## 9. ZWCAD vs AutoCAD 差异
+## 10. ZWCAD vs AutoCAD 差异
 
-### 9.1 条件编译
+### 10.1 条件编译
 
 ```csharp
 #if AUTOCAD
@@ -648,7 +699,7 @@ private static bool IsEntityVisible(Entity entity)
 
 所有 `src/Common/` 下的文件使用 `#if AUTOCAD` 条件编译，共享逻辑不变，仅切换命名空间。
 
-### 9.2 平台差异清单
+### 10.2 平台差异清单
 
 | 方面 | AutoCAD | ZWCAD |
 |------|---------|-------|
@@ -662,7 +713,7 @@ private static bool IsEntityVisible(Entity entity)
 | 图框库迁移 | 首次加载时自动从 ZWCAD 路径导入 | 无迁移逻辑 |
 | 动态块 API | `IsDynamicBlock` / `DynamicBlockTableRecord` 稳定 | 老版本可能异常 → 已用 try/catch 保护 |
 
-### 9.3 编译项目对应
+### 10.3 编译项目对应
 
 | .csproj | 平台 | Target | Output |
 |---------|------|--------|--------|
@@ -676,7 +727,7 @@ private static bool IsEntityVisible(Entity entity)
 
 ---
 
-## 10. 项目文件结构
+## 11. 项目文件结构
 
 ```
 批量打印/
@@ -688,11 +739,15 @@ private static bool IsEntityVisible(Entity entity)
 │
 ├── src/
 │   ├── Common/                  ← 双平台共享代码 (#if AUTOCAD)
-│   │   ├── BatchPlotCommands.cs     ← 命令入口 + 新增图框向导 + 单张打印
+│   │   ├── BatchPlotCommands.cs     ← 命令入口 + 窗口扫描 + 工具方法 (partial class)
+│   │   ├── CoordinateUtils.cs       ← UCS/DCS 坐标变换矩阵 (partial class)
+│   │   ├── SinglePlotCommands.cs    ← 单张打印核心 + 打印机选择 (partial class)
+│   │   ├── AddTitleBlockCommands.cs ← 新增图框向导 + 动态块可见性 (partial class)
 │   │   ├── BatchPlotForm.cs         ← 批量打印主面板 (图框库匹配模式)
 │   │   ├── RectangleBatchPlotForm.cs ← 批量打印面板 (矩形框扫描模式)
+│   │   ├── SinglePlotForm.cs        ← 单张打印确认面板（预览/纸张/路径）
 │   │   ├── TitleBlockScanner.cs     ← 图框库扫描器: 扫描→匹配→生成PlotJob
-│   │   ├── RectangleFrameScanner.cs ← 矩形框扫描器: 递归扫描PL→过滤→生成PlotJob
+│   │   ├── RectangleFrameScanner.cs ← 矩形框扫描器: 递归扫描PL→4层过滤→生成PlotJob
 │   │   ├── PaperSizeDetector.cs     ← 纸张尺寸检测: A0~A3标准/加长
 │   │   ├── Models.cs               ← 数据模型: PlotJob, TitleBlockDefinition, LocalRectangle
 │   │   ├── AppSettingsStore.cs      ← 设置持久化 (JSON)
@@ -708,7 +763,7 @@ private static bool IsEntityVisible(Entity entity)
 │   │   ├── UiLayout.cs              ← WinForms 布局: DPI缩放、按钮创建
 │   │   ├── BatchPlotLogger.cs       ← 日志输出
 │   │   ├── DirectoryTableGenerator.cs ← 图纸目录表生成: 在CAD中绘制表格
-│   │   └── TemporarySequenceOverlay.cs ← 打印序号标注: 在图纸上画临时编号
+│   │   └── TemporarySequenceOverlay.cs ← 打印序号标注: 红框+数字，点击高亮
 │   │
 │   ├── AutoCAD/                  ← AutoCAD 专用实现
 │   │   ├── CadTextExtractor.cs   ← 文字提取: 属性/文字/多行文字/MText
@@ -738,8 +793,15 @@ private static bool IsEntityVisible(Entity entity)
 │       └── PMP Files/LA_pdf.pmp  ← 绘图仪校准文件
 │
 ├── bin/                          ← ZWCAD 编译输出
-├── bin-acad/                     ← AutoCAD 2019+ 编译输出
+├── bin-acad/                     ← AutoCAD 2019-2024 编译输出
+├── bin-acad2016/                 ← AutoCAD 2016 编译输出
+├── bin-acad2017/                 ← AutoCAD 2017 编译输出
+├── bin-acad2018/                 ← AutoCAD 2018 编译输出
+├── bin-acad2019/                 ← AutoCAD 2019 编译输出
 ├── bin-acad-core/                ← AutoCAD 2025+ Core 编译输出
+├── bin-tmp/ bin-new/            ← 临时编译输出（bin 被锁时）
+│
+├── release/                      ← 发布包
 │
 └── tests/
     └── RobustnessTests/          ← 单元测试项目
