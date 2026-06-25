@@ -79,12 +79,11 @@ public sealed class TemporarySequenceOverlay
             var color = isHighlight
                 ? Color.FromColorIndex(ColorMethod.ByAci, 2)
                 : Color.FromColorIndex(ColorMethod.ByAci, 1);
+            // 高亮通过 PL 线宽（ConstantWidth）实现，不动 LineWeight——用户不一定会开线宽显示
             var frameWidth = isHighlight
-                ? GetFrameWidth(minSide) * 2.5
+                ? Math.Max(GetFrameWidth(minSide) * 3d, minSide / 20d)
                 : GetFrameWidth(minSide);
-            var lineWeight = isHighlight
-                ? BumpLineWeight(GetLineWeight(minSide))
-                : GetLineWeight(minSide);
+            var lineWeight = GetLineWeight(minSide);
 
             var ownerId = GetJobOwnerId(tr, db, job);
             if (ownerId.IsNull)

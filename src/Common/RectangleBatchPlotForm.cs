@@ -253,6 +253,14 @@ public sealed class RectangleBatchPlotForm : Form
             if (e.RowIndex >= 0 && e.RowIndex < _rows.Count)
             {
                 _highlightedJobIndex = e.RowIndex;
+                try
+                {
+                    var selectedJobs = _rows.Where(row => row.Selected).Select(row => row.Job).ToList();
+                    var targetJob = _rows[e.RowIndex].Job;
+                    var idx = selectedJobs.FindIndex(j => ReferenceEquals(j, targetJob));
+                    _overlay.Show(selectedJobs, idx);
+                }
+                catch { }
             }
         };
         _grid.CellFormatting += GridCellFormatting;
@@ -353,14 +361,16 @@ public sealed class RectangleBatchPlotForm : Form
             return rows.ToList();
         }
 
-        var typicalSpan = rows
-            .Select(row => horizontalFirst
-                ? Math.Abs(row.Job.MaxX - row.Job.MinX)
-                : Math.Abs(row.Job.MaxY - row.Job.MinY))
-            .Where(value => value > 1e-6)
-            .OrderBy(value => value)
-            .ElementAt(Math.Max(0, rows.Count / 2 - 1));
-        var bandTolerance = Math.Max(typicalSpan * 0.35, 1e-6);
+        // 用相邻帧中心点间距的中位数的一半作为行列容差
+        // 比固定比例（0.35 × 图框尺寸）更能适应不同间距和微偏移
+        // 行先：取 Y 中心间距；列先：取 X 中心间距
+        var centers = horizontalFirst
+            ? rows.Select(row => CenterX(row.Job)).Distinct().OrderBy(x => x).ToList()
+            : rows.Select(row => CenterY(row.Job)).Distinct().OrderBy(y => y).ToList();
+        var gaps = centers.Zip(centers.Skip(1), (a, b) => Math.Abs(b - a))
+            .Where(g => g > 1e-6).OrderBy(g => g).ToList();
+        var medianGap = gaps.Count > 0 ? gaps[gaps.Count / 2] : 1.0;
+        var bandTolerance = Math.Max(medianGap * 0.5, 1e-6);
         var remaining = horizontalFirst
             ? rows.OrderBy(row => CenterX(row.Job)).ToList()
             : rows.OrderByDescending(row => CenterY(row.Job)).ToList();
