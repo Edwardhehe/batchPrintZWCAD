@@ -32,6 +32,7 @@ public sealed class RectangleBatchPlotForm : Form
     private readonly Document _document;
     private readonly AppSettings _settings;
     private readonly TemporarySequenceOverlay _overlay;
+    private int _highlightedJobIndex = -1;
     private readonly BindingList<Row> _rows = new();
     private readonly DataGridView _grid = new();
     private readonly TextBox _outputDirectory = new();
@@ -200,6 +201,14 @@ public sealed class RectangleBatchPlotForm : Form
         _grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
         _grid.DefaultCellStyle.Padding = new Padding(UiLayout.Scale(3), 0, UiLayout.Scale(3), 0);
         _grid.DataSource = _rows;
+        var indexCol = new DataGridViewTextBoxColumn { HeaderText = "编号", Width = UiLayout.Scale(52), ReadOnly = true };
+        _grid.Columns.Add(indexCol);
+        _grid.CellFormatting += (_, e) =>
+        {
+            if (e.ColumnIndex == indexCol.Index && e.RowIndex >= 0)
+                e.Value = (e.RowIndex + 1).ToString();
+        };
+
         _grid.Columns.Add(new DataGridViewButtonColumn
         {
             Name = "Preview", HeaderText = "预览", Text = "预览", UseColumnTextForButtonValue = true, Width = UiLayout.Scale(62)
@@ -239,6 +248,13 @@ public sealed class RectangleBatchPlotForm : Form
         };
         _grid.CellContentClick += GridCellContentClick;
         _grid.CellMouseDown += GridCellMouseDown;
+        _grid.CellClick += (_, e) =>
+        {
+            if (e.RowIndex >= 0 && e.RowIndex < _rows.Count)
+            {
+                _highlightedJobIndex = e.RowIndex;
+            }
+        };
         _grid.CellFormatting += GridCellFormatting;
         _grid.ContextMenuStrip = CreateContextMenu();
         _grid.DataError += (_, e) => e.ThrowException = false;
@@ -692,7 +708,14 @@ public sealed class RectangleBatchPlotForm : Form
         _status.Text = $"识别 {_rows.Count} 个矩形框  |  打印 {selected} 个  |  顺序：{order}  |  输出：{_outputDirectory.Text}";
         try
         {
-            _overlay.Show(_rows.Where(row => row.Selected).Select(row => row.Job).ToList());
+            var selectedJobs = _rows.Where(row => row.Selected).Select(row => row.Job).ToList();
+            var highlightIdx = -1;
+            if (_highlightedJobIndex >= 0 && _highlightedJobIndex < _rows.Count)
+            {
+                var targetJob = _rows[_highlightedJobIndex].Job;
+                highlightIdx = selectedJobs.FindIndex(j => ReferenceEquals(j, targetJob));
+            }
+            _overlay.Show(selectedJobs, highlightIdx);
         }
         catch
         {

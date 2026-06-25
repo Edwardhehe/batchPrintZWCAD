@@ -90,6 +90,8 @@ public sealed class PlotJob
 
     /// <summary>MinX/Y/MaxX/MaxY 已经是 DCS 坐标，GetPlotWindow 跳过 WCS→DCS 变换。</summary>
     public bool IsDcsWindow { get; set; }
+    /// <summary>打印区域 4 个实际 WCS 角点，格式 [x0,y0,x1,y1,x2,y2,x3,y3]。null 时用 Min/Max。</summary>
+    public double[]? CornerPoints { get; set; }
 }
 
 public enum TitleBlockScanScope

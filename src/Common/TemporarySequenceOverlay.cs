@@ -30,7 +30,7 @@ public sealed class TemporarySequenceOverlay
         _document = document;
     }
 
-    public void Show(IReadOnlyList<PlotJob> jobs)
+    public void Show(IReadOnlyList<PlotJob> jobs, int highlightIndex = -1)
     {
         Clear();
 
@@ -74,8 +74,17 @@ public sealed class TemporarySequenceOverlay
             var minSide = Math.Min(width, height);
             var padding = Math.Max(minSide * 0.035, 10d);
             var textHeight = GetTextHeight(width, height);
-            var color = Color.FromColorIndex(ColorMethod.ByAci, 1);
-            var frameWidth = GetFrameWidth(minSide);
+            // 高亮行：黄色 (ACI 2)、加粗边框、加粗数字；普通行：红色 (ACI 1)
+            var isHighlight = i == highlightIndex;
+            var color = isHighlight
+                ? Color.FromColorIndex(ColorMethod.ByAci, 2)
+                : Color.FromColorIndex(ColorMethod.ByAci, 1);
+            var frameWidth = isHighlight
+                ? GetFrameWidth(minSide) * 2.5
+                : GetFrameWidth(minSide);
+            var lineWeight = isHighlight
+                ? BumpLineWeight(GetLineWeight(minSide))
+                : GetLineWeight(minSide);
 
             var ownerId = GetJobOwnerId(tr, db, job);
             if (ownerId.IsNull)
@@ -101,7 +110,7 @@ public sealed class TemporarySequenceOverlay
                 Closed = true,
                 Color = color,
                 LayerId = layerId,
-                LineWeight = GetLineWeight(minSide),
+                LineWeight = lineWeight,
                 ConstantWidth = frameWidth
             };
             frame.AddVertexAt(0, Rot(-hw, -hh), 0, 0, 0);
@@ -111,7 +120,7 @@ public sealed class TemporarySequenceOverlay
             AddEntity(tr, owner, frame);
 
             var center = new Point3d((minX + maxX) / 2d, (minY + maxY) / 2d, 0);
-            AddBoldLabel(tr, owner, layerId, color, center, (i + 1).ToString(), textHeight, ucsAngle);
+            AddBoldLabel(tr, owner, layerId, color, center, (i + 1).ToString(), textHeight, ucsAngle, isHighlight);
         }
 
         tr.Commit();
@@ -210,9 +219,11 @@ public sealed class TemporarySequenceOverlay
         }
     }
 
-    private void AddBoldLabel(Transaction tr, BlockTableRecord owner, ObjectId layerId, Color color, Point3d center, string text, double height, double rotation)
+    private void AddBoldLabel(Transaction tr, BlockTableRecord owner, ObjectId layerId, Color color, Point3d center, string text, double height, double rotation, bool highlight = false)
     {
         var stroke = Math.Max(height * 0.035, 2d);
+        // 高亮时描边加粗：偏移量翻倍 + 额外一层中间描边
+        if (highlight) stroke *= 2;
         var cosR = Math.Cos(rotation);
         var sinR = Math.Sin(rotation);
         var offsets = new (double X, double Y)[]
@@ -298,6 +309,20 @@ public sealed class TemporarySequenceOverlay
     private static double GetFrameWidth(double minSide)
     {
         return Math.Min(Math.Max(minSide * 0.08, 20d), minSide * 0.18);
+    }
+
+    private static LineWeight BumpLineWeight(LineWeight w)
+    {
+        return w switch
+        {
+            LineWeight.LineWeight000 => LineWeight.LineWeight025,
+            LineWeight.LineWeight025 => LineWeight.LineWeight050,
+            LineWeight.LineWeight050 => LineWeight.LineWeight080,
+            LineWeight.LineWeight080 => LineWeight.LineWeight100,
+            LineWeight.LineWeight100 => LineWeight.LineWeight140,
+            LineWeight.LineWeight140 => LineWeight.LineWeight200,
+            _ => LineWeight.LineWeight211
+        };
     }
 
     private static LineWeight GetLineWeight(double minSide)

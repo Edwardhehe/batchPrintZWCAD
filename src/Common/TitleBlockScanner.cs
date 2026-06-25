@@ -134,10 +134,11 @@ public static class TitleBlockScanner
                 LocalRectangle titleRegion;
                 LocalRectangle numberRegion;
                 RegionCoordinateMode coordinateMode;
+                LocalRectangle referenceFrame;
                 try
                 {
                     coordinateMode = GetCoordinateMode(definition);
-                    var referenceFrame = ResolveReferenceFrame(definition, blockRef);
+                    referenceFrame = ResolveReferenceFrame(definition, blockRef);
                     extents = ResolveWorldExtents(definition, blockRef, coordinateMode, referenceFrame);
                     titleRegion = ResolveLocalRegion(definition.TitleRegion, effectiveBlockTransform, coordinateMode, referenceFrame);
                     numberRegion = ResolveLocalRegion(definition.DrawingNumberRegion, effectiveBlockTransform, coordinateMode, referenceFrame);
@@ -155,6 +156,11 @@ public static class TitleBlockScanner
 
                 var width = extents.MaxPoint.X - extents.MinPoint.X;
                 var height = extents.MaxPoint.Y - extents.MinPoint.Y;
+
+                // 计算打印区域的 4 个实际 WCS 角点（含 BlockTransform 的缩放和旋转）
+                // 不取包围盒，和矩形框扫描的 CornerPoints 同理：4 角 × WCS→DCS 只取一次包围盒
+                var wcsCorners = ComputeWcsCorners(coordinateMode, referenceFrame, blockRef.BlockTransform);
+
                 var detectedPaper = PaperSizeDetector.Detect(width, height);
                 var paper = ApplyFixedPaper(definition, detectedPaper);
                 string title;
@@ -213,7 +219,8 @@ public static class TitleBlockScanner
                     MinX = extents.MinPoint.X,
                     MinY = extents.MinPoint.Y,
                     MaxX = extents.MaxPoint.X,
-                    MaxY = extents.MaxPoint.Y
+                    MaxY = extents.MaxPoint.Y,
+                    CornerPoints = wcsCorners
                 });
             }
         }
@@ -679,6 +686,27 @@ public static class TitleBlockScanner
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// 计算打印区域的 4 个实际 WCS 角点（不取包围盒），用于 DCS 四点法变换。
+    /// 和矩形框扫描的 CornerPoints 同理：4 角 × WCS→DCS 只取一次包围盒，
+    /// 避免在 ResolveWorldExtents 中已经被取过一次包围盒的值再次被取包围盒。
+    /// </summary>
+    private static double[] ComputeWcsCorners(
+        RegionCoordinateMode mode, LocalRectangle frame, Matrix3d blockTransform)
+    {
+        // World 模式：PrintRegion 本身是 WCS 坐标，无需再乘 BlockTransform
+        var xform = mode == RegionCoordinateMode.World ? Matrix3d.Identity : blockTransform;
+
+        var c = new[]
+        {
+            new Point3d(frame.MinX, frame.MinY, 0).TransformBy(xform),
+            new Point3d(frame.MaxX, frame.MinY, 0).TransformBy(xform),
+            new Point3d(frame.MaxX, frame.MaxY, 0).TransformBy(xform),
+            new Point3d(frame.MinX, frame.MaxY, 0).TransformBy(xform)
+        };
+        return new[] { c[0].X, c[0].Y, c[1].X, c[1].Y, c[2].X, c[2].Y, c[3].X, c[3].Y };
     }
 
     private static bool IsEntityVisible(Entity entity)

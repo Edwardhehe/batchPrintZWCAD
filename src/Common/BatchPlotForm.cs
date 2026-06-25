@@ -35,6 +35,7 @@ public sealed class BatchPlotForm : Form
     private readonly ComboBox _deviceCombo = new();
     private readonly ComboBox _styleCombo = new();
     private readonly CheckBox _mergePdfCheckBox = new();
+    private readonly CheckBox _addSeqCheckBox = new();
     private readonly Button _printButton = new();
     private readonly Label _statusLabel = new();
     private readonly List<string> _logLines = new();
@@ -42,6 +43,7 @@ public sealed class BatchPlotForm : Form
     private readonly TemporarySequenceOverlay _sequenceOverlay;
     private readonly AppSettings _settings;
     private bool _sequenceOverlayFollowsCurrentJobs;
+    private int _highlightedJobIndex = -1;
     private string _lastLogPath = "";
     private string _mergedOutputPath = "";
     private long _nextSortPriority;
@@ -242,6 +244,14 @@ public sealed class BatchPlotForm : Form
         _mergePdfCheckBox.Margin = new Padding(UiLayout.Scale(12), UiLayout.Scale(7), UiLayout.Scale(12), 0);
         SetTip(_mergePdfCheckBox, "勾选后选择最终文件名；打印过程只使用临时单页，完成后仅保留一个合并 PDF。");
 
+        _addSeqCheckBox.Text = "文件名加序号";
+        _addSeqCheckBox.AutoSize = true;
+        _addSeqCheckBox.Checked = false;
+        _addSeqCheckBox.TextAlign = ContentAlignment.MiddleLeft;
+        _addSeqCheckBox.Margin = new Padding(UiLayout.Scale(12), UiLayout.Scale(7), UiLayout.Scale(12), 0);
+        _addSeqCheckBox.CheckedChanged += (_, _) => SortAndRefreshOutputPaths();
+        SetTip(_addSeqCheckBox, "勾选后文件名前自动加序号，序号与图号的连接符使用设置中的连接符。");
+
         actionRow.Controls.Add(scanButton);
         actionRow.Controls.Add(scanWindowButton);
         actionRow.Controls.Add(addFilesButton);
@@ -280,6 +290,7 @@ public sealed class BatchPlotForm : Form
             Margin = new Padding(0, UiLayout.Scale(8), UiLayout.Scale(8), 0)
         });
         pathRow.Controls.Add(_mergePdfCheckBox);
+        pathRow.Controls.Add(_addSeqCheckBox);
         pathRow.Controls.Add(currentFolderButton);
         pathRow.Controls.Add(currentPdfButton);
         pathRow.Controls.Add(specifiedFolderButton);
@@ -299,6 +310,14 @@ public sealed class BatchPlotForm : Form
             }
         };
         _grid.CellMouseDown += GridCellMouseDown;
+        _grid.CellClick += (_, e) =>
+        {
+            if (e.RowIndex >= 0 && e.RowIndex < _jobs.Count)
+            {
+                _highlightedJobIndex = e.RowIndex;
+                ShowSequenceOverlayForCurrentJobs();
+            }
+        };
         _grid.ContextMenuStrip = CreateGridContextMenu();
 
         _statusLabel.Dock = DockStyle.Bottom;
@@ -330,6 +349,15 @@ public sealed class BatchPlotForm : Form
 
     private void AddColumns()
     {
+        // 编号列（无绑定，CellFormatting 时显示行号）
+        var indexCol = new DataGridViewTextBoxColumn { HeaderText = "编号", Width = UiLayout.Scale(52), ReadOnly = true };
+        _grid.Columns.Add(indexCol);
+        _grid.CellFormatting += (_, e) =>
+        {
+            if (e.ColumnIndex == indexCol.Index && e.RowIndex >= 0)
+                e.Value = (e.RowIndex + 1).ToString();
+        };
+
         _grid.Columns.Add(new DataGridViewButtonColumn
         {
             Name = "PreviewPdf",
@@ -644,19 +672,35 @@ public sealed class BatchPlotForm : Form
             var wcsToDcs = BatchPlotCommands.BuildWcsToDcsMatrix(_currentDocument.Editor);
             foreach (var job in jobs)
             {
-                // 和矩形框扫描完全一样的算法：4 个 WCS 角点 × WCS→DCS → 取一次包围盒
-                // 视图旋转时包围盒会变大——这是打印引擎需要的，PlotRotation 回正时光靠小窗口盖不住
-                var corners = new[]
+                // 和图框块扫描一样的四点法：4 个 WCS 角点 × WCS→DCS → 取一次包围盒
+                // 优先用 CornerPoints（图框库参考框的实际 WCS 角点，避免包围盒二次放大）
+                // 兜底用 Min/Max（老版图框库数据或无 PrintRegion 的块）
+                Point3d[] pts;
+                var cp = job.CornerPoints;
+                if (cp != null)
                 {
-                    new Point3d(job.MinX, job.MinY, 0).TransformBy(wcsToDcs),
-                    new Point3d(job.MaxX, job.MinY, 0).TransformBy(wcsToDcs),
-                    new Point3d(job.MaxX, job.MaxY, 0).TransformBy(wcsToDcs),
-                    new Point3d(job.MinX, job.MaxY, 0).TransformBy(wcsToDcs)
-                };
-                job.MinX = corners.Min(p => p.X);
-                job.MinY = corners.Min(p => p.Y);
-                job.MaxX = corners.Max(p => p.X);
-                job.MaxY = corners.Max(p => p.Y);
+                    pts = new[]
+                    {
+                        new Point3d(cp[0], cp[1], 0).TransformBy(wcsToDcs),
+                        new Point3d(cp[2], cp[3], 0).TransformBy(wcsToDcs),
+                        new Point3d(cp[4], cp[5], 0).TransformBy(wcsToDcs),
+                        new Point3d(cp[6], cp[7], 0).TransformBy(wcsToDcs)
+                    };
+                }
+                else
+                {
+                    pts = new[]
+                    {
+                        new Point3d(job.MinX, job.MinY, 0).TransformBy(wcsToDcs),
+                        new Point3d(job.MaxX, job.MinY, 0).TransformBy(wcsToDcs),
+                        new Point3d(job.MaxX, job.MaxY, 0).TransformBy(wcsToDcs),
+                        new Point3d(job.MinX, job.MaxY, 0).TransformBy(wcsToDcs)
+                    };
+                }
+                job.MinX = pts.Min(p => p.X);
+                job.MinY = pts.Min(p => p.Y);
+                job.MaxX = pts.Max(p => p.X);
+                job.MaxY = pts.Max(p => p.Y);
                 job.IsDcsWindow = true;
                 // 阻止 PlotterService 重新扫描 DWG 刷新坐标（和矩形框批量打印同理）
                 job.IsManualWindow = true;
@@ -757,9 +801,11 @@ public sealed class BatchPlotForm : Form
 
         _jobs.Clear();
         var reservedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var idx = 0;
         foreach (var job in sorted)
         {
-            job.OutputPath = BuildOutputPath(job, reservedPaths);
+            var seq = _addSeqCheckBox.Checked ? $"{++idx}{_settings.PdfFileNameSeparator}" : "";
+            job.OutputPath = BuildOutputPath(job, seq, reservedPaths);
             _jobs.Add(job);
         }
 
@@ -832,7 +878,7 @@ public sealed class BatchPlotForm : Form
         _sequenceOverlayFollowsCurrentJobs = true;
         try
         {
-            _sequenceOverlay.Show(_jobs.Where(job => job.Selected && IsCurrentDocumentJob(job)).ToList());
+            _sequenceOverlay.Show(_jobs.Where(job => job.Selected && IsCurrentDocumentJob(job)).ToList(), _highlightedJobIndex);
         }
         catch (Exception ex)
         {
@@ -980,9 +1026,9 @@ public sealed class BatchPlotForm : Form
         RefreshStatus();
     }
 
-    private string BuildOutputPath(PlotJob job, ISet<string> reservedPaths)
+    private string BuildOutputPath(PlotJob job, string seqPrefix, ISet<string> reservedPaths)
     {
-        var baseName = $"{job.DrawingNumber}{_settings.PdfFileNameSeparator}{job.Title}";
+        var baseName = $"{seqPrefix}{job.DrawingNumber}{_settings.PdfFileNameSeparator}{job.Title}";
         return FileNameSanitizer.MakeUnique(_outputDirectory.Text, baseName, reservedPaths, _settings.AddSequenceWhenPdfExists);
     }
 
