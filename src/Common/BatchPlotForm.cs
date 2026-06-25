@@ -633,14 +633,24 @@ public sealed class BatchPlotForm : Form
                 return;
             }
 
-            // 用户框选的是 UCS 坐标 → 转为 WCS 后传给 Scanner
+            // 用户框选的是 UCS 坐标 → 四个角点转到 WCS 后取一次包围盒
             var ucsToWcs = editor.CurrentUserCoordinateSystem;
-            var wcsP1 = first.Value.TransformBy(ucsToWcs);
-            var wcsP2 = second.Value.TransformBy(ucsToWcs);
+            var ucsX1 = first.Value.X;
+            var ucsY1 = first.Value.Y;
+            var ucsX2 = second.Value.X;
+            var ucsY2 = second.Value.Y;
+
+            var wcsCorners = new[]
+            {
+                new Point3d(ucsX1, ucsY1, 0).TransformBy(ucsToWcs),
+                new Point3d(ucsX2, ucsY1, 0).TransformBy(ucsToWcs),
+                new Point3d(ucsX1, ucsY2, 0).TransformBy(ucsToWcs),
+                new Point3d(ucsX2, ucsY2, 0).TransformBy(ucsToWcs)
+            };
 
             var window = new Extents3d(
-                new Point3d(Math.Min(wcsP1.X, wcsP2.X), Math.Min(wcsP1.Y, wcsP2.Y), 0),
-                new Point3d(Math.Max(wcsP1.X, wcsP2.X), Math.Max(wcsP1.Y, wcsP2.Y), 0));
+                new Point3d(wcsCorners.Min(p => p.X), wcsCorners.Min(p => p.Y), 0),
+                new Point3d(wcsCorners.Max(p => p.X), wcsCorners.Max(p => p.Y), 0));
 
             _jobs.Clear();
             var scannedJobs = TitleBlockScanner.Scan(_currentDocument, library, window);
