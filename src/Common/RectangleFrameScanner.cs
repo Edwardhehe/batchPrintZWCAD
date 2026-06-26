@@ -337,6 +337,7 @@ public static class RectangleFrameScanner
     ///   - 跳过临时序号标注图层
     ///   - 跳过不可打印图层的实体
     ///   - 跳过 CAD 判定为不可见的实体（动态块隐藏状态等）
+    ///   - 跳过被 XCLIP 裁切过的块参照
     ///   - 防循环：同一个块定义只处理一次（visitedDefinitions）
     ///   - 防过深：递归深度上限 12 层
     /// </summary>
@@ -371,6 +372,12 @@ public static class RectangleFrameScanner
 
         // ── 分支 2：BlockReference → 递归进入 ──
         if (entity is not BlockReference blockReference || depth >= 12)
+        {
+            return;
+        }
+
+        // XCLIP 裁切过的块不参与扫描
+        if (IsBlockClipped(tr, blockReference))
         {
             return;
         }
@@ -468,6 +475,29 @@ public static class RectangleFrameScanner
             return !layer.IsOff      // 图层未关闭
                 && !layer.IsFrozen    // 图层未冻结
                 && layer.IsPlottable; // 图层可打印
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 检查块参照是否被 XCLIP 命令裁切过。
+    /// XCLIP 通过扩展字典中的 "ACAD_FILTER" 条目存储裁切边界，
+    /// 裁切后的块参照显示不全，内部矩形框不应参与扫描。
+    /// </summary>
+    private static bool IsBlockClipped(Transaction tr, BlockReference blockRef)
+    {
+        try
+        {
+            if (blockRef.ExtensionDictionary == ObjectId.Null)
+            {
+                return false;
+            }
+
+            var extDict = (DBDictionary)tr.GetObject(blockRef.ExtensionDictionary, OpenMode.ForRead);
+            return extDict.Contains("ACAD_FILTER");
         }
         catch
         {
@@ -910,6 +940,12 @@ public static class RectangleFrameScanner
 
         // ── 递归进入块参照 ──
         if (entity is not BlockReference blockRef || depth >= 12)
+        {
+            return false;
+        }
+
+        // XCLIP 裁切过的块不参与扫描
+        if (IsBlockClipped(tr, blockRef))
         {
             return false;
         }

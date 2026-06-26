@@ -44,7 +44,10 @@ public static class CadTextExtractor
 
             if (entity is BlockReference ownerBlock)
             {
-                CollectOwnerBlockTextForCache(tr, ownerBlock, values);
+                if (!IsBlockClipped(tr, ownerBlock))
+                {
+                    CollectOwnerBlockTextForCache(tr, ownerBlock, values);
+                }
                 continue;
             }
 
@@ -726,5 +729,23 @@ public static class CadTextExtractor
         Attribute = 0,
         OwnerSpace = 1,
         BlockDefinition = 2
+    }
+
+    private static bool IsBlockClipped(Transaction tr, BlockReference blockRef)
+    {
+        try
+        {
+            if (blockRef.ExtensionDictionary == ObjectId.Null)
+            {
+                return false;
+            }
+
+            var extDict = (DBDictionary)tr.GetObject(blockRef.ExtensionDictionary, OpenMode.ForRead);
+            return extDict.Contains("ACAD_FILTER");
+        }
+        catch
+        {
+            return false;
+        }
     }
 }
