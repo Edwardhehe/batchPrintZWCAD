@@ -105,6 +105,7 @@ public static class RectangleFrameScanner
             CollectEntityRectangles(tr, entity, Matrix3d.Identity, rectangles, new HashSet<ObjectId>(), 0);
         }
 
+        var ownerId = owner.ObjectId; // 保存，用于后续内容检测（空框过滤）
         tr.Commit();
 
         // ── 第 3 步：逐层过滤 ──
@@ -118,13 +119,13 @@ public static class RectangleFrameScanner
             .Where(r => Intersects(r, window))
             .ToList();
 
-        // 3b. 去重去嵌套（重叠的矩形只保留一个，嵌套的内外框去内留外）
-        var unique = FilterRectangles(inWindow);
-
-        // 3d. 纸张标准比例过滤（最后一道，只保留能匹配标准纸张尺寸的矩形）
+        // 3b. 纸张标准比例过滤（在去重去嵌套之前，避免非标准大矩形吞掉内部标准图框）
+        // 典型场景：用户在多个标准图框外画了一个大矩形全包住，大矩形通不过纸张检测，
+        // 但如果先去嵌套，大矩形会把内部的标准图框全部移除，最终结果为空。
         var stem = Path.GetFileNameWithoutExtension(sourceFile);
-        var results = new List<Result>();
-        foreach (var rectangle in unique)
+        var paperMatched = new List<LocalRectangle>();
+        var paperOptionsByRect = new Dictionary<LocalRectangle, IReadOnlyList<PaperDetection>>();
+        foreach (var rectangle in inWindow)
         {
             var width = rectangle.ActualWidth > 0 ? rectangle.ActualWidth : rectangle.MaxX - rectangle.MinX;
             var height = rectangle.ActualHeight > 0 ? rectangle.ActualHeight : rectangle.MaxY - rectangle.MinY;
@@ -134,7 +135,25 @@ public static class RectangleFrameScanner
                 continue; // 不匹配任何标准纸张 → 丢弃
             }
 
+            paperMatched.Add(rectangle);
+            paperOptionsByRect[rectangle] = options;
+        }
+
+        // 3c. 去重去嵌套（只对通过纸张过滤的矩形，重叠的只保留一个，嵌套的内外框去内留外）
+        var unique = FilterRectangles(paperMatched);
+
+        // 3d. 空框过滤：排除矩形范围内没有任何可见可打印图素的空框
+        // 典型场景：残留的空矩形多段线、只有外框没有内容的图框、不可见图层上的图框
+        var withContent = FilterEmptyRectangles(document, ownerId, unique);
+
+        // 3e. 生成结果
+        var results = new List<Result>();
+        foreach (var rectangle in withContent)
+        {
+            var options = paperOptionsByRect[rectangle];
             var paper = options.First();
+            var width = rectangle.ActualWidth > 0 ? rectangle.ActualWidth : rectangle.MaxX - rectangle.MinX;
+            var height = rectangle.ActualHeight > 0 ? rectangle.ActualHeight : rectangle.MaxY - rectangle.MinY;
             var index = results.Count;
             results.Add(new Result
             {
@@ -636,5 +655,161 @@ public static class RectangleFrameScanner
             && rectangle.MinX <= window.MaxX
             && rectangle.MaxY >= window.MinY
             && rectangle.MinY <= window.MaxY;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // 空框过滤：检查矩形内是否存在实际的绘图内容（图素）
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// 过滤掉没有任何可见可打印图素的空矩形框。
+    ///
+    /// 对每个候选矩形，递归遍历布局内的所有实体，检查是否有至少一个
+    /// 可见、可打印、非矩形框自身的实体落入矩形范围内。
+    /// </summary>
+    /// <param name="document">当前 CAD 文档</param>
+    /// <param name="ownerId">布局 BlockTableRecord 的 ObjectId</param>
+    /// <param name="candidates">待检查的候选矩形列表</param>
+    /// <returns>包含实际图素的矩形列表</returns>
+    private static List<LocalRectangle> FilterEmptyRectangles(
+        Document document, ObjectId ownerId, List<LocalRectangle> candidates)
+    {
+        using var tr = document.Database.TransactionManager.StartTransaction();
+        var owner = (BlockTableRecord)tr.GetObject(ownerId, OpenMode.ForRead);
+        var result = new List<LocalRectangle>();
+        foreach (var rect in candidates)
+        {
+            if (HasDrawingContent(tr, owner, rect))
+            {
+                result.Add(rect);
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// 检查一个矩形范围内是否存在任何可见、可打印的绘图实体（图素）。
+    ///
+    /// 递归遍历布局内所有实体，包括块参照内的子实体。
+    /// 矩形框多段线自身不计为"内容"——通过比较 GeomExtents 与矩形
+    /// 包围盒的相似度来排除。
+    /// </summary>
+    private static bool HasDrawingContent(Transaction tr, BlockTableRecord owner, LocalRectangle targetRect)
+    {
+        foreach (ObjectId id in owner)
+        {
+            if (tr.GetObject(id, OpenMode.ForRead, false) is not Entity entity)
+            {
+                continue;
+            }
+
+            if (CheckEntityContent(tr, entity, Matrix3d.Identity, targetRect, new HashSet<ObjectId>(), 0))
+            {
+                return true; // 找到一个就行，短路退出
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// 递归检查单个实体（及其嵌套块）是否落入目标矩形范围内。
+    ///
+    /// 与 CollectEntityRectangles 的遍历路径一致：
+    ///   - 跳过临时标注图层
+    ///   - 跳过不可打印图层的实体
+    ///   - 跳过不可见实体（动态块隐藏状态）
+    ///   - 块参照递归进入，防循环、防过深
+    ///
+    /// "有内容"的判定：实体的 GeometricExtents（变换到 WCS）与目标矩形相交，
+    ///   且不是矩形框多段线自身（包围盒与目标矩形重合的实体被跳过）。
+    /// </summary>
+    private static bool CheckEntityContent(
+        Transaction tr,
+        Entity entity,
+        Matrix3d transform,
+        LocalRectangle targetRect,
+        ISet<ObjectId> visitedDefinitions,
+        int depth)
+    {
+        // 跳过临时标注图层
+        if (string.Equals(entity.Layer, TemporaryOverlayLayer, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        // 跳过不可打印图层的实体
+        if (!IsEntityLayerScannable(tr, entity))
+        {
+            return false;
+        }
+
+        // 跳过不可见实体
+        if (!IsEntityVisible(entity))
+        {
+            return false;
+        }
+
+        // ── 检查当前实体是否落入目标矩形 ──
+        try
+        {
+            var ext = entity.GeometricExtents;
+            var extMin = ext.MinPoint.TransformBy(transform);
+            var extMax = ext.MaxPoint.TransformBy(transform);
+            var entityRect = LocalRectangle.FromPoints(
+                Math.Min(extMin.X, extMax.X), Math.Min(extMin.Y, extMax.Y),
+                Math.Max(extMin.X, extMax.X), Math.Max(extMin.Y, extMax.Y));
+
+            if (Intersects(entityRect, targetRect))
+            {
+                return true;
+            }
+        }
+        catch
+        {
+            // 部分实体（如空块参照）可能抛出异常，忽略继续
+        }
+
+        // ── 递归进入块参照 ──
+        if (entity is not BlockReference blockRef || depth >= 12)
+        {
+            return false;
+        }
+
+        var definitionId = blockRef.BlockTableRecord;
+        if (!visitedDefinitions.Add(definitionId))
+        {
+            return false;
+        }
+
+        try
+        {
+            var definition = (BlockTableRecord)tr.GetObject(definitionId, OpenMode.ForRead);
+            var nestedTransform = blockRef.BlockTransform * transform;
+
+            foreach (ObjectId nestedId in definition)
+            {
+                if (tr.GetObject(nestedId, OpenMode.ForRead, false) is not Entity nested)
+                {
+                    continue;
+                }
+
+                if (CheckEntityContent(tr, nested, nestedTransform, targetRect, visitedDefinitions, depth + 1))
+                {
+                    return true;
+                }
+            }
+        }
+        catch
+        {
+            // 损坏的块定义无法读取，跳过
+        }
+        finally
+        {
+            visitedDefinitions.Remove(definitionId);
+        }
+
+        return false;
     }
 }
