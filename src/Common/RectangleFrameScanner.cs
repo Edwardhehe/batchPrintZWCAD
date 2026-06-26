@@ -15,11 +15,16 @@ using ZwSoft.ZwCAD.Geometry;
 namespace ZwcadBatchPlot;
 
 /// <summary>
-/// 矩形框扫描器：在当前布局中递归扫描所有 Polyline 矩形，
+/// 矩形框扫描器：扫描一个或多个布局中的 Polyline 矩形，
 /// 筛选出符合标准纸张比例的作为待打印图框。
 ///
-/// 核心流程：ScanWindow 入口 → CollectEntityRectangles 递归遍历 →
-/// TryGetRectangle 矩形检测 → FilterRectangles 去重去嵌套 → 生成 PlotJob。
+/// 公共入口：
+///   ScanWindow  — 扫描当前空间（框选范围）
+///   ScanScope   — 按范围扫描多个布局（全部/布局/当前/模型）
+///
+/// 内部流水线：CollectRectanglesFromSpace 收集 →
+/// FilterAndPackageRectangles 过滤打包（窗口裁剪 → 纸张比例 →
+/// 去重去嵌套 → 空框过滤 → 生成 Result）。
 ///
 /// 支持 WCS 和 UCS（旋转视图），矩形检测使用几何算法而非轴对齐检查。
 /// </summary>
@@ -43,13 +48,7 @@ public static class RectangleFrameScanner
     // ═══════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// 扫描指定窗口内的矩形框，每个匹配的矩形生成一个 PlotJob。
-    ///
-    /// 算法步骤：
-    ///   1. 确定扫描空间（模型空间或当前图纸空间布局）
-    ///   2. 遍历空间内所有顶层实体，递归进入块参照
-    ///   3. 对找到的矩形做过滤去重
-    ///   4. 每个矩形生成 PlotJob（坐标是 WCS，上游会转为 DCS）
+    /// 扫描指定窗口内的矩形框（仅当前空间），每个匹配的矩形生成一个 PlotJob。
     /// </summary>
     /// <param name="document">当前 CAD 文档</param>
     /// <param name="scanWindow">扫描窗口（WCS 坐标）</param>
@@ -58,23 +57,18 @@ public static class RectangleFrameScanner
         var sourceFile = string.IsNullOrWhiteSpace(document.Database.Filename)
             ? document.Name
             : document.Database.Filename;
-        var rectangles = new List<LocalRectangle>();
 
-        // ── 第 1 步：确定扫描目标空间 ──
         using var tr = document.Database.TransactionManager.StartTransaction();
         BlockTableRecord owner;
         Layout layout;
         if (document.Database.TileMode)
         {
-            // 模型空间：从 BlockTable 中取 ModelSpace 记录
             var blockTable = (BlockTable)tr.GetObject(document.Database.BlockTableId, OpenMode.ForRead);
             owner = (BlockTableRecord)tr.GetObject(blockTable[BlockTableRecord.ModelSpace], OpenMode.ForRead);
             layout = (Layout)tr.GetObject(owner.LayoutId, OpenMode.ForRead);
         }
         else
         {
-            // 图纸空间：用 LayoutManager 获取当前布局的 BlockTableRecord
-            // 不用 CurrentSpaceId，因为用户可能在视口内编辑（CurrentSpaceId 指向模型空间）
             var currentLayoutName = LayoutManager.Current.CurrentLayout;
             var layouts = (DBDictionary)tr.GetObject(document.Database.LayoutDictionaryId, OpenMode.ForRead);
             if (!layouts.Contains(currentLayoutName))
@@ -91,8 +85,77 @@ public static class RectangleFrameScanner
             return new List<Result>();
         }
 
-        // ── 第 2 步：递归遍历空间内所有实体 ──
+        var rectangles = CollectRectanglesFromSpace(tr, owner);
+        var ownerId = owner.ObjectId;
         var layoutName = layout.LayoutName;
+        tr.Commit();
+
+        return FilterAndPackageRectangles(document, rectangles, scanWindow, ownerId, sourceFile, layoutName, !layout.ModelType);
+    }
+
+    /// <summary>
+    /// 按扫描范围扫描多个布局中的矩形框。
+    ///
+    /// 遍历所有布局，按 <paramref name="scope"/> 决定扫描哪些空间，
+    /// 每个空间独立收集矩形、过滤、打包为 Result。结果按布局遍历顺序排列。
+    /// </summary>
+    /// <param name="document">当前 CAD 文档</param>
+    /// <param name="scope">扫描范围</param>
+    public static List<Result> ScanScope(Document document, TitleBlockScanScope scope)
+    {
+        var sourceFile = string.IsNullOrWhiteSpace(document.Database.Filename)
+            ? document.Name
+            : document.Database.Filename;
+        var currentSpaceName = GetCurrentSpaceName(document.Database);
+
+        // 第一阶段：在事务内遍历所有匹配布局，收集矩形
+        var spaceData = new List<(List<LocalRectangle> Rectangles, ObjectId OwnerId, string LayoutName, bool IsPaperSpace, int TabOrder)>();
+        using (var tr = document.Database.TransactionManager.StartTransaction())
+        {
+            var blockTable = (BlockTable)tr.GetObject(document.Database.BlockTableId, OpenMode.ForRead);
+            foreach (ObjectId recordId in blockTable)
+            {
+                var owner = (BlockTableRecord)tr.GetObject(recordId, OpenMode.ForRead);
+                if (!owner.IsLayout || owner.LayoutId.IsNull)
+                {
+                    continue;
+                }
+
+                var layout = (Layout)tr.GetObject(owner.LayoutId, OpenMode.ForRead);
+                if (!ShouldScanLayout(layout, scope, currentSpaceName))
+                {
+                    continue;
+                }
+
+                var rectangles = CollectRectanglesFromSpace(tr, owner);
+                spaceData.Add((rectangles, owner.ObjectId, layout.LayoutName, !layout.ModelType, layout.TabOrder));
+            }
+
+            tr.Commit();
+        }
+
+        // 按布局 TabOrder 排序，确保模型空间在最前、图纸布局按选项卡顺序排列
+        spaceData.Sort((a, b) => a.TabOrder.CompareTo(b.TabOrder));
+
+        // 第二阶段：对每个空间独立过滤打包（FilterEmptyRectangles 内会开自己的事务）
+        var allResults = new List<Result>();
+        foreach (var (rectangles, ownerId, layoutName, isPaperSpace, _) in spaceData)
+        {
+            var results = FilterAndPackageRectangles(document, rectangles, null, ownerId, sourceFile, layoutName, isPaperSpace);
+            allResults.AddRange(results);
+        }
+
+        return allResults;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // 内部：单空间收集 & 过滤打包
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>遍历单个空间（BlockTableRecord）内所有顶层实体，递归收集矩形 Polyline。</summary>
+    private static List<LocalRectangle> CollectRectanglesFromSpace(Transaction tr, BlockTableRecord owner)
+    {
+        var rectangles = new List<LocalRectangle>();
         foreach (ObjectId id in owner)
         {
             if (tr.GetObject(id, OpenMode.ForRead, false) is not Entity entity)
@@ -100,28 +163,45 @@ public static class RectangleFrameScanner
                 continue;
             }
 
-            // 从顶层实体开始，transform=Identity，depth=0
-            // 不做纸张过滤，先收集所有矩形
             CollectEntityRectangles(tr, entity, Matrix3d.Identity, rectangles, new HashSet<ObjectId>(), 0);
         }
 
-        var ownerId = owner.ObjectId; // 保存，用于后续内容检测（空框过滤）
-        tr.Commit();
+        return rectangles;
+    }
 
-        // ── 第 3 步：逐层过滤 ──
-        // 3a. 按扫描窗口裁剪（第一道，减少后续处理量）
-        var window = LocalRectangle.FromPoints(
-            scanWindow.MinPoint.X,
-            scanWindow.MinPoint.Y,
-            scanWindow.MaxPoint.X,
-            scanWindow.MaxPoint.Y);
-        var inWindow = rectangles
-            .Where(r => Intersects(r, window))
-            .ToList();
+    /// <summary>
+    /// 对一个空间内收集到的矩形做完整的过滤流水线并打包为 Result 列表。
+    ///
+    /// 流水线：窗口裁剪（可选）→ 纸张比例过滤 → 去重去嵌套 → 空框过滤 → 生成 Result。
+    /// </summary>
+    private static List<Result> FilterAndPackageRectangles(
+        Document document,
+        List<LocalRectangle> rectangles,
+        Extents3d? scanWindow,
+        ObjectId ownerId,
+        string sourceFile,
+        string layoutName,
+        bool isPaperSpace)
+    {
+        // 3a. 窗口裁剪（可选）
+        List<LocalRectangle> inWindow;
+        if (scanWindow.HasValue)
+        {
+            var window = LocalRectangle.FromPoints(
+                scanWindow.Value.MinPoint.X,
+                scanWindow.Value.MinPoint.Y,
+                scanWindow.Value.MaxPoint.X,
+                scanWindow.Value.MaxPoint.Y);
+            inWindow = rectangles
+                .Where(r => Intersects(r, window))
+                .ToList();
+        }
+        else
+        {
+            inWindow = rectangles.ToList();
+        }
 
-        // 3b. 纸张标准比例过滤（在去重去嵌套之前，避免非标准大矩形吞掉内部标准图框）
-        // 典型场景：用户在多个标准图框外画了一个大矩形全包住，大矩形通不过纸张检测，
-        // 但如果先去嵌套，大矩形会把内部的标准图框全部移除，最终结果为空。
+        // 3b. 纸张标准比例过滤
         var stem = Path.GetFileNameWithoutExtension(sourceFile);
         var paperMatched = new List<LocalRectangle>();
         var paperOptionsByRect = new Dictionary<LocalRectangle, IReadOnlyList<PaperDetection>>();
@@ -132,18 +212,17 @@ public static class RectangleFrameScanner
             var options = PaperSizeDetector.DetectCandidates(width, height);
             if (options.Count == 0)
             {
-                continue; // 不匹配任何标准纸张 → 丢弃
+                continue;
             }
 
             paperMatched.Add(rectangle);
             paperOptionsByRect[rectangle] = options;
         }
 
-        // 3c. 去重去嵌套（只对通过纸张过滤的矩形，重叠的只保留一个，嵌套的内外框去内留外）
+        // 3c. 去重去嵌套
         var unique = FilterRectangles(paperMatched);
 
-        // 3d. 空框过滤：排除矩形范围内没有任何可见可打印图素的空框
-        // 典型场景：残留的空矩形多段线、只有外框没有内容的图框、不可见图层上的图框
+        // 3d. 空框过滤
         var withContent = FilterEmptyRectangles(document, ownerId, unique);
 
         // 3e. 生成结果
@@ -164,7 +243,7 @@ public static class RectangleFrameScanner
                     IsManualWindow = true,
                     SourceFile = sourceFile,
                     SpaceName = layoutName,
-                    IsPaperSpace = !layout.ModelType,
+                    IsPaperSpace = isPaperSpace,
                     DrawingNumber = (index + 1).ToString("D2"),
                     Title = stem,
                     PaperName = paper.PaperName,
@@ -183,6 +262,64 @@ public static class RectangleFrameScanner
         }
 
         return results;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // 布局范围判断（与 TitleBlockScanner 一致）
+    // ═══════════════════════════════════════════════════════════════
+
+    private static bool ShouldScanLayout(Layout layout, TitleBlockScanScope scope, string? currentSpaceName)
+    {
+        switch (scope)
+        {
+            case TitleBlockScanScope.PaperLayouts:
+                return !layout.ModelType;
+            case TitleBlockScanScope.ModelSpace:
+                return layout.ModelType;
+            case TitleBlockScanScope.CurrentSpace:
+                return IsCurrentSpace(layout, currentSpaceName);
+            case TitleBlockScanScope.AllSpaces:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private static bool IsCurrentSpace(Layout layout, string? currentSpaceName)
+    {
+        if (string.IsNullOrWhiteSpace(currentSpaceName))
+        {
+            return false;
+        }
+
+        return string.Equals(layout.LayoutName, currentSpaceName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? GetCurrentSpaceName(Database db)
+    {
+        try
+        {
+            return LayoutManager.Current.CurrentLayout;
+        }
+        catch
+        {
+            try
+            {
+                using var tr = db.TransactionManager.StartTransaction();
+                var csId = db.CurrentSpaceId;
+                if (!csId.IsNull && tr.GetObject(csId, OpenMode.ForRead) is BlockTableRecord btr)
+                {
+                    var layout = (Layout)tr.GetObject(btr.LayoutId, OpenMode.ForRead);
+                    return layout.LayoutName;
+                }
+            }
+            catch
+            {
+                // 没有打开的文档或数据库不可用
+            }
+
+            return null;
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════

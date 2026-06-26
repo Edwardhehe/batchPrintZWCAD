@@ -9,9 +9,13 @@ using System.Windows.Forms;
 #if AUTOCAD
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.DatabaseServices;
+using Autodesk.AutoCAD.EditorInput;
+using Autodesk.AutoCAD.Geometry;
 #else
 using ZwSoft.ZwCAD.ApplicationServices;
 using ZwSoft.ZwCAD.DatabaseServices;
+using ZwSoft.ZwCAD.EditorInput;
+using ZwSoft.ZwCAD.Geometry;
 #endif
 
 namespace ZwcadBatchPlot;
@@ -41,21 +45,17 @@ public sealed class RectangleBatchPlotForm : Form
     private readonly ComboBox _style = new();
     private readonly CheckBox _mergePdf = new();
     private readonly Label _status = new();
-    private readonly Extents3d _scanWindow;
+    private Extents3d? _scanWindow;
+    private TitleBlockScanScope? _lastScanScope;
     private bool _updating;
 
-    public RectangleBatchPlotForm(
-        Document document,
-        Extents3d scanWindow,
-        IReadOnlyList<RectangleFrameScanner.Result> results)
+    public RectangleBatchPlotForm(Document document)
     {
         _document = document;
-        _scanWindow = scanWindow;
         _settings = AppSettingsStore.Load();
         _overlay = new TemporarySequenceOverlay(document);
         InitializeComponents();
         LoadPlotOptions();
-        LoadRows(results);
         FormClosed += (_, _) => _overlay.Clear();
     }
 
@@ -80,12 +80,19 @@ public sealed class RectangleBatchPlotForm : Form
         top.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(68)));
 
         var actions = NewFlow();
+        var scanCurrent = UiLayout.CreateButton("扫描当前图", 108);
+        scanCurrent.Click += (_, _) => ScanCurrentDrawing();
+        var scanWindow = UiLayout.CreateButton("框选扫描", 92);
+        scanWindow.Click += (_, _) => ScanSelectedWindow();
         var selectAll = UiLayout.CreateButton("全选", 64);
         selectAll.Click += (_, _) => SetAll(true);
         var selectNone = UiLayout.CreateButton("全不选", 76);
         selectNone.Click += (_, _) => SetAll(false);
         var refresh = UiLayout.CreateButton("重新识别", 88);
         refresh.Click += (_, _) => ReloadFrames();
+        actions.Controls.Add(scanCurrent);
+        actions.Controls.Add(scanWindow);
+        actions.Controls.Add(Separator());
         actions.Controls.Add(selectAll);
         actions.Controls.Add(selectNone);
         actions.Controls.Add(Separator());
@@ -97,7 +104,9 @@ public sealed class RectangleBatchPlotForm : Form
             ForeColor = Color.DimGray,
             Margin = new Padding(UiLayout.Scale(10), UiLayout.Scale(8), 0, 0)
         });
-        tips.SetToolTip(refresh, "重新扫描最初框选的范围，并刷新矩形框列表。");
+        tips.SetToolTip(scanCurrent, "扫描当前打开图纸中的全部符合纸张比例的矩形框。");
+        tips.SetToolTip(scanWindow, "回到 CAD 框选区域，只识别框内矩形框。");
+        tips.SetToolTip(refresh, "按上次扫描方式重新扫描，并刷新矩形框列表。");
 
         var outputGroup = new GroupBox
         {
@@ -324,11 +333,221 @@ public sealed class RectangleBatchPlotForm : Form
     {
         try
         {
-            LoadRows(RectangleFrameScanner.ScanWindow(_document, _scanWindow));
+            List<RectangleFrameScanner.Result> results;
+            if (_lastScanScope.HasValue)
+            {
+                results = RectangleFrameScanner.ScanScope(_document, _lastScanScope.Value);
+            }
+            else if (_scanWindow.HasValue)
+            {
+                results = RectangleFrameScanner.ScanWindow(_document, _scanWindow.Value);
+            }
+            else
+            {
+                return;
+            }
+
+            if (results.Count == 0)
+            {
+                MessageBox.Show("重新识别后没有找到矩形框。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            TransformResultsToDcs(results);
+            LoadRows(results);
         }
         catch (Exception ex)
         {
             MessageBox.Show("重新识别矩形框失败: " + ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private TitleBlockScanScope? PromptScanScope()
+    {
+        using var form = new Form
+        {
+            Text = "扫描当前图",
+            StartPosition = FormStartPosition.CenterParent,
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            MaximizeBox = false,
+            MinimizeBox = false,
+            ShowInTaskbar = false,
+            ClientSize = new Size(UiLayout.Scale(360), UiLayout.Scale(220))
+        };
+
+        var panel = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 6,
+            Padding = new Padding(UiLayout.Scale(16), UiLayout.Scale(12), UiLayout.Scale(16), UiLayout.Scale(12))
+        };
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(28)));
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(30)));
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(30)));
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(30)));
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(30)));
+        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+
+        var title = new Label { Text = "选择扫描范围", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
+        var all = new RadioButton { Text = "扫描本图全部模型和布局", Dock = DockStyle.Fill, Checked = true };
+        var layouts = new RadioButton { Text = "扫描全部布局", Dock = DockStyle.Fill };
+        var current = new RadioButton { Text = "扫描当前布局/模型", Dock = DockStyle.Fill };
+        var model = new RadioButton { Text = "扫描模型空间", Dock = DockStyle.Fill };
+
+        var buttons = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = System.Windows.Forms.FlowDirection.RightToLeft,
+            Padding = new Padding(0, UiLayout.Scale(10), 0, 0)
+        };
+        var ok = UiLayout.CreateButton("确定", 76);
+        var cancel = UiLayout.CreateButton("取消", 76);
+        ok.DialogResult = DialogResult.OK;
+        cancel.DialogResult = DialogResult.Cancel;
+        buttons.Controls.Add(ok);
+        buttons.Controls.Add(cancel);
+
+        panel.Controls.Add(title, 0, 0);
+        panel.Controls.Add(all, 0, 1);
+        panel.Controls.Add(layouts, 0, 2);
+        panel.Controls.Add(current, 0, 3);
+        panel.Controls.Add(model, 0, 4);
+        panel.Controls.Add(buttons, 0, 5);
+        form.Controls.Add(panel);
+        form.AcceptButton = ok;
+        form.CancelButton = cancel;
+
+        if (form.ShowDialog(this) != DialogResult.OK)
+        {
+            return null;
+        }
+
+        if (all.Checked) return TitleBlockScanScope.AllSpaces;
+        if (layouts.Checked) return TitleBlockScanScope.PaperLayouts;
+        if (current.Checked) return TitleBlockScanScope.CurrentSpace;
+        return TitleBlockScanScope.ModelSpace;
+    }
+
+    private void ScanCurrentDrawing()
+    {
+        var scope = PromptScanScope();
+        if (scope == null)
+        {
+            return;
+        }
+
+        try
+        {
+            var results = RectangleFrameScanner.ScanScope(_document, scope.Value);
+            if (results.Count == 0)
+            {
+                MessageBox.Show("扫描范围内没有识别到符合常见纸张比例的矩形框。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            TransformResultsToDcs(results);
+            _lastScanScope = scope;
+            _scanWindow = null;
+            LoadRows(results);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show("扫描当前图失败: " + ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private void ScanSelectedWindow()
+    {
+        Hide();
+        System.Windows.Forms.Application.DoEvents();
+        try
+        {
+            var editor = _document.Editor;
+            var first = editor.GetPoint(new PromptPointOptions("\n框选矩形图框扫描范围第一个角点: "));
+            if (first.Status != PromptStatus.OK)
+            {
+                return;
+            }
+
+            var second = editor.GetCorner(new PromptCornerOptions("\n框选矩形图框扫描范围对角点: ", first.Value));
+            if (second.Status != PromptStatus.OK)
+            {
+                return;
+            }
+
+            var ucsToWcs = editor.CurrentUserCoordinateSystem;
+            var ucsX1 = first.Value.X;
+            var ucsY1 = first.Value.Y;
+            var ucsX2 = second.Value.X;
+            var ucsY2 = second.Value.Y;
+            var wcsCorners = new[]
+            {
+                new Point3d(ucsX1, ucsY1, 0).TransformBy(ucsToWcs),
+                new Point3d(ucsX2, ucsY1, 0).TransformBy(ucsToWcs),
+                new Point3d(ucsX1, ucsY2, 0).TransformBy(ucsToWcs),
+                new Point3d(ucsX2, ucsY2, 0).TransformBy(ucsToWcs)
+            };
+            var window = new Extents3d(
+                new Point3d(wcsCorners.Min(p => p.X), wcsCorners.Min(p => p.Y), 0),
+                new Point3d(wcsCorners.Max(p => p.X), wcsCorners.Max(p => p.Y), 0));
+
+            var results = RectangleFrameScanner.ScanWindow(_document, window);
+            if (results.Count == 0)
+            {
+                MessageBox.Show("框选范围内没有识别到符合常见纸张比例的矩形框。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            TransformResultsToDcs(results);
+            _scanWindow = window;
+            _lastScanScope = null;
+            LoadRows(results);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show("框选扫描失败: " + ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            Show();
+            Activate();
+        }
+    }
+
+    private void TransformResultsToDcs(List<RectangleFrameScanner.Result> results)
+    {
+        try
+        {
+            var wcsToDcs = BatchPlotCommands.BuildWcsToDcsMatrix(_document.Editor);
+            foreach (var result in results)
+            {
+                var job = result.Job;
+                if (result.CornerPoints != null)
+                {
+                    var corners = new[]
+                    {
+                        new Point3d(result.CornerPoints[0], result.CornerPoints[1], 0).TransformBy(wcsToDcs),
+                        new Point3d(result.CornerPoints[2], result.CornerPoints[3], 0).TransformBy(wcsToDcs),
+                        new Point3d(result.CornerPoints[4], result.CornerPoints[5], 0).TransformBy(wcsToDcs),
+                        new Point3d(result.CornerPoints[6], result.CornerPoints[7], 0).TransformBy(wcsToDcs)
+                    };
+                    job.MinX = corners.Min(p => p.X);
+                    job.MinY = corners.Min(p => p.Y);
+                    job.MaxX = corners.Max(p => p.X);
+                    job.MaxY = corners.Max(p => p.Y);
+                }
+                else
+                {
+                    BatchPlotCommands.TransformPlotWindow(job, wcsToDcs);
+                }
+
+                job.IsDcsWindow = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            _document.Editor.WriteMessage($"\n矩形框 WCS→DCS 变换失败，使用 WCS 坐标：{ex.Message}");
         }
     }
 
@@ -341,12 +560,25 @@ public sealed class RectangleBatchPlotForm : Form
         }
 
         var horizontalFirst = _sortOrder.SelectedIndex == 1;
-        var sorted = SortSpatially(_rows.ToList(), horizontalFirst);
+
+        // 多布局按 TabOrder 分组（Scanner 已按 TabOrder 排序），组内空间排序，组间保持布局顺序
+        var layoutOrder = _rows
+            .Select(r => r.Job.SpaceName)
+            .Distinct()
+            .ToList();
+        var allRows = _rows.ToList();
         _updating = true;
         _rows.Clear();
-        foreach (var row in sorted)
+        foreach (var spaceName in layoutOrder)
         {
-            _rows.Add(row);
+            var group = allRows
+                .Where(r => string.Equals(r.Job.SpaceName, spaceName, StringComparison.Ordinal))
+                .ToList();
+            var sorted = SortSpatially(group, horizontalFirst);
+            foreach (var row in sorted)
+            {
+                _rows.Add(row);
+            }
         }
         _updating = false;
         RefreshFileNames();

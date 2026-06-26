@@ -235,128 +235,18 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
             return;
         }
 
-        var editor = doc.Editor;
-        if (!doc.Database.TileMode)
+        var form = new RectangleBatchPlotForm(doc);
+        _rectangleBatchPlotForm = form;
+        form.FormClosed += (_, _) =>
         {
-            try
+            if (ReferenceEquals(_rectangleBatchPlotForm, form))
             {
-                editor.SwitchToPaperSpace();
+                _rectangleBatchPlotForm = null;
             }
-            catch
-            {
-                try
-                {
-                    CadApp.SetSystemVariable("CVPORT", 1);
-                }
-                catch
-                {
-                }
-            }
-        }
 
-        var first = editor.GetPoint(new PromptPointOptions("\n框选矩形图框扫描范围第一个角点: "));
-        if (first.Status != PromptStatus.OK)
-        {
-            return;
-        }
-
-        var second = editor.GetCorner(new PromptCornerOptions("\n框选矩形图框扫描范围对角点: ", first.Value));
-        if (second.Status != PromptStatus.OK)
-        {
-            return;
-        }
-
-        // 用户框选的是 UCS 坐标 → 四个角点转到 WCS 后取一次包围盒
-        // Scanner 内部 Polyline 坐标全链路是 WCS，扫描窗口必须一致
-        var ucsToWcs = editor.CurrentUserCoordinateSystem;
-        var ucsX1 = first.Value.X;
-        var ucsY1 = first.Value.Y;
-        var ucsX2 = second.Value.X;
-        var ucsY2 = second.Value.Y;
-
-        var wcsCorners = new[]
-        {
-            new Point3d(ucsX1, ucsY1, 0).TransformBy(ucsToWcs),
-            new Point3d(ucsX2, ucsY1, 0).TransformBy(ucsToWcs),
-            new Point3d(ucsX1, ucsY2, 0).TransformBy(ucsToWcs),
-            new Point3d(ucsX2, ucsY2, 0).TransformBy(ucsToWcs)
+            form.Dispose();
         };
-
-        var window = new Extents3d(
-            new Point3d(wcsCorners.Min(p => p.X), wcsCorners.Min(p => p.Y), 0),
-            new Point3d(wcsCorners.Max(p => p.X), wcsCorners.Max(p => p.Y), 0));
-
-        try
-        {
-            var results = RectangleFrameScanner.ScanWindow(doc, window);
-            if (results.Count == 0)
-            {
-                MessageBox.Show(
-                    "框选范围内没有识别到符合常见纸张比例的矩形框。",
-                    "批量打印(选矩形框)",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
-                return;
-            }
-
-            // 扫描得到的矩形坐标是 WCS，转换为 DCS 后打印
-            // 和单张打印 UCS→DCS 同理，但这里输入已是 WCS
-            try
-            {
-                var wcsToDcs = BuildWcsToDcsMatrix(editor);
-                foreach (var result in results)
-                {
-                    var job = result.Job;
-
-                    if (result.CornerPoints != null)
-                    {
-                        // 和单张打印完全一样的算法：
-                        // 4 个实际角点（WCS）→ WCS→DCS 变换 → 取一次包围盒
-                        var corners = new[]
-                        {
-                            new Point3d(result.CornerPoints[0], result.CornerPoints[1], 0).TransformBy(wcsToDcs),
-                            new Point3d(result.CornerPoints[2], result.CornerPoints[3], 0).TransformBy(wcsToDcs),
-                            new Point3d(result.CornerPoints[4], result.CornerPoints[5], 0).TransformBy(wcsToDcs),
-                            new Point3d(result.CornerPoints[6], result.CornerPoints[7], 0).TransformBy(wcsToDcs)
-                        };
-                        job.MinX = corners.Min(p => p.X);
-                        job.MinY = corners.Min(p => p.Y);
-                        job.MaxX = corners.Max(p => p.X);
-                        job.MaxY = corners.Max(p => p.Y);
-                    }
-                    else
-                    {
-                        TransformPlotWindow(job, wcsToDcs);
-                    }
-
-                    job.IsDcsWindow = true;
-                }
-            }
-            catch (System.Exception ex)
-            {
-                editor.WriteMessage($"\n矩形框 WCS→DCS 变换失败，使用 WCS 坐标：{ex.Message}");
-            }
-
-            var form = new RectangleBatchPlotForm(doc, window, results);
-            _rectangleBatchPlotForm = form;
-            form.FormClosed += (_, _) =>
-            {
-                if (ReferenceEquals(_rectangleBatchPlotForm, form))
-                {
-                    _rectangleBatchPlotForm = null;
-                }
-                form.Dispose();
-            };
-            ShowModelessDialog(form);
-        }
-        catch (System.Exception ex)
-        {
-            MessageBox.Show(
-                "矩形框识别失败: " + ex.Message,
-                "批量打印(选矩形框)",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Error);
-        }
+        ShowModelessDialog(form);
     }
 
     // ---- 通用工具方法 ----
