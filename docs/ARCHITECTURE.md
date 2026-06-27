@@ -1,6 +1,6 @@
 # 批量打印插件架构文档
 
-> 覆盖 ZWCAD 和 AutoCAD 双平台，版本 1.10.1
+> 覆盖 ZWCAD 和 AutoCAD 双平台，版本 1.10.1 — 本文档反映当前项目结构，包含单张打印自定义纸张、XCLIP 过滤、空框过滤、TabOrder 排序等新特性。
 
 ---
 
@@ -11,6 +11,7 @@
 3. [流程二：扫描图框（图框库匹配）](#3-流程二扫描图框图框库匹配)
 4. [流程三：扫描矩形框](#4-流程三扫描矩形框)
 5. [流程四：单张打印](#5-流程四单张打印)
+   - [5.4 自定义纸张尺寸（非标图纸）](#54-自定义纸张尺寸非标图纸)
 6. [打印引擎](#6-打印引擎)
 7. [PDF 合并](#7-pdf-合并)
 8. [UCS 坐标变换](#8-ucs-坐标变换)
@@ -231,9 +232,43 @@ TitleBlockScanner.Scan(Document, TitleBlockLibrary)
 
 ## 4. 流程三：扫描矩形框
 
-**触发**：用户运行 `ZBP_RECTANGLE_BATCH_PLOT`，手动框选一个扫描范围。
+**触发**：用户运行 `ZBP_RECTANGLE_BATCH_PLOT`，打开 RectangleBatchPlotForm（先弹窗，后扫描）。
+
+> 注意：与图框库模式不同，矩形框批打采用"先弹窗后扫描"的 UX 设计。
+> 用户打开面板后，点击"扫描当前图"（选择范围）或"框选扫描"（框选区域）触发扫描，
+> 而非打开命令后立即扫描。
 
 ### 4.1 整体流程
+
+矩形框扫描提供两个入口：
+
+- `ScanWindow(Document, scanWindow)` — 扫描当前空间的框选窗口（单布局）
+- `ScanScope(Document, scope)` — 按范围扫描多个布局（全部/仅布局/当前/仅模型）
+
+#### ScanScope 多布局流程
+
+```
+RectangleFrameScanner.ScanScope(Document, scope)
+  │
+  ├─ 第一阶段：遍历所有布局，按 scope 筛选
+  │   ├─ 每个匹配布局 → CollectRectanglesFromSpace(tr, owner)
+  │   │   // 遍历布局中所有顶层实体，递归收集矩形 Polyline
+  │   ├─ 记录 (rectangles, ownerId, layoutName, isPaperSpace, TabOrder)
+  │   └─ tr.Commit()
+  │
+  ├─ 按布局 TabOrder 排序
+  │   // 模型空间先于图纸布局，图纸布局按选项卡顺序
+  │
+  └─ 第二阶段：对每个空间独立过滤打包
+      └─ FilterAndPackageRectangles(...)
+          ├─ 窗口裁剪（ScanWindow 传入时）
+          ├─ 纸张标准比例过滤（DetectCandidates）
+          ├─ 去重去嵌套（FilterRectangles）
+          ├─ 空框过滤（FilterEmptyRectangles）
+          └─ 生成 Result 列表
+```
+
+#### ScanWindow 单布局流程
 
 ```
 RectangleFrameScanner.ScanWindow(Document, scanWindow)
@@ -259,6 +294,8 @@ RectangleFrameScanner.ScanWindow(Document, scanWindow)
   │       │   └─ rectangles.Add(rectangle) ✅
   │       │
   │       └─ ② 是 BlockReference? (depth ≤ 12)
+  │           ├─ XCLIP 裁切检查: IsBlockClipped(tr, blockRef)
+  │           │   // 扩展字典中存在 "ACAD_FILTER" → 跳过整个块参照
   │           ├─ visitedDefinitions.Add(definitionId)
   │           │   // 防循环引用: 同一个块定义只处理一次
   │           ├─ 进入块定义 (BlockTableRecord)
@@ -275,29 +312,38 @@ RectangleFrameScanner.ScanWindow(Document, scanWindow)
   │           └─ finally: visitedDefinitions.Remove(definitionId)
   │               // 离开时移除，允许不同路径再次进入（不同父级下的同一定义）
   │
-  ├─ 过滤重矩形:
-  │   ├─ FilterRectangles()
-  │   │   ├─ 按面积降序
-  │   │   ├─ 去重: 重叠率 ≥ 90% + 宽高相似度 ≥ 90% → 保留一个
-  │   │   └─ 去嵌套: 小矩形完全在大矩形内 + 大面积 ≥ 小面积 × 1.5 → 移除小的
-  │   └─ 按扫描窗口裁剪: Intersects(rectangle, scanWindow)
-  │
-  └─ 生成 PlotJob 列表:
-      ├─ PaperSizeDetector.DetectCandidates(width, height) → 候选纸张
-      ├─ 取最优匹配 paper = options[0]
-      └─ 返回 List<Result>（每个 Result 含 PlotJob + 候选纸张列表）
+  └─ 过滤打包 (FilterAndPackageRectangles):
+      ├─ ① 窗口裁剪 → Intersects(rectangle, scanWindow)
+      ├─ ② 纸张比例过滤 → DetectCandidates 必须有至少1个候选
+      ├─ ③ FilterRectangles()
+      │   ├─ 按面积降序
+      │   ├─ 去重: 重叠率 ≥ 90% + 宽高相似度 ≥ 90% → 保留一个
+      │   └─ 去嵌套: 小矩形完全在大矩形内 + 大面积 ≥ 小面积 × 1.5 → 移除小的
+      ├─ ④ FilterEmptyRectangles()
+      │   // 检查每个候选矩形内是否存在可见、可打印的绘图实体
+      │   // 遍历布局所有实体（含块内嵌套），检查 GeometricExtents 是否与目标矩形相交
+      │   // 矩形框多段线自身不计为"内容"
+      └─ ⑤ 生成 Result 列表
+          ├─ PaperSizeDetector.DetectCandidates(width, height) → 候选纸张
+          ├─ 取最优匹配 paper = options[0]
+          └─ 返回 List<Result>（每个 Result 含 PlotJob + 候选纸张列表）
 ```
 
 ### 4.2 关键代码路径
 
 | 步骤 | 代码位置 |
 |------|---------|
-| 扫描入口 | `RectangleFrameScanner.ScanWindow()` — [line 27](src/Common/RectangleFrameScanner.cs#L27) |
-| 递归遍历 | `CollectEntityRectangles()` — [line 117](src/Common/RectangleFrameScanner.cs#L117) |
+| 扫描入口（单窗口） | `RectangleFrameScanner.ScanWindow()` — [line 55](src/Common/RectangleFrameScanner.cs#L55) |
+| 扫描入口（多布局） | `RectangleFrameScanner.ScanScope()` — [line 104](src/Common/RectangleFrameScanner.cs#L104) |
+| TabOrder 排序 | `spaceData.Sort((a, b) => a.TabOrder.CompareTo(b.TabOrder))` — [line 138](src/Common/RectangleFrameScanner.cs#L138) |
+| 递归遍历 | `CollectEntityRectangles()` — [line 350](src/Common/RectangleFrameScanner.cs#L350) |
 | 矩形检测 | `TryGetRectangle()` — 顶点≥4, bulge=0, 闭合, 去重后=4直角顶点 |
 | 图层过滤 | `IsEntityLayerScannable()` — !Off && !Frozen && IsPlottable |
 | 可见性过滤 | `IsEntityVisible()` — `entity.Visible`，try/catch 兜底为 true |
-| 去重去嵌套 | `FilterRectangles()` — [line 305](src/Common/RectangleFrameScanner.cs#L305) |
+| XCLIP 过滤 | `IsBlockClipped()` — 检查扩展字典 `ACAD_FILTER` — [line 490](src/Common/RectangleFrameScanner.cs#L490) |
+| 去重去嵌套 | `FilterRectangles()` — [line 305](src/Common/RectangleFrameScanner.cs#L305)（已更新行号请以实际为准） |
+| 空框过滤 | `FilterEmptyRectangles()` — [line 841](src/Common/RectangleFrameScanner.cs#L841) |
+| 纸张比例过滤 | `PaperSizeDetector.DetectCandidates()` — [PaperSizeDetector.cs](src/Common/PaperSizeDetector.cs) |
 
 ### 4.3 三种场景的识别逻辑
 
@@ -395,11 +441,20 @@ CollectEntityRectangles(BlockRef*U12, Identity):
   │     height = maxY - minY
   │     // 宽高 ≤ 1e-6 → 无效，提示用户重新选择
   │
+  │
   ├─ ④ PaperSizeDetector.DetectCandidates(width, height)
   │     // 用世界坐标下的实际宽高匹配常见纸张 × 常用比例
   │     // 例: 59400×42000 → A2 × 100 → 1:100
-  │     // 如果只有一个候选: 直接使用
-  │     // 如果有多个候选: 弹出 SinglePlotPaperSelectionForm 让用户选择
+  │     ├─ 有候选 → 继续
+  │     │   // 只有一个候选: 直接使用
+  │     │   // 有多个候选: 弹出 SinglePlotPaperSelectionForm 让用户选择
+  │     └─ 无候选 → 进入自定义纸张流程（详见 5.4）
+  │         ├─ GuessScale(width, height) → 推测整比例
+  │         ├─ CustomScaleForm 弹窗确认比例
+  │         ├─ InstallBundledPlotter() 确保打印机已安装
+  │         ├─ PmpCustomPaper.RegisterCustomPaper() 写入 PMP
+  │         ├─ 组装自定义纸张候选
+  │         └─ finally: RemoveCustomPaper() 清理 PMP
   │
   ├─ ⑤ 选择输出路径
   │     SaveFileDialog:
@@ -452,6 +507,75 @@ CollectEntityRectangles(BlockRef*U12, Identity):
 | 多文件处理 | 只处理当前 DWG | 可跨 DWG 文件扫描和打印 |
 | 图名图号 | 使用文件名 | 从图框块中自动提取文字 |
 | 合并 PDF | 不支持 | 支持（PdfDocumentService.Merge） |
+| 自定义纸张 | 支持非标尺寸（GuessScale + CustomScaleForm + PmpCustomPaper） | 不支持（仅标准纸张） |
+
+### 5.4 自定义纸张尺寸（非标图纸）
+
+当用户框选的区域无法匹配 A0~A4 标准纸张时，系统自动进入自定义纸张流程。
+
+**触发条件**：`PaperSizeDetector.DetectCandidates()` 返回空列表。
+
+**流程**：
+
+```
+SinglePlotCore() 中 candidates.Count == 0
+  │
+  ├─ ① GuessScale(width, height)
+  │   // 根据短边尺寸推测最可能的整数比例
+  │   // 尝试 [1,2,4,5,8,10,20,25,50,100,200,500,1000]
+  │   // 使纸张短边落入 100-900mm 范围
+  │   // 取最接近标准短边 (210/297/420/594/841) 的比例
+  │
+  ├─ ② CustomScaleForm(width, height, guessedScale)
+  │   // 弹窗显示当前图形尺寸和推测比例
+  │   // 用户可调整整数比例值
+  │   // 根据所选比例反算纸张尺寸: paperW = drawingW / scale
+  │
+  ├─ ③ AcadPlotterInstaller.InstallBundledPlotter()
+  │   // 确保 LA_pdf 打印机已安装（必须在 PMP 修改前执行）
+  │
+  ├─ ④ PmpCustomPaper.RegisterCustomPaper(pmpPath, paperW, paperH)
+  │   // 向 LA_pdf.pmp 写入自定义纸张条目
+  │   // 自动检测 PMP 格式:
+  │   │   ├─ "PIAFILEVERSION_3.0,..." → PIA 3.0 JSON (AutoCAD 2024+)
+  │   │   ├─ "[Meta]" → ZWCAD INI 格式
+  │   │   └─ 其他 → PIA 2.0 压缩 (AutoCAD 2019-2023, 使用 PianNoCN)
+  │   // 如果同尺寸已存在则返回已有 paperName 而不重复添加
+  │   // 返回 paperName（用于后续删除）
+  │
+  ├─ ⑤ 组装自定义纸张候选
+  │   // PaperName = customPaperName ?? "UserDefined"
+  │   // ScaleValue = scale
+  │   // Note = "自定义纸张 W x H mm"
+  │
+  ├─ ⑥ 弹出 SinglePlotForm 让用户确认（含预览/路径/纸张选择）
+  │
+  └─ ⑦ finally: PmpCustomPaper.RemoveCustomPaper(pmpPath, paperName)
+       // 无论打印成功或失败，清理 PMP 中的自定义条目
+       // 防止污染用户 PMP 文件
+```
+
+**PIA 版本适配**：
+
+| AutoCAD 版本 | PMP 格式 | 读/写方式 |
+|-------------|----------|----------|
+| 2024+ | PIA 3.0 JSON | Newtonsoft.Json 解析/修改 JSON |
+| 2019-2023 | PIA 2.0 压缩 | PianNoCN 库解压→修改→重新压缩 |
+| ZWCAD | INI 文本 | Regex 匹配 `[Meta]/[user]` 段 |
+
+**判断代码路径**：
+
+| 步骤 | 代码位置 |
+|------|---------|
+| 比例推测 | `PaperSizeDetector.GuessScale()` — [line 58](src/Common/PaperSizeDetector.cs#L58) |
+| 自定义比例对话框 | `CustomScaleForm` — [CustomScaleForm.cs](src/Common/CustomScaleForm.cs) |
+| PMP 注册（入口） | `PmpCustomPaper.RegisterCustomPaper()` — [PmpCustomPaper.cs](src/Common/PmpCustomPaper.cs#L26) |
+| PMP 清理 | `PmpCustomPaper.RemoveCustomPaper()` — [line 56](src/Common/PmpCustomPaper.cs#L56) |
+| PIA 版本检测 | `PmpPiaConverter.IsCadPia3Compatible()` — [PmpPiaConverter.cs](src/Common/PmpPiaConverter.cs#L14) |
+| PIA 3→2 转换 | `PmpPiaConverter.ConvertToPia2()` — [line 31](src/Common/PmpPiaConverter.cs#L31) |
+| PIA 2.0 序列化 | `PlotterConfiguration` / `PiaSerializer` — [src/PianNoCN/](src/PianNoCN/) |
+| 打印前安装 | `AcadPlotterInstaller.InstallBundledPlotter()` — 平台特有 |
+| 主流程 | `BatchPlotCommands.SinglePlotCore()` — [SinglePlotCommands.cs](src/Common/SinglePlotCommands.cs) |
 
 ---
 
@@ -718,12 +842,11 @@ private static bool IsEntityVisible(Entity entity)
 | .csproj | 平台 | Target | Output |
 |---------|------|--------|--------|
 | `BatchPlotter.csproj` | ZWCAD | net48 | `bin\BatchPlotter.dll` |
-| `AcadBatchPlot.csproj` | AutoCAD 2019+ | net48 | `bin-acad\AcadBatchPlot.dll` |
-| `AcadBatchPlot.Core.csproj` | AutoCAD 2025+ Core | net8.0-windows | `bin-acad-core\` |
-| `AcadBatchPlot.AutoCAD2016.csproj` | AutoCAD 2016 | net45 | `bin-acad-2016\` |
-| `AcadBatchPlot.AutoCAD2017.csproj` | AutoCAD 2017 | net46 | `bin-acad-2017\` |
-| `AcadBatchPlot.AutoCAD2018.csproj` | AutoCAD 2018 | net46 | `bin-acad-2018\` |
-| `AcadBatchPlot.AutoCAD2019.csproj` | AutoCAD 2019 | net47 | `bin-acad-2019\` |
+| `AcadBatchPlot.csproj` | AutoCAD 2019-2024 | net48 | `bin-acad\AcadBatchPlot.dll` |
+| `AcadBatchPlot.AutoCAD2019.csproj` | AutoCAD 2019 | net47 | `bin-acad2019\AcadBatchPlot.dll` |
+| `AcadBatchPlot.Core.csproj` | AutoCAD 2025+ Core | net8.0-windows | `bin-acad-core\AcadBatchPlot.Core.dll` |
+
+> AutoCAD 2016-2018 项目已移除，最低支持 AutoCAD 2019。
 
 ---
 
@@ -732,23 +855,24 @@ private static bool IsEntityVisible(Entity entity)
 ```
 批量打印/
 ├── ARCHITECTURE.md              ← 本文档
-├── BatchPlotter.csproj          ← ZWCAD 编译入口
-├── AcadBatchPlot.csproj         ← AutoCAD 2019+ 编译入口
-├── AcadBatchPlot.Core.csproj    ← AutoCAD 2025+ Core 编译入口
+├── AcadBatchPlot.csproj         ← AutoCAD 2019-2024 编译入口 (net48)
+├── AcadBatchPlot.AutoCAD2019.csproj ← AutoCAD 2019 专用编译入口 (net47)
+├── AcadBatchPlot.Core.csproj    ← AutoCAD 2025+ Core 编译入口 (net8.0-windows)
+├── BatchPlotter.csproj          ← ZWCAD 编译入口 (net48)
 ├── Directory.Build.props        ← 共享 MSBuild 属性
 │
 ├── src/
 │   ├── Common/                  ← 双平台共享代码 (#if AUTOCAD)
 │   │   ├── BatchPlotCommands.cs     ← 命令入口 + 窗口扫描 + 工具方法 (partial class)
 │   │   ├── CoordinateUtils.cs       ← UCS/DCS 坐标变换矩阵 (partial class)
-│   │   ├── SinglePlotCommands.cs    ← 单张打印核心 + 打印机选择 (partial class)
+│   │   ├── SinglePlotCommands.cs    ← 单张打印核心 + 打印机选择 + 自定义纸张 (partial class)
 │   │   ├── AddTitleBlockCommands.cs ← 新增图框向导 + 动态块可见性 (partial class)
 │   │   ├── BatchPlotForm.cs         ← 批量打印主面板 (图框库匹配模式)
-│   │   ├── RectangleBatchPlotForm.cs ← 批量打印面板 (矩形框扫描模式)
+│   │   ├── RectangleBatchPlotForm.cs ← 批量打印面板 (矩形框扫描模式, 先弹窗后扫描, TabOrder 分组 + 行列排序)
 │   │   ├── SinglePlotForm.cs        ← 单张打印确认面板（预览/纸张/路径）
 │   │   ├── TitleBlockScanner.cs     ← 图框库扫描器: 扫描→匹配→生成PlotJob
-│   │   ├── RectangleFrameScanner.cs ← 矩形框扫描器: 递归扫描PL→4层过滤→生成PlotJob
-│   │   ├── PaperSizeDetector.cs     ← 纸张尺寸检测: A0~A3标准/加长
+│   │   ├── RectangleFrameScanner.cs ← 矩形框扫描器: 递归扫描 → XCLIP过滤 → 空框过滤 → TabOrder排序 → 生成PlotJob
+│   │   ├── PaperSizeDetector.cs     ← 纸张尺寸检测: A0~A3标准/加长 + GuessScale (非标图纸比例推测)
 │   │   ├── Models.cs               ← 数据模型: PlotJob, TitleBlockDefinition, LocalRectangle
 │   │   ├── AppSettingsStore.cs      ← 设置持久化 (JSON)
 │   │   ├── PdfDocumentService.cs    ← PDF 合并 (PdfSharp)
@@ -763,10 +887,25 @@ private static bool IsEntityVisible(Entity entity)
 │   │   ├── UiLayout.cs              ← WinForms 布局: DPI缩放、按钮创建
 │   │   ├── BatchPlotLogger.cs       ← 日志输出
 │   │   ├── DirectoryTableGenerator.cs ← 图纸目录表生成: 在CAD中绘制表格
+│   │   ├── PmpCustomPaper.cs        ← PMP 自定义纸张注册/删除 (PIA3 JSON / PIA2 / ZWCAD INI)
+│   │   ├── PmpPiaConverter.cs       ← PIA 版本检测 + PIA 3→2 转换
+│   │   ├── CustomScaleForm.cs       ← 非标图纸整数比例选择对话框
 │   │   └── TemporarySequenceOverlay.cs ← 打印序号标注: 红框+数字，点击高亮
 │   │
+│   ├── PianNoCN/                 ← PIA 2.0 文件格式序列化（仅 AutoCAD 编译, namespace PiaNO）
+│   │   ├── Pia/
+│   │   │   ├── PiaFile.cs           ← PIA 文件容器
+│   │   │   ├── PiaNode.cs           ← PIA 树节点
+│   │   │   ├── PiaHeader.cs         ← PIA 文件头
+│   │   │   ├── PiaSerializer.cs     ← deflate 解压/序列化
+│   │   │   ├── PiaException.cs      ← 异常类型
+│   │   │   └── EnumDecompressionType.cs
+│   │   └── Plot/
+│   │       ├── PlotterConfiguration.cs ← 绘图仪配置类型访问
+│   │       └── Media.cs
+│   │
 │   ├── AutoCAD/                  ← AutoCAD 专用实现
-│   │   ├── CadTextExtractor.cs   ← 文字提取: 属性/文字/多行文字/MText
+│   │   ├── CadTextExtractor.cs   ← 文字提取: XCLIP 过滤, 属性/文字/多行文字/MText
 │   │   ├── CadTextUpdater.cs     ← 文字回写: 将图号图名写回DWG
 │   │   ├── CadMenuInstaller.cs   ← 菜单安装: 创建"批量打印"菜单
 │   │   ├── PlotterService.cs     ← 打印引擎: PlotMany→PlotDatabase→RunPlot
@@ -776,7 +915,7 @@ private static bool IsEntityVisible(Entity entity)
 │   │   └── ScanDiagnostics.cs    ← 调试命令: 矩形扫描诊断
 │   │
 │   └── ZWCAD/                    ← ZWCAD 专用实现（接口同名，平台适配）
-│       ├── CadTextExtractor.cs   ← 同AutoCAD, 动态块API用try/catch保护
+│       ├── CadTextExtractor.cs   ← 同AutoCAD (XCLIP 过滤 +), 动态块API用try/catch保护
 │       ├── CadTextUpdater.cs
 │       ├── CadMenuInstaller.cs   ← 菜单命令前缀加 ^C^C
 │       ├── PlotterService.cs     ← 简化纸张匹配, LA_pdf.pc5
@@ -784,20 +923,25 @@ private static bool IsEntityVisible(Entity entity)
 │       ├── AutoloadManager.cs    ← 注册表路径: ZWSOFT\ZWCAD
 │       └── TitleBlockLibraryStore.cs ← 无跨平台迁移, 路径 ZwcadBatchPlot
 │
+├── lib/
+│   └── PianNoCN/                 ← PianNoCN 原始上游源码 (参考用，编译时使用 src/PianNoCN/)
+│
 ├── resources/
 │   ├── acad/Plotters/            ← AutoCAD PDF 打印机配置
-│   │   ├── LA_pdf.pc3            ← AutoCAD 绘图仪配置 (.pc3)
-│   │   └── PMP Files/LA_pdf.pmp  ← 绘图仪校准文件
-│   └── zwcad/Plotters/           ← ZWCAD PDF 打印机配置
-│       ├── LA_pdf.pc5            ← ZWCAD 绘图仪配置 (.pc5)
-│       └── PMP Files/LA_pdf.pmp  ← 绘图仪校准文件
+│   │   ├── PIA3/                    ← PIA 3.0 JSON 格式 (AutoCAD 2024+)
+│   │   │   ├── LA_pdf.pc3
+│   │   │   └── PMP Files/LA_pdf.pmp
+│   │   ├── PIA2/                    ← PIA 2.0 压缩格式 (AutoCAD 2019-2023)
+│   │   │   ├── LA_pdf.pc3
+│   │   │   └── PMP Files/LA_pdf.pmp
+│   │   └── README.md
+│   └── zwcad/Plotters/           ← ZWCAD PDF 打印机配置 (INI 格式)
+│       ├── LA_pdf.pc5
+│       └── PMP Files/LA_pdf.pmp
 │
 ├── bin/                          ← ZWCAD 编译输出
 ├── bin-acad/                     ← AutoCAD 2019-2024 编译输出
-├── bin-acad2016/                 ← AutoCAD 2016 编译输出
-├── bin-acad2017/                 ← AutoCAD 2017 编译输出
-├── bin-acad2018/                 ← AutoCAD 2018 编译输出
-├── bin-acad2019/                 ← AutoCAD 2019 编译输出
+├── bin-acad2019/                 ← AutoCAD 2019 专用编译输出
 ├── bin-acad-core/                ← AutoCAD 2025+ Core 编译输出
 ├── bin-tmp/ bin-new/            ← 临时编译输出（bin 被锁时）
 │
@@ -814,8 +958,10 @@ private static bool IsEntityVisible(Entity entity)
 | 包 | 用途 | 保留原因 |
 |----|------|---------|
 | `Newtonsoft.Json` 13.0.3 | JSON 序列化 | 设置、图框库、日志均依赖 |
-| `PdfSharp` 1.50.5147 | PDF 合并、验证、页数检查 | 打印后自动验证和合并 |
-| `AutoCAD.NET` | AutoCAD .NET API | 仅 AutoCAD 版本，运行时由 CAD 提供 |
+| `PDFsharp` 1.50.5147 | PDF 合并、验证、页数检查 | 打印后自动验证和合并 |
+| `SharpZipLib` 1.3.3–1.4.2 | PIA 2.0 deflate 解压/压缩 | PianNoCN 序列化依赖，用于 AutoCAD 2019-2023 PMP 修改 |
+| `AutoCAD.NET` (20.0.1 / 23.0.0 / 25.0.0) | AutoCAD .NET API | 仅 AutoCAD 版本，运行时由 CAD 提供 |
 | `ZwManaged.dll` / `ZwDatabaseMgd.dll` | ZWCAD .NET API | 仅 ZWCAD 版本，运行时由 ZWCAD 提供 |
+| `PianNoCN` (内嵌源码) | PIA 2.0 文件格式解析 | 自定义纸张时读取/写入 PIA 2.0 压缩 PMP |
 
 已移除的依赖: `Microsoft.Web.WebView2`（原用于 PDF 内嵌预览，PdfPreviewForm 已移除）

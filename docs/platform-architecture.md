@@ -36,6 +36,46 @@ The following files remain under both `src/ZWCAD/` and `src/AutoCAD/` because th
 - AutoCAD projects define `AUTOCAD`.
 - `AcadBatchPlot.Core.csproj` additionally defines `ACAD_CORE`.
 
+## PianNoCN integration
+
+Files under `src/PianNoCN/` provide PIA 2.0 compressed-format serialization for AutoCAD PMP/PC3 files. They are compiled into AutoCAD assemblies (AcadBatchPlot, AcadBatchPlot.AutoCAD2019, AcadBatchPlot.Core) but not into the ZWCAD assembly, which uses INI-format PMP instead.
+
+The PianNoCN code (namespace `PiaNO`) handles:
+- `PiaFile` / `PiaNode` / `PiaHeader`: tree-based node model for PIA 2.0 binary files.
+- `PiaSerializer`: deflate decompression of the PIA 2.0 payload into text nodes.
+- `PlotterConfiguration`: typed access to PC3 plotter configuration metadata.
+
+The original upstream source lives in `lib/PianNoCN/` for reference; the compiled copy is at `src/PianNoCN/`.
+
+## New features (v1.10.1+)
+
+### Single-plot custom paper size
+
+When the user's selected region does not match any standard paper size, `PaperSizeDetector.GuessScale()` infers the most likely integer scale. A `CustomScaleForm` dialog lets the user adjust the scale, and `PmpCustomPaper.RegisterCustomPaper()` writes a custom paper entry into the LA_pdf.pmp file before plotting. `PmpCustomPaper.RemoveCustomPaper()` cleans up the entry in a `finally` block after the plot completes.
+
+PMP write/cleanup supports three formats:
+- **PIA 3.0 JSON** (AutoCAD 2024+): JSON-with-header format, parsed/modified via Newtonsoft.Json.
+- **PIA 2.0 compressed** (AutoCAD 2019-2023): PianNoCN-based tree manipulation, then re-serialized.
+- **ZWCAD INI**: `[Meta]/[user]` section-based text format, handled with regex.
+
+`PmpPiaConverter.IsCadPia3Compatible()` detects the target AutoCAD's PMP format at runtime. `PmpPiaConverter.ConvertToPia2()` converts PIA 3.0 resources to PIA 2.0 for older AutoCAD versions.
+
+### XCLIP filtering
+
+Both `CadTextExtractor.BuildOwnerTextCache()` (both platforms) and `RectangleFrameScanner.CollectEntityRectangles()` skip block references that have an XCLIP boundary. Detection is via `IsBlockClipped()`, which checks the block reference's extension dictionary for an `"ACAD_FILTER"` entry. XCLIPped blocks display only a portion of their content, so internal rectangles or text extracted from them would be incomplete and are excluded from scanning.
+
+### Empty-frame filtering
+
+`RectangleFrameScanner.FilterEmptyRectangles()` checks each candidate rectangle for actual drawing content. `HasDrawingContent()` recursively traverses all entities (including nested blocks) within the rectangle's bounding box; if an entity's `GeometricExtents` intersects the target rectangle and is not the original Polyline frame itself, the rectangle is considered non-empty. Frames without content (blank title blocks, empty layouts) are excluded from results.
+
+### Rectangle-frame multi-layout with TabOrder
+
+`RectangleFrameScanner.ScanScope()` collects rectangles from all matching layouts while recording each layout's `TabOrder`. After collection, spaces are sorted by TabOrder (model space first, then paper layouts in tab order). Within `RectangleBatchPlotForm`, results are grouped by layout (preserving TabOrder), and each group is further sorted spatially by the user's chosen direction (top-to-bottom/left-to-right or left-to-right/top-to-bottom). The overlay numbering follows the same sort order.
+
+### Rectangle batch print form-first UX
+
+Unlike the title-block batch flow (scan then auto-open results), `ZBP_RECTANGLE_BATCH_PLOT` opens the `RectangleBatchPlotForm` immediately. The user then explicitly triggers scanning via "Scan current drawing" (with a scope dialog for layout selection) or "Box select scan" (for window-based area selection). A "Re-identify" button repeats the last scan. This gives the user control over scanning scope and timing.
+
 ## Key design decisions (v1.10.0)
 
 ### UCS coordinate transform chain
