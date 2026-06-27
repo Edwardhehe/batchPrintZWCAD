@@ -48,6 +48,52 @@ public static class PaperSizeDetector
         120d, 125d, 150d, 200d, 250d, 300d, 400d, 500d, 600d, 1000d
     };
 
+    private static readonly int[] IntegerScales = { 1, 2, 4, 5, 8, 10, 20, 25, 50, 100, 200, 500, 1000 };
+
+    /// <summary>
+    /// 根据图纸短边尺寸推测最可能的整数打印比例。
+    /// 尝试每个常规整数比例，取使纸张短边落入 100-900mm 范围且最接近 A4~A0 短边的。
+    /// 推测失败返回 0。
+    /// </summary>
+    public static int GuessScale(double drawingWidth, double drawingHeight)
+    {
+        var shortSide = Math.Min(drawingWidth, drawingHeight);
+        if (shortSide <= 1e-6) return 0;
+
+        var standardShorts = new[] { 210d, 297d, 420d, 594d, 841d }; // A4 A3 A2 A1 A0 短边
+        var bestScale = 0;
+        var bestDistance = double.MaxValue;
+
+        foreach (var scale in IntegerScales)
+        {
+            var paperShort = shortSide / scale;
+            if (paperShort < 100 || paperShort > 900) continue; // 纸张太极端
+
+            // 找最接近的标准短边
+            var nearest = standardShorts.OrderBy(s => Math.Abs(s - paperShort)).First();
+            var distance = Math.Abs(nearest - paperShort);
+            if (distance < bestDistance)
+            {
+                bestDistance = distance;
+                bestScale = scale;
+            }
+        }
+
+        return bestScale;
+    }
+
+    /// <summary>
+    /// 根据图纸尺寸和整数比例计算自定义纸张尺寸（mm）。
+    /// 返回 (paperWidth, paperHeight, scale)。
+    /// </summary>
+    public static (double PaperWidth, double PaperHeight, double Scale) CalculateCustomPaper(
+        double drawingWidth, double drawingHeight, int scale)
+    {
+        var paperWidth = drawingWidth / scale;
+        var paperHeight = drawingHeight / scale;
+        return (paperWidth, paperHeight, scale);
+    }
+
     public static PaperDetection Detect(double width, double height)
     {
         var candidates = GetCandidateDetails(width, height);

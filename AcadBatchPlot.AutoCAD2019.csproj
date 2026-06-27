@@ -14,11 +14,13 @@
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <OutputPath>bin-acad2019\</OutputPath>
+    <GenerateResourceUsePreserializedResources>true</GenerateResourceUsePreserializedResources>
   </PropertyGroup>
 
   <ItemGroup>
     <Compile Include="src\Common\**\*.cs" />
     <Compile Include="src\AutoCAD\**\*.cs" />
+    <Compile Include="src\PianNoCN\**\*.cs" />
     <EmbeddedResource Include="src\AutoCAD\**\*.resx" />
     <None Remove="src\AutoCAD\**\*" />
   </ItemGroup>
@@ -43,5 +45,7 @@
       <ExcludeAssets>runtime</ExcludeAssets>
     </PackageReference>
     <PackageReference Include="PDFsharp" Version="1.50.5147" />
+    <PackageReference Include="SharpZipLib" Version="1.3.3" />
+    <PackageReference Include="System.Resources.Extensions" Version="7.0.0" />
   </ItemGroup>
 </Project>

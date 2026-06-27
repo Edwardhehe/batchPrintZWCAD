@@ -104,6 +104,8 @@ public static class AcadPlotterInstaller
         };
     }
 
+    public static string GetPlottersDirectory() => GetAutoCadPlotterDirectory();
+
     private static string GetAutoCadPlotterDirectory()
     {
         var printerConfigDir = GetSystemVariableString("PrinterConfigDir");

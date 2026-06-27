@@ -396,6 +396,8 @@ public static class PlotterService
             plotSettings.CopyFrom(layout);
 
             var validator = PlotSettingsValidator.Current;
+            // 先卸再装，强制 ZWCAD 重新读 PMP 获取自定义纸张
+            validator.SetPlotConfigurationName(plotSettings, "None", null);
             validator.SetPlotConfigurationName(plotSettings, deviceName, null);
             validator.RefreshLists(plotSettings);
             TrySetPlotPaperUnits(validator, plotSettings, PlotPaperUnit.Millimeters);
@@ -403,8 +405,10 @@ public static class PlotterService
             var media = SelectMedia(validator, plotSettings, job, settings);
             if (media == null)
             {
+                var allMedia = validator.GetCanonicalMediaNameList(plotSettings).Cast<string>().ToList();
+                var debugInfo = string.Join("|", allMedia.Where(x => x.IndexOf("Custom", StringComparison.OrdinalIgnoreCase) >= 0 || x.IndexOf("UserDefined", StringComparison.OrdinalIgnoreCase) >= 0));
                 throw new InvalidOperationException(
-                    $"未找到匹配 {job.PaperSizeText} 的 PDF 纸张。请在中望 PDF 打印机中添加这个自定义纸张后再打印。");
+                    $"未找到匹配 {job.PaperSizeText} 的 PDF 纸张（{job.PaperWidthMm:0.##}x{job.PaperHeightMm:0.##}mm, name={job.PaperName}）。自定义纸张列表: {debugInfo}");
             }
 
             validator.SetCanonicalMediaName(plotSettings, media.Name);
@@ -638,6 +642,7 @@ public static class PlotterService
             plotSettings.CopyFrom(layout);
 
             var validator = PlotSettingsValidator.Current;
+            validator.SetPlotConfigurationName(plotSettings, "None", null);
             validator.SetPlotConfigurationName(plotSettings, deviceName, null);
             validator.RefreshLists(plotSettings);
             TrySetPlotPaperUnits(validator, plotSettings, PlotPaperUnit.Millimeters);

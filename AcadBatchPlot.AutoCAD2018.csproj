@@ -14,11 +14,13 @@
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <OutputPath>bin-acad2018\</OutputPath>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
   </PropertyGroup>
 
   <ItemGroup>
     <Compile Include="src\Common\**\*.cs" />
     <Compile Include="src\AutoCAD\**\*.cs" />
+    <Compile Include="src\PianNoCN\**\*.cs" />
     <EmbeddedResource Include="src\AutoCAD\**\*.resx" />
     <None Remove="src\AutoCAD\**\*" />
   </ItemGroup>
@@ -42,6 +44,7 @@
       <PrivateAssets>all</PrivateAssets>
       <ExcludeAssets>runtime</ExcludeAssets>
     </PackageReference>
+    <PackageReference Include="SharpZipLib" Version="0.86.0" />
     <PackageReference Include="System.ValueTuple" Version="4.5.0" />
     <PackageReference Include="PDFsharp" Version="1.50.5147" />
   </ItemGroup>

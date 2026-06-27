@@ -20,6 +20,7 @@
   <ItemGroup>
     <Compile Include="src\Common\**\*.cs" />
     <Compile Include="src\AutoCAD\**\*.cs" />
+    <Compile Include="src\PianNoCN\**\*.cs" />
     <EmbeddedResource Include="src\AutoCAD\**\*.resx" />
     <None Remove="src\AutoCAD\**\*" />
   </ItemGroup>
@@ -44,5 +45,6 @@
       <ExcludeAssets>runtime</ExcludeAssets>
     </PackageReference>
     <PackageReference Include="PDFsharp" Version="6.2.4" />
+    <PackageReference Include="SharpZipLib" Version="1.4.2" />
   </ItemGroup>
 </Project>
