@@ -30,9 +30,26 @@ $projects = [ordered]@{
     }
     AutoCAD2025 = @{
         Project = "AcadBatchPlot.Core.csproj"
-        Output = "bin-acad-core"
+        Output = "bin-acad2025*"
         Dll = "AcadBatchPlot.Core.dll"
     }
+}
+
+function Resolve-OutputPath {
+    param(
+        [string]$RootPath,
+        [string]$Output
+    )
+
+    if ($Output -like "*[*?]*") {
+        $match = Get-ChildItem -LiteralPath $RootPath -Directory -Filter $Output -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if ($match) {
+            return $match.FullName
+        }
+    }
+
+    return (Join-Path $RootPath $Output)
 }
 
 $selectedTargets = if ($Target -eq "All") { $projects.Keys } else { @($Target) }
@@ -40,8 +57,7 @@ $selectedTargets = if ($Target -eq "All") { $projects.Keys } else { @($Target) }
 foreach ($name in $selectedTargets) {
     $info = $projects[$name]
     $projectPath = Join-Path $root $info.Project
-    $outputPath = Join-Path $root $info.Output
-    $dllPath = Join-Path $outputPath $info.Dll
+    $outputPath = Resolve-OutputPath -RootPath $root -Output $info.Output
 
     if ($Clean -and (Test-Path -LiteralPath $outputPath)) {
         try {
@@ -57,6 +73,8 @@ foreach ($name in $selectedTargets) {
         throw "Build failed for $name. If CAD has loaded the old DLL, close CAD before rebuilding."
     }
 
+    $outputPath = Resolve-OutputPath -RootPath $root -Output $info.Output
+    $dllPath = Join-Path $outputPath $info.Dll
     if (-not (Test-Path -LiteralPath $dllPath)) {
         throw "Build finished but expected DLL was not found: $dllPath"
     }
