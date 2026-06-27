@@ -10,8 +10,8 @@ namespace ZwcadBatchPlot;
 
 public static class CadMenuInstaller
 {
-    private const string MenuName = "批量打印";
-    private const string LegacyMenuName = "ZW批量打印";
+    private const string MenuName = "LA批量打印";
+    private const string LegacyMenuName = "批量打印";
 
     public static void Install(bool force = false)
     {

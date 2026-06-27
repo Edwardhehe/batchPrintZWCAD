@@ -802,6 +802,8 @@ public sealed class RectangleBatchPlotForm : Form
         if (_grid.Columns[e.ColumnIndex].Name == "Preview"
             && _grid.Rows[e.RowIndex].DataBoundItem is Row row)
         {
+            Hide();
+            System.Windows.Forms.Application.DoEvents();
             try
             {
                 PlotterService.Preview(row.Job, SelectedDevice(), SelectedStyle(), _document);
@@ -809,6 +811,11 @@ public sealed class RectangleBatchPlotForm : Form
             catch (Exception ex)
             {
                 MessageBox.Show("打印预览失败: " + ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                Show();
+                Activate();
             }
         }
     }
