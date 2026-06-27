@@ -7,7 +7,8 @@ using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.Geometry;
 using Autodesk.AutoCAD.PlottingServices;
-using iTextSharp.text.pdf;
+using PdfSharp.Pdf;
+using PdfSharp.Pdf.IO;
 #if ACAD_CORE
 using CadApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
 #else
@@ -1109,10 +1110,10 @@ public static class PlotterService
             throw new IOException("打印引擎未生成 PDF 文件: " + outputPath);
         }
 
-        using var reader = new PdfReader(outputPath);
-        if (reader.NumberOfPages == 0)
+        using var pdf = PdfReader.Open(outputPath, PdfDocumentOpenMode.Import);
+        if (pdf.PageCount == 0 || !pdf.Pages.Cast<PdfPage>().Any(page => page.Contents.Elements.Count > 0))
         {
-            throw new InvalidDataException("PDF 已生成但无页面，已按打印失败处理: " + outputPath);
+            throw new InvalidDataException("PDF 已生成但页面内容为空，已按打印失败处理: " + outputPath);
         }
         {
             throw new InvalidDataException("PDF 已生成但页面内容为空，已按打印失败处理: " + outputPath);

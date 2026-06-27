@@ -2,8 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using iTextSharp.text;
-using iTextSharp.text.pdf;
+using PdfSharp.Pdf;
+using PdfSharp.Pdf.IO;
 
 namespace ZwcadBatchPlot;
 
@@ -32,32 +32,36 @@ public static class PdfDocumentService
         var temporaryOutput = fullOutputPath + "." + Guid.NewGuid().ToString("N") + ".tmp.pdf";
         try
         {
-            using var stream = new FileStream(temporaryOutput, FileMode.Create);
-            var document = new Document();
-            var copy = new PdfCopy(document, stream);
-            document.Open();
-
-            var totalPages = 0;
-            foreach (var file in inputFiles)
+            using (var output = new PdfDocument())
             {
-                using var reader = new PdfReader(file);
-                for (var i = 1; i <= reader.NumberOfPages; i++)
+                output.PageLayout = PdfPageLayout.SinglePage;
+                foreach (var file in inputFiles)
                 {
-                    var page = copy.GetImportedPage(reader, i);
-                    copy.AddPage(page);
+                    using var input = PdfReader.Open(file, PdfDocumentOpenMode.Import);
+                    PdfPage? firstPage = null;
+                    foreach (var page in input.Pages)
+                    {
+                        var newPage = output.AddPage(page);
+                        firstPage ??= newPage;
+                    }
+
+                    if (firstPage != null)
+                    {
+                        output.Outlines.Add(
+                            Path.GetFileNameWithoutExtension(file),
+                            firstPage,
+                            true,
+                            PdfOutlineStyle.Bold);
+                    }
                 }
 
-                totalPages += reader.NumberOfPages;
-                copy.FreeReader(reader);
-            }
+                if (output.PageCount == 0)
+                {
+                    throw new InvalidDataException("待合并 PDF 中没有有效页面。");
+                }
 
-            if (totalPages == 0)
-            {
-                document.Close();
-                throw new InvalidDataException("待合并 PDF 中没有有效页面。");
+                output.Save(temporaryOutput);
             }
-
-            document.Close();
 
             Validate(temporaryOutput);
             if (File.Exists(fullOutputPath))
@@ -83,21 +87,8 @@ public static class PdfDocumentService
             throw new IOException("PDF 文件不存在或为空: " + path);
         }
 
-        using var reader = new PdfReader(path);
-        if (reader.NumberOfPages == 0)
-        {
-            throw new InvalidDataException("PDF 页面内容为空: " + path);
-        }
-
-        try
-        {
-            var page = reader.GetPageN(1);
-            if (page == null || page.GetAsDict(PdfName.CONTENTS) == null)
-            {
-                throw new InvalidDataException("PDF 页面内容为空: " + path);
-            }
-        }
-        catch
+        using var pdf = PdfReader.Open(path, PdfDocumentOpenMode.Import);
+        if (pdf.PageCount == 0 || !pdf.Pages.Cast<PdfPage>().Any(page => page.Contents.Elements.Count > 0))
         {
             throw new InvalidDataException("PDF 页面内容为空: " + path);
         }
