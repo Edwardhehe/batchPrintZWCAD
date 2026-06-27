@@ -39,6 +39,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="iTextSharp" Version="5.5.13.3" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
     <PackageReference Include="AutoCAD.NET" Version="22.0.0">
       <PrivateAssets>all</PrivateAssets>
@@ -46,6 +47,5 @@
     </PackageReference>
     <PackageReference Include="SharpZipLib" Version="0.86.0" />
     <PackageReference Include="System.ValueTuple" Version="4.5.0" />
-    <PackageReference Include="PDFsharp" Version="1.50.5147" />
   </ItemGroup>
 </Project>

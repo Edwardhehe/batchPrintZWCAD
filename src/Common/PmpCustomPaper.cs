@@ -98,7 +98,7 @@ public static class PmpCustomPaper
         // 检查同尺寸是否已存在
         var wFmt = widthMm.ToString("0.##");
         var hFmt = heightMm.ToString("0.##");
-        var paperName = $"Custom ({wFmt} x {hFmt} MM)";
+        var paperName = $"自定义 ({wFmt} x {hFmt} 毫米)";
         foreach (var prop in desc.Properties())
         {
             var entry = prop.Value as JObject;
@@ -122,13 +122,14 @@ public static class PmpCustomPaper
 
         // 添加 description 条目
         var area = widthMm * heightMm;
+        var descName = $"UserDefinedMetric 自定义 {wFmt}W x {hFmt}H - (0, 0) x ({wFmt}, {hFmt}) ={area:0.} 毫米";
         var descEntry = new JObject
         {
             ["caps_type"] = 2,
             ["dimensional"] = true,
             ["media_bounds_urx"] = widthMm,
             ["media_bounds_ury"] = heightMm,
-            ["name"] = $"UserDefinedMetric Custom {wFmt}W x {hFmt}H - (0, 0) x ({wFmt}, {hFmt}) ={area:0.} MM",
+            ["name"] = descName,
             ["printable_area"] = area,
             ["printable_bounds_llx"] = 0.0,
             ["printable_bounds_lly"] = 0.0,
@@ -143,9 +144,9 @@ public static class PmpCustomPaper
             ["caps_type"] = 2,
             ["landscape_mode"] = true,
             ["localized_name"] = paperName,
-            ["media_description_name"] = $"UserDefinedMetric Custom {wFmt}W x {hFmt}H - (0, 0) x ({wFmt}, {hFmt}) ={area:0.} MM",
+            ["media_description_name"] = descName,
             ["media_group"] = 15,
-            ["name"] = $"UserDefinedMetric Custom ({wFmt} x {hFmt} MM)"
+            ["name"] = paperName
         };
         size[index] = sizeEntry;
 
