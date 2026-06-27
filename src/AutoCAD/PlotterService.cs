@@ -363,8 +363,8 @@ public static class PlotterService
         }
 
         EnsureRequiredMediaSize(settings, media);
-        validator.SetPlotType(settings, Autodesk.AutoCAD.DatabaseServices.PlotType.Window);
         validator.SetPlotWindowArea(settings, window);
+        validator.SetPlotType(settings, Autodesk.AutoCAD.DatabaseServices.PlotType.Window);
         validator.SetUseStandardScale(settings, true);
         validator.SetStdScaleType(settings, StdScaleType.ScaleToFit);
         validator.SetPlotCentered(settings, true);
@@ -373,6 +373,130 @@ public static class PlotterService
         if (!string.IsNullOrWhiteSpace(styleSheet))
         {
             validator.SetCurrentStyleSheet(settings, styleSheet);
+        }
+    }
+
+    private static IReadOnlyList<MediaChoice> ChooseMediaCandidates(PlotSettingsValidator validator, Layout layout, string deviceName, PlotJob job)
+    {
+        using var settings = new PlotSettings(layout.ModelType);
+        settings.CopyFrom(layout);
+        validator.SetPlotConfigurationName(settings, deviceName, null);
+        validator.RefreshLists(settings);
+        validator.SetPlotPaperUnits(settings, PlotPaperUnit.Millimeters);
+
+        var names = validator.GetCanonicalMediaNameList(settings).Cast<string>().ToList();
+        if (names.Count == 0)
+        {
+            throw new InvalidOperationException($"鎵撳嵃鏈烘病鏈夊彲鐢ㄧ焊寮? {deviceName}");
+        }
+
+        var targetWidth = job.PaperWidthMm > 0 ? job.PaperWidthMm : Math.Abs(job.MaxX - job.MinX);
+        var targetHeight = job.PaperHeightMm > 0 ? job.PaperHeightMm : Math.Abs(job.MaxY - job.MinY);
+        var choices = new List<MediaChoice>();
+
+        foreach (var name in names)
+        {
+            var size = GetMediaSize(validator, settings, name);
+            if (size == null)
+            {
+                continue;
+            }
+
+            var directError = DirectSizeError(size.Value.Width, size.Value.Height, targetWidth, targetHeight);
+            var rotatedError = DirectSizeError(size.Value.Width, size.Value.Height, targetHeight, targetWidth);
+            choices.Add(new MediaChoice
+            {
+                Name = name,
+                WidthMm = size.Value.Width,
+                HeightMm = size.Value.Height,
+                Error = Math.Min(directError, rotatedError),
+                IsFullBleed = IsFullBleedMedia(name),
+                PreferredRotation = rotatedError < directError ? PlotRotation.Degrees090 : PlotRotation.Degrees000
+            });
+        }
+
+        var candidates = new List<MediaChoice>();
+        var isLongPaper = IsLongPaperName(job.PaperName ?? "");
+        var paper = job.PaperName ?? "";
+        var basePaper = paper.Replace("+", "");
+
+        var named = choices
+            .Where(x => MediaNameMatchesPaper(x.Name, paper, basePaper))
+            .OrderBy(x => x.Error)
+            .ThenBy(x => x.IsFullBleed ? 0 : 1)
+            .ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        foreach (var item in named)
+        {
+            item.RequiresExactSize = isLongPaper;
+        }
+
+        AddUniqueMedia(candidates, named);
+
+        var exact = choices
+            .Where(x => x.Error <= MediaMatchToleranceMm)
+            .OrderBy(x => x.Error)
+            .ThenBy(x => x.IsFullBleed ? 0 : 1)
+            .ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        foreach (var item in exact)
+        {
+            item.RequiresExactSize = isLongPaper;
+        }
+
+        AddUniqueMedia(candidates, exact);
+
+        if (isLongPaper && targetWidth > 0 && targetHeight > 0)
+        {
+            AddUniqueMedia(candidates, new[]
+            {
+                new MediaChoice
+                {
+                    Name = $"Closest {targetWidth:0.##} x {targetHeight:0.##} mm",
+                    WidthMm = targetWidth,
+                    HeightMm = targetHeight,
+                    Error = 0,
+                    UseClosestBySize = true,
+                    RequiresExactSize = true,
+                    PreferredRotation = targetWidth >= targetHeight ? PlotRotation.Degrees090 : PlotRotation.Degrees000
+                }
+            });
+        }
+
+        var closest = choices
+            .OrderBy(x => x.Error)
+            .ThenBy(x => x.IsFullBleed ? 0 : 1)
+            .ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        AddUniqueMedia(candidates, closest);
+
+        if (candidates.Count > 0)
+        {
+            return candidates;
+        }
+
+        var fallbackName = BestMediaNameByText(names, job) ?? names[0];
+        return new[]
+        {
+            new MediaChoice
+            {
+                Name = fallbackName,
+                PreferredRotation = job.PaperWidthMm >= job.PaperHeightMm ? PlotRotation.Degrees090 : PlotRotation.Degrees000
+            }
+        };
+    }
+
+    private static void AddUniqueMedia(List<MediaChoice> candidates, IEnumerable<MediaChoice> choices)
+    {
+        foreach (var choice in choices)
+        {
+            if (candidates.Any(x => string.Equals(x.Name, choice.Name, StringComparison.OrdinalIgnoreCase)
+                && x.UseClosestBySize == choice.UseClosestBySize))
+            {
+                continue;
+            }
+
+            candidates.Add(choice);
         }
     }
 

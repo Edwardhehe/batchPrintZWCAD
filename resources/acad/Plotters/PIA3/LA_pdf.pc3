@@ -116,7 +116,7 @@ PIAFILEVERSION_3.0,json
    "config_description": "",
    "default_system_cfg": false,
    "dm_driver_version": 0,
-   "driver_pathname": "C:\\Program Files\\Autodesk\\AutoCAD 2024\\drv\\pdfplot16.hdi",
+   "driver_pathname": "",
    "driver_tag_line": "PDF ePlot - by Autodesk",
    "driver_type": 3,
    "driver_version": "1.1-16.3.222.0 [v018-1]",
@@ -133,7 +133,7 @@ PIAFILEVERSION_3.0,json
    "truetype_as_text": true,
    "udm_description": "",
    "user_defined_model_basename": "",
-   "user_defined_model_pathname": "C:\\Users\\lihao\\AppData\\Roaming\\Autodesk\\AutoCAD 2024\\R24.3\\chs\\plotters\\PMP Files\\LA_pdf.pmp"
+   "user_defined_model_pathname": ""
   },
   "res_color_mem": {
    "color_depth": 24,
