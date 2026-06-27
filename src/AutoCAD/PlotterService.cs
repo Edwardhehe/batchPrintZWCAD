@@ -1235,12 +1235,9 @@ public static class PlotterService
         }
 
         using var pdf = PdfReader.Open(outputPath, PdfDocumentOpenMode.Import);
-        if (pdf.PageCount == 0 || !pdf.Pages.Cast<PdfPage>().Any(page => page.Contents.Elements.Count > 0))
+        if (pdf.PageCount == 0)
         {
-            throw new InvalidDataException("PDF 已生成但页面内容为空，已按打印失败处理: " + outputPath);
-        }
-        {
-            throw new InvalidDataException("PDF 已生成但页面内容为空，已按打印失败处理: " + outputPath);
+            throw new InvalidDataException("PDF 已生成但没有有效页面，已按打印失败处理: " + outputPath);
         }
     }
 

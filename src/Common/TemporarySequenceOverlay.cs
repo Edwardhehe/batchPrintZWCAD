@@ -22,6 +22,7 @@ namespace ZwcadBatchPlot;
 public sealed class TemporarySequenceOverlay
 {
     private const string LayerName = "ZBP_TEMP_SEQUENCE_OVERLAY";
+    private const string TextStyleName = "ZBP_TEMP_SEQUENCE_TEXT";
     private readonly Document _document;
     private readonly List<ObjectId> _entityIds = new();
 
@@ -38,6 +39,7 @@ public sealed class TemporarySequenceOverlay
         using var tr = _document.Database.TransactionManager.StartTransaction();
         var db = _document.Database;
         var layerId = EnsureLayer(tr, db);
+        var textStyleId = EnsureTextStyle(tr, db);
 
         // 单张打印和矩形框批量的 Job 坐标是 DCS，绘制到图纸前需回退到 WCS
         // DCS→WCS：绘制前回退坐标
@@ -119,7 +121,7 @@ public sealed class TemporarySequenceOverlay
             AddEntity(tr, owner, frame);
 
             var center = new Point3d((minX + maxX) / 2d, (minY + maxY) / 2d, 0);
-            AddBoldLabel(tr, owner, layerId, color, center, (i + 1).ToString(), textHeight, ucsAngle, isHighlight);
+            AddBoldLabel(tr, owner, layerId, textStyleId, color, center, (i + 1).ToString(), textHeight, ucsAngle, isHighlight);
         }
 
         tr.Commit();
@@ -188,6 +190,31 @@ public sealed class TemporarySequenceOverlay
         return id;
     }
 
+    private static ObjectId EnsureTextStyle(Transaction tr, Database db)
+    {
+        var table = (TextStyleTable)tr.GetObject(db.TextStyleTableId, OpenMode.ForRead);
+        if (table.Has(TextStyleName))
+        {
+            var existing = (TextStyleTableRecord)tr.GetObject(table[TextStyleName], OpenMode.ForWrite);
+            existing.FileName = "simsun.ttc";
+            existing.XScale = 1.0;
+            existing.ObliquingAngle = 0;
+            return existing.ObjectId;
+        }
+
+        table.UpgradeOpen();
+        var record = new TextStyleTableRecord
+        {
+            Name = TextStyleName,
+            FileName = "simsun.ttc",
+            XScale = 1.0,
+            ObliquingAngle = 0
+        };
+        var id = table.Add(record);
+        tr.AddNewlyCreatedDBObject(record, true);
+        return id;
+    }
+
     private void AddEntity(Transaction tr, BlockTableRecord owner, Entity entity)
     {
         var id = owner.AppendEntity(entity);
@@ -218,7 +245,7 @@ public sealed class TemporarySequenceOverlay
         }
     }
 
-    private void AddBoldLabel(Transaction tr, BlockTableRecord owner, ObjectId layerId, Color color, Point3d center, string text, double height, double rotation, bool highlight = false)
+    private void AddBoldLabel(Transaction tr, BlockTableRecord owner, ObjectId layerId, ObjectId textStyleId, Color color, Point3d center, string text, double height, double rotation, bool highlight = false)
     {
         var stroke = Math.Max(height * 0.035, 2d);
         // 高亮时描边加粗：偏移量翻倍 + 额外一层中间描边
@@ -244,19 +271,26 @@ public sealed class TemporarySequenceOverlay
             var rx = dx * cosR - dy * sinR;
             var ry = dx * sinR + dy * cosR;
             var point = new Point3d(center.X + rx, center.Y + ry, center.Z);
-            var label = new DBText
-            {
-                TextString = text,
-                Color = color,
-                LayerId = layerId,
-                Height = height,
-                Rotation = rotation,
-                HorizontalMode = TextHorizontalMode.TextCenter,
-                VerticalMode = TextVerticalMode.TextVerticalMid,
-                Position = point,
-                AlignmentPoint = point
-            };
+            var label = new DBText();
+            label.SetDatabaseDefaults(_document.Database);
+            label.TextString = text;
+            label.Color = color;
+            label.LayerId = layerId;
+            label.TextStyleId = textStyleId;
+            label.Height = height;
+            label.Rotation = rotation;
+            label.HorizontalMode = TextHorizontalMode.TextCenter;
+            label.VerticalMode = TextVerticalMode.TextVerticalMid;
+            label.Position = point;
+            label.AlignmentPoint = point;
             AddEntity(tr, owner, label);
+            try
+            {
+                label.AdjustAlignment(_document.Database);
+            }
+            catch
+            {
+            }
         }
     }
 
