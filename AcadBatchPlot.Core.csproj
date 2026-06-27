@@ -14,7 +14,7 @@
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
-    <OutputPath>bin-acad-core\</OutputPath>
+    <OutputPath>bin-acad2025之后\</OutputPath>
   </PropertyGroup>
 
   <ItemGroup>
