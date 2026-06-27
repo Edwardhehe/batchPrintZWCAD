@@ -160,39 +160,64 @@ public static class PmpCustomPaper
 
     private static string? RegisterPia2(string pmpPath, double widthMm, double heightMm)
     {
-        // PIA 2.0：使用 PianNoCN 库
+        // PIA 2.0：使用 PianNoCN 库，结构与 PIA 3.0 一致：udm.media.description/{N} + udm.media.size/{N}
         try
         {
             var config = new PlotterConfiguration(pmpPath);
-            var paperName = $"UserDefined_{widthMm:0.##}x{heightMm:0.##}";
-            var modNode = config["mod"];
-            if (modNode?[paperName] != null) return paperName;
+            var desc = config["data"]?["udm"]?["media"]?["description"];
+            var size = config["data"]?["udm"]?["media"]?["size"];
+            if (desc == null || size == null) return null;
 
-            // 检查同尺寸不同名（与 PIA 3.0 一致）
-            if (modNode != null)
+            var wFmt = widthMm.ToString("0.##");
+            var hFmt = heightMm.ToString("0.##");
+            var paperName = $"自定义 ({wFmt} x {hFmt} 毫米)";
+
+            // 检查同尺寸是否已存在
+            foreach (var child in desc)
             {
-                foreach (var child in modNode)
+                var caps = child.GetValue("caps_type");
+                if (caps != "2") continue;
+                double.TryParse(child.GetValue("media_bounds_urx"), out var urx);
+                double.TryParse(child.GetValue("media_bounds_ury"), out var ury);
+                if (Math.Abs(urx - widthMm) < 0.5 && Math.Abs(ury - heightMm) < 0.5)
                 {
-                    var n = child.NodeName;
-                    if (string.IsNullOrEmpty(n)) continue;
-                    var sxStr = child.GetValue("size_max_x");
-                    var syStr = child.GetValue("size_max_y");
-                    double.TryParse(sxStr, out var sx);
-                    double.TryParse(syStr, out var sy);
-                    if (Math.Abs(sx - widthMm) < 0.5 && Math.Abs(sy - heightMm) < 0.5)
-                        return n;
+                    // 返回已有的 localized_name
+                    var match = size[child.NodeName];
+                    var matchName = match?.GetValue("localized_name");
+                    return !string.IsNullOrWhiteSpace(matchName) ? matchName : child.NodeName;
                 }
             }
 
-            var mediaNode = modNode!.Add(paperName);
-            mediaNode.SetValue("size_max_x", widthMm.ToString("0.##"));
-            mediaNode.SetValue("size_max_y", heightMm.ToString("0.##"));
-            mediaNode.SetValue("printable_max_x", widthMm.ToString("0.##"));
-            mediaNode.SetValue("printable_max_y", heightMm.ToString("0.##"));
-            mediaNode.SetValue("hard_clip_ll_x", "0");
-            mediaNode.SetValue("hard_clip_ll_y", "0");
-            mediaNode.SetValue("hard_clip_ur_x", widthMm.ToString("0.##"));
-            mediaNode.SetValue("hard_clip_ur_y", heightMm.ToString("0.##"));
+            // 找下一个可用索引
+            var maxIdx = 0;
+            foreach (var child in desc)
+                if (int.TryParse(child.NodeName, out var idx) && idx > maxIdx)
+                    maxIdx = idx;
+            var index = (maxIdx + 1).ToString();
+
+            // 添加 description 条目
+            var area = widthMm * heightMm;
+            var descName = $"UserDefinedMetric 自定义 {wFmt}W x {hFmt}H - (0, 0) x ({wFmt}, {hFmt}) ={area:0.} 毫米";
+            var descEntry = desc.Add(index);
+            descEntry.SetValue("caps_type", "2");
+            descEntry.SetValue("dimensional", "TRUE");
+            descEntry.SetValue("media_bounds_urx", widthMm.ToString("0.##"));
+            descEntry.SetValue("media_bounds_ury", heightMm.ToString("0.##"));
+            descEntry.SetValue("name", descName);
+            descEntry.SetValue("printable_area", area.ToString("0.##"));
+            descEntry.SetValue("printable_bounds_llx", "0.0");
+            descEntry.SetValue("printable_bounds_lly", "0.0");
+            descEntry.SetValue("printable_bounds_urx", widthMm.ToString("0.##"));
+            descEntry.SetValue("printable_bounds_ury", heightMm.ToString("0.##"));
+
+            // 添加 size 条目
+            var sizeEntry = size.Add(index);
+            sizeEntry.SetValue("caps_type", "2");
+            sizeEntry.SetValue("landscape_mode", "TRUE");
+            sizeEntry.SetValue("localized_name", paperName);
+            sizeEntry.SetValue("media_description_name", descName);
+            sizeEntry.SetValue("media_group", "15");
+            sizeEntry.SetValue("name", paperName);
 
             config.Saves(pmpPath);
             return paperName;
@@ -313,7 +338,24 @@ public static class PmpCustomPaper
         try
         {
             var config = new PlotterConfiguration(pmpPath);
-            config["mod"]?.Remove(paperName);
+            var desc = config["data"]?["udm"]?["media"]?["description"];
+            var size = config["data"]?["udm"]?["media"]?["size"];
+            if (desc == null || size == null) return;
+
+            // 在 size 中找匹配 localized_name 的条目
+            string? targetIndex = null;
+            foreach (var child in size)
+            {
+                if (child.GetValue("localized_name") == paperName)
+                {
+                    targetIndex = child.NodeName;
+                    break;
+                }
+            }
+            if (targetIndex == null) return;
+
+            desc.Remove(targetIndex);
+            size.Remove(targetIndex);
             config.Saves(pmpPath);
         }
         catch { }
