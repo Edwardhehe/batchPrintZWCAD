@@ -21,17 +21,24 @@ public static class CadMenuInstaller
 
 #if ACAD_CORE
             WriteMessage("\n批量打印插件已加载。使用命令: ZBP_SHOW_PANEL / ZBP_SINGLE_PLOT / ZBP_RECTANGLE_BATCH_PLOT");
-            return;
+            var acadApplication = GetAcadApplication();
+            var menuBar = acadApplication == null ? null : GetProperty(acadApplication, "MenuBar");
+            var menuGroups = acadApplication == null ? null : GetProperty(acadApplication, "MenuGroups");
 #else
             var menuBar = CadApp.MenuBar;
             var menuGroups = CadApp.MenuGroups;
+#endif
             if (menuBar == null || menuGroups == null)
             {
                 WriteMessage("\n批量打印菜单未创建。使用命令: ZBP_SHOW_PANEL / ZBP_SINGLE_PLOT / ZBP_RECTANGLE_BATCH_PLOT");
                 return;
             }
 
+#if ACAD_CORE
+            var menuGroup = InvokeItem(menuGroups, "ACAD") ?? InvokeItem(menuGroups, 0);
+#else
             var menuGroup = InvokeItem(menuGroups, 0);
+#endif
             if (menuGroup == null)
             {
                 WriteMessage("\n批量打印插件已加载，但未取得默认菜单组。");
@@ -84,7 +91,6 @@ public static class CadMenuInstaller
             TryInvoke(menu, "InsertInMenuBar", menuCount);
 
             WriteMessage("\n批量打印菜单已加载。");
-#endif
         }
         catch (Exception ex)
         {
@@ -165,10 +171,50 @@ public static class CadMenuInstaller
         return null;
     }
 
-    private static object? InvokeItem(object collection, int index)
+    private static object? InvokeItem(object collection, object index)
     {
         return TryInvoke(collection, "Item", index);
     }
+
+    private static object? GetStaticProperty(Type target, string name)
+    {
+        try
+        {
+            return target.InvokeMember(name, BindingFlags.GetProperty | BindingFlags.Static | BindingFlags.Public, null, null, null);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+#if ACAD_CORE
+    private static object? GetAcadApplication()
+    {
+        var applicationTypeNames = new[]
+        {
+            "Autodesk.AutoCAD.ApplicationServices.Application, AcMgd",
+            "Autodesk.AutoCAD.ApplicationServices.Core.Application, AcCoreMgd"
+        };
+
+        foreach (var typeName in applicationTypeNames)
+        {
+            var type = Type.GetType(typeName, throwOnError: false);
+            if (type == null)
+            {
+                continue;
+            }
+
+            var acadApplication = GetStaticProperty(type, "AcadApplication");
+            if (acadApplication != null)
+            {
+                return acadApplication;
+            }
+        }
+
+        return null;
+    }
+#endif
 
     private static object? GetProperty(object target, string name)
     {
