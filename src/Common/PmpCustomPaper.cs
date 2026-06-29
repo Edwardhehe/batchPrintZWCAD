@@ -164,8 +164,8 @@ public static class PmpCustomPaper
         try
         {
             var config = new PlotterConfiguration(pmpPath);
-            var desc = config["data"]?["udm"]?["media"]?["description"];
-            var size = config["data"]?["udm"]?["media"]?["size"];
+            var desc = config["udm"]?["media"]?["description"];
+            var size = config["udm"]?["media"]?["size"];
             if (desc == null || size == null) return null;
 
             var wFmt = widthMm.ToString("0.##");
@@ -338,8 +338,8 @@ public static class PmpCustomPaper
         try
         {
             var config = new PlotterConfiguration(pmpPath);
-            var desc = config["data"]?["udm"]?["media"]?["description"];
-            var size = config["data"]?["udm"]?["media"]?["size"];
+            var desc = config["udm"]?["media"]?["description"];
+            var size = config["udm"]?["media"]?["size"];
             if (desc == null || size == null) return;
 
             // 在 size 中找匹配 localized_name 的条目

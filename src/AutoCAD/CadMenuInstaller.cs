@@ -20,14 +20,14 @@ public static class CadMenuInstaller
             ShowMenuBar();
 
 #if ACAD_CORE
-            WriteMessage("\n批量打印插件已加载。AutoCAD 2025+ Core 版请使用 ZBP_SHOW_PANEL 命令打开主界面。");
+            WriteMessage("\n批量打印插件已加载。使用命令: ZBP_SHOW_PANEL / ZBP_SINGLE_PLOT / ZBP_RECTANGLE_BATCH_PLOT");
             return;
 #else
             var menuBar = CadApp.MenuBar;
             var menuGroups = CadApp.MenuGroups;
             if (menuBar == null || menuGroups == null)
             {
-                WriteMessage("\n批量打印插件已加载，但当前 CAD 未暴露菜单栏接口。");
+                WriteMessage("\n批量打印菜单未创建。使用命令: ZBP_SHOW_PANEL / ZBP_SINGLE_PLOT / ZBP_RECTANGLE_BATCH_PLOT");
                 return;
             }
 
