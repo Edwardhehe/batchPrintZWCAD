@@ -8,28 +8,50 @@ using Microsoft.Win32;
 
 namespace ZwcadBatchPlot;
 
+/// <summary>
+/// AutoCAD 自动加载管理器 — 通过注册表或 Bundle 机制实现插件随 AutoCAD 启动自动加载。
+/// 支持两种模式：
+///   ACAD_CORE（AutoCAD 2025+）：通过 ApplicationPlugins Bundle 机制自动加载；
+///   传统 AutoCAD：通过 HKCU\Software\Autodesk\AutoCAD\...\Applications 注册表键实现按需加载。
+/// </summary>
 public static class AutoloadManager
 {
+    /// <summary>注册表中的应用键名</summary>
     private const string AppKeyName = "AcadBatchPlot";
+    /// <summary>注册表中显示的应用描述</summary>
     private const string AppDescription = "AutoCAD批量打印插件";
+    /// <summary>AutoCAD 注册表根路径</summary>
     private const string AcadRoot = @"Software\Autodesk\AutoCAD";
+    /// <summary>ApplicationPlugins Bundle 目录名</summary>
     private const string BundleName = "AcadBatchPlot.bundle";
 
+    /// <summary>当前 DLL 的完整路径</summary>
     public static string CurrentDllPath => Assembly.GetExecutingAssembly().Location;
 
+    /// <summary>
+    /// 安装自动加载。
+    /// 传统模式：在注册表 Applications 下写入 LOADER / LOADCTRLS / MANAGED 等键值；
+    /// Core 模式：将 DLL 及依赖复制到 %AppData%/Autodesk/ApplicationPlugins/ 下的 Bundle 目录。
+    /// </summary>
+    /// <param name="dllPath">可选，指定要注册的 DLL 路径；为空则使用当前程序集路径</param>
+    /// <returns>注册到的 Applications 根路径列表</returns>
     public static IReadOnlyList<string> Install(string? dllPath = null)
     {
 #if ACAD_CORE
+        // AutoCAD 2025+ Core 模式：通过 Bundle 机制安装
         var bundlePath = InstallCoreBundle(dllPath);
         return new[] { bundlePath };
 #else
+        // 传统 AutoCAD：通过注册表 Applications 键实现自加载
         dllPath = string.IsNullOrWhiteSpace(dllPath) ? CurrentDllPath : Path.GetFullPath(dllPath);
+        // 扫描所有 AutoCAD 版本的 Applications 注册表路径
         var roots = GetApplicationRoots().ToList();
         if (roots.Count == 0)
         {
             throw new InvalidOperationException("未找到AutoCAD自加载注册表位置。请先启动一次AutoCAD。");
         }
 
+        // 在每个版本的 Applications 下写入自加载注册表项
         foreach (var applicationsRoot in roots)
         {
             using var key = Registry.CurrentUser.CreateSubKey(applicationsRoot + "\\" + AppKeyName);
@@ -38,9 +60,13 @@ public static class AutoloadManager
                 continue;
             }
 
+            // DESCRIPTION: 插件描述
             key.SetValue("DESCRIPTION", AppDescription, RegistryValueKind.String);
+            // LOADCTRLS: 2 = 在 AutoCAD 启动时加载
             key.SetValue("LOADCTRLS", 2, RegistryValueKind.DWord);
+            // LOADER: 要加载的 DLL 路径
             key.SetValue("LOADER", dllPath, RegistryValueKind.String);
+            // MANAGED: 1 = .NET 托管程序集
             key.SetValue("MANAGED", 1, RegistryValueKind.DWord);
         }
 
@@ -48,6 +74,12 @@ public static class AutoloadManager
 #endif
     }
 
+    /// <summary>
+    /// 卸载自动加载。
+    /// Core 模式：删除 Bundle 目录下的 PackageContents.xml 并清理整个 Bundle；
+    /// 传统模式：遍历所有 AutoCAD 版本，删除 Applications 下的注册表子键。
+    /// </summary>
+    /// <returns>成功清理的注册表项或文件数量</returns>
     public static int Uninstall()
     {
 #if ACAD_CORE
@@ -58,9 +90,11 @@ public static class AutoloadManager
             removed += DisableAndDeleteCoreBundle(bundlePath);
         }
 
+        // 同时清理可能残留的传统注册表项
         removed += RemoveRegistryAutoloadEntries();
         return removed;
 #else
+        // 遍历所有 AutoCAD 版本的 Applications 路径，删除自加载子键
         var removed = 0;
         foreach (var applicationsRoot in GetApplicationRoots())
         {
@@ -84,6 +118,13 @@ public static class AutoloadManager
 #endif
     }
 
+    /// <summary>
+    /// 检测自动加载是否已安装。
+    /// Core 模式：检查 Bundle 目录下是否存在 PackageContents.xml；
+    /// 传统模式：检查注册表 Applications 下是否存在 LOADER 值。
+    /// </summary>
+    /// <param name="dllPath">输出已注册的 DLL 路径</param>
+    /// <returns>是否已安装自动加载</returns>
     public static bool IsInstalled(out string dllPath)
     {
 #if ACAD_CORE
@@ -109,6 +150,10 @@ public static class AutoloadManager
     }
 
 #if ACAD_CORE
+    /// <summary>
+    /// Core 模式安装：将 DLL 及依赖文件复制到 %AppData%/Autodesk/ApplicationPlugins/ 下的 Bundle 目录，
+    /// 并生成 PackageContents.xml 和菜单 .mnu 文件，使 AutoCAD 2025+ 启动时自动加载。
+    /// </summary>
     private static string InstallCoreBundle(string? dllPath)
     {
         dllPath = string.IsNullOrWhiteSpace(dllPath) ? CurrentDllPath : Path.GetFullPath(dllPath);
@@ -117,15 +162,19 @@ public static class AutoloadManager
             throw new FileNotFoundException("当前插件 DLL 不存在，无法安装自动加载。", dllPath);
         }
 
+        // 先清理可能残留的传统注册表自加载项
         RemoveRegistryAutoloadEntries();
 
         var sourceDir = Path.GetDirectoryName(dllPath)
             ?? throw new InvalidOperationException("无法定位当前插件目录，不能安装自动加载。");
+        // Bundle 目录：%AppData%/Autodesk/ApplicationPlugins/AcadBatchPlot.bundle/
         var bundlePath = GetBundlePath();
+        // 每次安装使用带版本号和时间戳的子文件夹，便于区分不同版本
         var installFolderName = BuildInstallFolderName();
         var contentsPath = Path.Combine(bundlePath, "Contents", installFolderName);
         Directory.CreateDirectory(contentsPath);
 
+        // 复制 DLL、JSON、config 文件
         foreach (var pattern in new[] { "*.dll", "*.json", "*.config" })
         {
             foreach (var file in Directory.GetFiles(sourceDir, pattern, SearchOption.TopDirectoryOnly))
@@ -134,20 +183,29 @@ public static class AutoloadManager
             }
         }
 
+        // 复制运行时依赖目录和绘图仪配置目录
         CopyDirectoryIfExists(Path.Combine(sourceDir, "runtimes"), Path.Combine(contentsPath, "runtimes"));
         CopyDirectoryIfExists(Path.Combine(sourceDir, "Plotters"), Path.Combine(contentsPath, "Plotters"));
 
+        // 生成 PackageContents.xml（AutoCAD Bundle 描述文件）和菜单 .mnu 文件
         File.WriteAllText(Path.Combine(bundlePath, "PackageContents.xml"), BuildPackageContents(Path.GetFileName(dllPath), installFolderName));
         File.WriteAllText(Path.Combine(contentsPath, "AcadBatchPlot.mnu"), BuildMenuFile());
         return bundlePath;
     }
 
+    /// <summary>
+    /// 获取 Bundle 安装路径：%AppData%/Autodesk/ApplicationPlugins/AcadBatchPlot.bundle/
+    /// </summary>
     private static string GetBundlePath()
     {
         var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
         return Path.Combine(appData, "Autodesk", "ApplicationPlugins", BundleName);
     }
 
+    /// <summary>
+    /// 禁用并删除 Core Bundle：先删除 PackageContents.xml 使 AutoCAD 不再加载，
+    /// 再删除 .mnu 文件并尝试清理整个 Bundle 目录。
+    /// </summary>
     private static int DisableAndDeleteCoreBundle(string bundlePath)
     {
         var removed = 0;
@@ -172,12 +230,19 @@ public static class AutoloadManager
         return removed;
     }
 
+    /// <summary>
+    /// 构建安装文件夹名：v{版本号}-{时间戳}，确保每次安装使用独立目录。
+    /// </summary>
     private static string BuildInstallFolderName()
     {
         var version = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.0.0.0";
         return "v" + version + "-" + DateTime.Now.ToString("yyyyMMddHHmmssfff");
     }
 
+    /// <summary>
+    /// 生成 Bundle 描述文件 PackageContents.xml。
+    /// 包含组件定义（.Net 程序集 + .mnu 菜单文件）、自动加载配置及所有注册命令列表。
+    /// </summary>
     private static string BuildPackageContents(string dllName, string installFolderName)
     {
         var escapedInstallFolderName = SecurityElement.Escape(installFolderName);
@@ -206,6 +271,9 @@ public static class AutoloadManager
 ";
     }
 
+    /// <summary>
+    /// 生成 AutoCAD 菜单 .mnu 文件，定义批量打印菜单栏及其所有命令项。
+    /// </summary>
     private static string BuildMenuFile()
     {
         return @"***MENUGROUP=ACADBATCHPLOT
@@ -225,6 +293,7 @@ ID_ZBP_RELOAD_MENU [刷新菜单]ZBP_RELOAD_MENU
 ";
     }
 
+    /// <summary>递归复制整个目录及其所有文件到目标位置。</summary>
     private static void CopyDirectoryIfExists(string sourceDir, string targetDir)
     {
         if (!Directory.Exists(sourceDir))
@@ -241,6 +310,7 @@ ID_ZBP_RELOAD_MENU [刷新菜单]ZBP_RELOAD_MENU
         }
     }
 
+    /// <summary>计算相对路径，使用 URI 机制处理路径分隔符差异。</summary>
     private static string GetRelativePath(string basePath, string path)
     {
         var baseUri = new Uri(AppendDirectorySeparatorChar(Path.GetFullPath(basePath)));
@@ -249,6 +319,7 @@ ID_ZBP_RELOAD_MENU [刷新菜单]ZBP_RELOAD_MENU
             .Replace('/', Path.DirectorySeparatorChar);
     }
 
+    /// <summary>确保路径以目录分隔符结尾。</summary>
     private static string AppendDirectorySeparatorChar(string path)
     {
         return path.EndsWith(Path.DirectorySeparatorChar.ToString(), StringComparison.Ordinal)
@@ -256,6 +327,10 @@ ID_ZBP_RELOAD_MENU [刷新菜单]ZBP_RELOAD_MENU
             : path + Path.DirectorySeparatorChar;
     }
 
+    /// <summary>
+    /// 清理传统注册表自加载项：遍历所有 AutoCAD 版本/配置文件的 Applications 路径，
+    /// 删除 AppKeyName 子键。
+    /// </summary>
     private static int RemoveRegistryAutoloadEntries()
     {
         var removed = 0;
@@ -296,6 +371,7 @@ ID_ZBP_RELOAD_MENU [刷新菜单]ZBP_RELOAD_MENU
         return removed;
     }
 
+    /// <summary>安全删除目录：先清空所有子文件，再从深层到浅层逐层删除空目录。</summary>
     private static void TryDeleteDirectory(string path)
     {
         if (!Directory.Exists(path))
@@ -335,6 +411,7 @@ ID_ZBP_RELOAD_MENU [刷新菜单]ZBP_RELOAD_MENU
         }
     }
 
+    /// <summary>安全删除文件：先清除只读属性再删除。</summary>
     private static void TryDeleteFile(string path)
     {
         try
@@ -351,6 +428,10 @@ ID_ZBP_RELOAD_MENU [刷新菜单]ZBP_RELOAD_MENU
     }
 #endif
 
+    /// <summary>
+    /// 枚举所有已安装 AutoCAD 版本的 Applications 注册表路径。
+    /// 注册表结构：HKCU\Software\Autodesk\AutoCAD\R{version}\ACAD-{product}:{locale}\Applications
+    /// </summary>
     private static IEnumerable<string> GetApplicationRoots()
     {
         using var root = Registry.CurrentUser.OpenSubKey(AcadRoot);
@@ -359,8 +440,8 @@ ID_ZBP_RELOAD_MENU [刷新菜单]ZBP_RELOAD_MENU
             yield break;
         }
 
-        // AutoCAD registry structure:
-        // HKCU\Software\Autodesk\AutoCAD\R{version}\ACAD-{product}:{locale}\Applications
+        // 注册表结构：
+        // HKCU\Software\Autodesk\AutoCAD\R{版本号}\ACAD-{产品}:{语言}\Applications
         foreach (var version in root.GetSubKeyNames().OrderByDescending(x => x, StringComparer.OrdinalIgnoreCase))
         {
             if (!version.StartsWith("R", StringComparison.OrdinalIgnoreCase))
