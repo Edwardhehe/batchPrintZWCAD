@@ -58,9 +58,6 @@ public static class CadMenuInstaller
                 return;
             }
 
-            // 清理可能残留的同名工具栏
-            RemoveToolbar(menuGroup, MenuName);
-
             // 菜单已存在时的处理
             var existing = FindNamedItem(menuBar, MenuName);
             if (existing != null)
@@ -140,23 +137,6 @@ public static class CadMenuInstaller
         catch
         {
         }
-    }
-
-    /// <summary>
-    /// 删除指定名称的工具栏。
-    /// </summary>
-    private static void RemoveToolbar(object? menuGroup, string name)
-    {
-        if (menuGroup == null)
-            return;
-
-        var toolbars = GetProperty(menuGroup, "Toolbars");
-        if (toolbars == null)
-            return;
-
-        var existing = FindNamedItem(toolbars, name);
-        if (existing != null)
-            TryInvoke(existing, "Delete");
     }
 
     /// <summary>

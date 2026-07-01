@@ -18,6 +18,7 @@
   <ItemGroup>
     <Compile Remove="FileTools\**\*.cs" />
     <Compile Remove="src\AutoCAD\**\*.cs" />
+    <Compile Remove="src\PianNoCN\**\*.cs" />
     <Compile Remove="lib\**\*.cs" />
     <Compile Remove="local-artifacts\**\*.cs" />
     <Compile Remove="tests\**\*.cs" />
@@ -55,6 +56,9 @@
       <HintPath>C:\Program Files\ZWSOFT\ZWCAD Enterprise\ZwDatabaseMgd.dll</HintPath>
       <Private>false</Private>
     </Reference>
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="src\PianNoCN\PianNoCN.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />

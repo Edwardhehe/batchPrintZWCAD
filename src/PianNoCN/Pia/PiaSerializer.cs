@@ -143,7 +143,7 @@ public static class PiaSerializer
         stream.Write(Encoding.Default.GetBytes("\0"), 0, 1);
     }
 
-    internal static string SerializeNode(this PiaNode node, int level = 0)
+    public static string SerializeNode(this PiaNode node, int level = 0)
     {
         if (node is null)
             throw new ArgumentNullException(nameof(node));

@@ -20,8 +20,9 @@
   <ItemGroup>
     <Compile Include="src\Common\**\*.cs" />
     <Compile Include="src\AutoCAD\**\*.cs" />
-    <Compile Include="src\PianNoCN\**\*.cs" />
     <EmbeddedResource Include="src\AutoCAD\**\*.resx" />
+
+    <ProjectReference Include="src\PianNoCN\PianNoCN.csproj" />
     <None Remove="src\AutoCAD\**\*" />
   </ItemGroup>
 

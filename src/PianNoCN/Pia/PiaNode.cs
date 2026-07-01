@@ -50,21 +50,21 @@ public class PiaNode : ICloneable, IEquatable<PiaNode>, IEnumerable<PiaNode>
         ChildNodes.Clear();
     }
 
-    protected internal string GetValue(string key)
+    public string GetValue(string key)
     {
         if (string.IsNullOrEmpty(key))
             throw new ArgumentException("Value cannot be null or empty.", nameof(key));
         return NodeMap.TryGetValue(key, out var value) ? value : NodeMap[key] = string.Empty;
     }
 
-    protected internal void SetValue(string key, string value)
+    public void SetValue(string key, string value)
     {
         if (string.IsNullOrEmpty(key))
             throw new ArgumentException("Value cannot be null or empty.", nameof(key));
         NodeMap[key] = value;
     }
 
-    protected internal static Color? GetColor(string input)
+    public static Color? GetColor(string input)
     {
         var colorVal = int.Parse(input);
         return colorVal == -1 ? null : Color.FromArgb(colorVal);

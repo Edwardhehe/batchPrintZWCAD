@@ -5,7 +5,7 @@ namespace PiaNO;
 
 public abstract class PiaFile : PiaNode
 {
-    public PiaHeader? Header { get; internal set; }
+    public PiaHeader? Header { get; set; }
 
     public string? PiaFileName;
 
