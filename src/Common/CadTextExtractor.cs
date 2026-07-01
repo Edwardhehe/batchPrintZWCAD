@@ -3,8 +3,13 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Text.RegularExpressions;
+#if ZWCAD
 using ZwSoft.ZwCAD.DatabaseServices;
 using ZwSoft.ZwCAD.Geometry;
+#else
+using Autodesk.AutoCAD.DatabaseServices;
+using Autodesk.AutoCAD.Geometry;
+#endif
 
 namespace ZwcadBatchPlot;
 
@@ -32,7 +37,7 @@ public static class CadTextExtractor
         }
         catch
         {
-            // Older ZWCAD versions may not expose dynamic-block metadata reliably.
+            // Older CAD versions may not expose dynamic-block metadata reliably.
         }
 
         var btr = (BlockTableRecord)tr.GetObject(definitionId, OpenMode.ForRead);
@@ -40,6 +45,15 @@ public static class CadTextExtractor
     }
 
     public static OwnerTextCache BuildOwnerTextCache(Transaction tr, BlockTableRecord owner)
+    {
+        return BuildOwnerTextCache(tr, owner, null);
+    }
+
+    /// <summary>
+    /// 建立布局文字缓存。传入 libraryBlockNames 时仅递归遍历图框库中注册的块，
+    /// 避免对图纸中无关块（家具、符号等）的定义树做无意义遍历。
+    /// </summary>
+    public static OwnerTextCache BuildOwnerTextCache(Transaction tr, BlockTableRecord owner, HashSet<string>? libraryBlockNames)
     {
         var values = new List<TextCandidate>();
         foreach (ObjectId id in owner)
@@ -53,7 +67,11 @@ public static class CadTextExtractor
             {
                 if (!IsBlockClipped(tr, ownerBlock))
                 {
-                    CollectOwnerBlockTextForCache(tr, ownerBlock, values);
+                    // 若提供了库名列表，只递归遍历匹配的块，大幅减少无意义遍历
+                    if (libraryBlockNames == null || libraryBlockNames.Contains(GetBlockName(ownerBlock, tr)))
+                    {
+                        CollectOwnerBlockTextForCache(tr, ownerBlock, values);
+                    }
                 }
                 continue;
             }
@@ -74,9 +92,6 @@ public static class CadTextExtractor
     {
         if (entity is AttributeDefinition attributeDefinition)
         {
-            // A standalone ATTDEF pasted outside the title-block reference is
-            // displayed and edited through its tag. TextString remains the
-            // original template value (for example "图纸名称" or "1").
             text = string.IsNullOrWhiteSpace(attributeDefinition.Tag)
                 ? GetAttributeText(attributeDefinition)
                 : attributeDefinition.Tag;
@@ -147,8 +162,6 @@ public static class CadTextExtractor
             return "";
         }
 
-        // Attribute and owner-space text represent the current drawing instance.
-        // Block definition text is only a fallback for title blocks made of static text.
         var bestPriority = values.Min(x => x.Priority);
         return string.Join(" ", values
             .Where(x => x.Priority == bestPriority)
@@ -223,6 +236,30 @@ public static class CadTextExtractor
         catch
         {
         }
+
+        if (TryGetOwnerBlockName(ownerBlock, tr, out var blockName))
+        {
+            AddText(values, blockName, ownerBlock.Position, TextSourcePriority.OwnerSpace);
+        }
+    }
+
+    private static bool TryGetOwnerBlockName(BlockReference blockRef, Transaction tr, out string blockName)
+    {
+        blockName = GetBlockName(blockRef, tr);
+        if (string.IsNullOrWhiteSpace(blockName))
+        {
+            return false;
+        }
+
+        var trimmed = blockName.Trim();
+        if (trimmed.StartsWith("*", StringComparison.Ordinal)
+            || trimmed.StartsWith("A$C", StringComparison.OrdinalIgnoreCase)
+            || trimmed.IndexOf("$0$", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            return false;
+        }
+
+        return true;
     }
 
     private static bool TryGetText(Entity entity, out string text, out Point3d point)
@@ -514,9 +551,6 @@ public static class CadTextExtractor
                 widthFactor = 1d;
             }
 
-            // ZWCAD/AutoCAD may reject GeometricExtents for visible DBText and
-            // AttributeReference objects. Estimate a conservative text box from
-            // insertion/alignment data so visually overlapping regions still work.
             var halfWidth = Math.Max(height * 0.6d, characterCount * height * widthFactor * 0.45d);
             var halfHeight = height * 0.9d;
             var center = text.Position;
@@ -560,21 +594,37 @@ public static class CadTextExtractor
         var overlapWidth = Math.Max(0, Math.Min(region.MaxX, textBounds.MaxX) - Math.Max(region.MinX, textBounds.MinX));
         var overlapHeight = Math.Max(0, Math.Min(region.MaxY, textBounds.MaxY) - Math.Max(region.MinY, textBounds.MinY));
         var overlapArea = overlapWidth * overlapHeight;
-        var textArea = Math.Max(0, textBounds.MaxX - textBounds.MinX) * Math.Max(0, textBounds.MaxY - textBounds.MinY);
-        if (overlapArea <= 0 || textArea <= 0)
+        if (overlapArea <= 0)
         {
             return false;
         }
 
-        var centerX = (textBounds.MinX + textBounds.MaxX) / 2d;
-        var centerY = (textBounds.MinY + textBounds.MaxY) / 2d;
-        return region.Contains(centerX, centerY) || overlapArea / textArea >= 0.55;
+        var textArea = RectangleArea(textBounds);
+        var regionArea = RectangleArea(region);
+        if (textArea <= 0 || regionArea <= 0)
+        {
+            return false;
+        }
+
+        var textCenterX = (textBounds.MinX + textBounds.MaxX) / 2d;
+        var textCenterY = (textBounds.MinY + textBounds.MaxY) / 2d;
+        if (region.Contains(textCenterX, textCenterY))
+        {
+            return true;
+        }
+
+        var overlapTextRatio = overlapArea / textArea;
+        return overlapTextRatio >= 0.55;
+    }
+
+    private static double RectangleArea(LocalRectangle rectangle)
+    {
+        return Math.Max(0, rectangle.MaxX - rectangle.MinX)
+            * Math.Max(0, rectangle.MaxY - rectangle.MinY);
     }
 
     private static string GetMTextPlainText(MText mText)
     {
-        // Some ZWCAD/AutoCAD APIs expose MText.Text as plain display text, while
-        // Contents keeps inline format codes such as {\W0.75;...}.
         var textProperty = typeof(MText).GetProperty("Text", BindingFlags.Instance | BindingFlags.Public);
         if (textProperty?.GetValue(mText, null) is string plain && !string.IsNullOrWhiteSpace(plain))
         {
@@ -607,7 +657,7 @@ public static class CadTextExtractor
             .Replace("%%p", "±")
             .Trim();
 
-        value = Regex.Replace(value, @"\\[A-Za-z]+\d*(?:\.\d+)?;", "");
+        value = Regex.Replace(value, @"\\[A-Za-z]+[^;{}\\]*;", "");
         value = Regex.Replace(value, @"\\[A-Za-z]+", "");
         value = value.Replace("{", "").Replace("}", "");
         value = Regex.Replace(value, @"\s+", " ").Trim();

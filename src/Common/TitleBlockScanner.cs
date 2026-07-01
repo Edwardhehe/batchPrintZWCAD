@@ -63,6 +63,10 @@ public static class TitleBlockScanner
         using var tr = db.TransactionManager.StartTransaction();
         var blockTable = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
 
+        var libraryBlockNames = new HashSet<string>(
+            library.Blocks.Select(x => x.BlockName).Where(name => !string.IsNullOrWhiteSpace(name)),
+            StringComparer.OrdinalIgnoreCase);
+
         var matchIndex = 0;
         foreach (ObjectId recordId in blockTable)
         {
@@ -82,7 +86,7 @@ public static class TitleBlockScanner
             CadTextExtractor.OwnerTextCache? ownerTextCache = null;
             try
             {
-                ownerTextCache = CadTextExtractor.BuildOwnerTextCache(tr, owner);
+                ownerTextCache = CadTextExtractor.BuildOwnerTextCache(tr, owner, libraryBlockNames);
             }
             catch (Exception ex)
             {

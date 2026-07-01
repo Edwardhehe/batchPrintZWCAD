@@ -1,10 +1,22 @@
 using System;
 using System.IO;
 using System.Linq;
+#if ZWCAD
 using ZwSoft.ZwCAD.ApplicationServices;
 using ZwSoft.ZwCAD.DatabaseServices;
 using ZwSoft.ZwCAD.Geometry;
 using CadApp = ZwSoft.ZwCAD.ApplicationServices.Application;
+#elif ACAD_CORE
+using Autodesk.AutoCAD.ApplicationServices;
+using Autodesk.AutoCAD.DatabaseServices;
+using Autodesk.AutoCAD.Geometry;
+using CadApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
+#else
+using Autodesk.AutoCAD.ApplicationServices;
+using Autodesk.AutoCAD.DatabaseServices;
+using Autodesk.AutoCAD.Geometry;
+using CadApp = Autodesk.AutoCAD.ApplicationServices.Application;
+#endif
 
 namespace ZwcadBatchPlot;
 
@@ -141,7 +153,7 @@ public static class CadTextUpdater
             if (tr.GetObject(attributeId, OpenMode.ForWrite, false) is AttributeReference attribute)
             {
                 var local = attribute.Position.TransformBy(inverse);
-                if (region.Contains(local.X, local.Y))
+                if (IsInRegion(attribute, inverse, region, local))
                 {
                     attribute.TextString = value;
                     changed++;
@@ -156,19 +168,24 @@ public static class CadTextUpdater
                 continue;
             }
 
-            if (tr.GetObject(id, OpenMode.ForWrite, false) is DBText dbText)
+            if (tr.GetObject(id, OpenMode.ForWrite, false) is not Entity entity)
+            {
+                continue;
+            }
+
+            if (entity is DBText dbText)
             {
                 var local = dbText.Position.TransformBy(inverse);
-                if (region.Contains(local.X, local.Y))
+                if (IsInRegion(dbText, inverse, region, local))
                 {
                     dbText.TextString = value;
                     changed++;
                 }
             }
-            else if (tr.GetObject(id, OpenMode.ForWrite, false) is MText mText)
+            else if (entity is MText mText)
             {
                 var local = mText.Location.TransformBy(inverse);
-                if (region.Contains(local.X, local.Y))
+                if (IsInRegion(mText, inverse, region, local))
                 {
                     mText.Contents = value;
                     changed++;
@@ -177,6 +194,43 @@ public static class CadTextUpdater
         }
 
         return changed;
+    }
+
+    private static bool IsInRegion(Entity entity, Matrix3d entityToLocal, LocalRectangle region, Point3d fallbackPoint)
+    {
+        if (TryGetTransformedExtents(entity, entityToLocal, out var extents))
+        {
+            return Intersects(region, extents);
+        }
+
+        return region.Contains(fallbackPoint.X, fallbackPoint.Y);
+    }
+
+    private static bool TryGetTransformedExtents(Entity entity, Matrix3d transform, out LocalRectangle rectangle)
+    {
+        rectangle = new LocalRectangle();
+        try
+        {
+            var extents = entity.GeometricExtents;
+            var points = new[]
+            {
+                new Point3d(extents.MinPoint.X, extents.MinPoint.Y, 0).TransformBy(transform),
+                new Point3d(extents.MinPoint.X, extents.MaxPoint.Y, 0).TransformBy(transform),
+                new Point3d(extents.MaxPoint.X, extents.MinPoint.Y, 0).TransformBy(transform),
+                new Point3d(extents.MaxPoint.X, extents.MaxPoint.Y, 0).TransformBy(transform)
+            };
+
+            rectangle = LocalRectangle.FromPoints(
+                points.Min(p => p.X),
+                points.Min(p => p.Y),
+                points.Max(p => p.X),
+                points.Max(p => p.Y));
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static RegionCoordinateMode GetCoordinateMode(TitleBlockDefinition definition)
@@ -285,6 +339,14 @@ public static class CadTextUpdater
     {
         return Math.Abs(region.MaxX - region.MinX) > 1e-6
             && Math.Abs(region.MaxY - region.MinY) > 1e-6;
+    }
+
+    private static bool Intersects(LocalRectangle a, LocalRectangle b)
+    {
+        return a.MinX <= b.MaxX
+            && a.MaxX >= b.MinX
+            && a.MinY <= b.MaxY
+            && a.MaxY >= b.MinY;
     }
 
     private static Document? FindTargetDocument(PlotJob job, Document currentDocument)

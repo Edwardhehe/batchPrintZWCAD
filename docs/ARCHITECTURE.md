@@ -912,7 +912,6 @@ private static bool IsEntityVisible(Entity entity)
 │   │   ├── AcadPlotterInstaller.cs ← 打印机安装: 复制 LA_pdf.pc3 到CAD目录
 │   │   ├── AutoloadManager.cs    ← 自动加载: 注册表写入/卸载
 │   │   ├── TitleBlockLibraryStore.cs ← 图框库持久化:+ZWCAD迁移逻辑
-│   │   └── ScanDiagnostics.cs    ← 调试命令: 矩形扫描诊断
 │   │
 │   └── ZWCAD/                    ← ZWCAD 专用实现（接口同名，平台适配）
 │       ├── CadTextExtractor.cs   ← 同AutoCAD (XCLIP 过滤 +), 动态块API用try/catch保护

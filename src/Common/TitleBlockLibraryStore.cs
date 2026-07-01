@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Newtonsoft.Json;
@@ -7,8 +8,13 @@ namespace ZwcadBatchPlot;
 
 public static class TitleBlockLibraryStore
 {
+#if ZWCAD
     public static string DefaultDirectory =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ZwcadBatchPlot");
+#else
+    public static string DefaultDirectory =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "AcadBatchPlot");
+#endif
 
     public static string DefaultPath => Path.Combine(DefaultDirectory, "TitleBlockLibrary.json");
 
@@ -119,7 +125,7 @@ public static class TitleBlockLibraryStore
     {
         var json = File.ReadAllText(path);
         var loaded = JsonConvert.DeserializeObject<TitleBlockLibrary>(json) ?? new TitleBlockLibrary();
-        loaded.Blocks ??= new System.Collections.Generic.List<TitleBlockDefinition>();
+        loaded.Blocks ??= new List<TitleBlockDefinition>();
         NormalizeFrameCoordinates(loaded);
         return loaded;
     }

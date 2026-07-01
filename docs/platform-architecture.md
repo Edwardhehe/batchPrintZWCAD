@@ -28,8 +28,6 @@ The following files remain under both `src/ZWCAD/` and `src/AutoCAD/` because th
 | `PlotterService.cs` | Plot engines, media validation, document opening and Core Console support differ substantially. Includes `IsDcsWindow` and `PrepareEditorViewForPlot` guards for UCS-aware printing. |
 | `TitleBlockLibraryStore.cs` | AutoCAD additionally imports/migrates the existing ZWCAD library. |
 
-`src/AutoCAD/ScanDiagnostics.cs` is AutoCAD-only diagnostic tooling.
-
 ## Build constants
 
 - `BatchPlotter.csproj` defines `ZWCAD`.
