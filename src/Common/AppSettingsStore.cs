@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using Newtonsoft.Json;
 
 namespace ZwcadBatchPlot;
@@ -17,6 +19,7 @@ public sealed class AppSettings
     public bool ShowPlotProgress { get; set; } = true;
     public bool AddSequenceWhenPdfExists { get; set; } = false;
     public string PdfFileNameSeparator { get; set; } = "_";
+    public List<string> PdfFileNameFields { get; set; } = new() { "DrawingNumber", "Title" };
     public bool OpenExternalDwgForPlot { get; set; } = true;
     public double DirectoryIndexWidth { get; set; } = 900;
     public double DirectoryNumberWidth { get; set; } = 3200;
@@ -124,6 +127,17 @@ public static class AppSettingsStore
 
         settings.DirectoryTextStyleName ??= "";
         settings.PdfFileNameSeparator ??= "_";
+        if (settings.PdfFileNameFields == null || settings.PdfFileNameFields.Count == 0)
+        {
+            settings.PdfFileNameFields = new List<string> { "DrawingNumber", "Title" };
+        }
+        else
+        {
+            // 去重，防止旧版 UI 产生的重复项
+            settings.PdfFileNameFields = settings.PdfFileNameFields
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
 
         return settings;
     }

@@ -135,6 +135,27 @@ public sealed partial class BatchPlotCommands
                 return;
             }
 
+            // 可选字段（日期/版次/设计阶段）框选
+            LocalRectangle dateRegion;
+            LocalRectangle revisionRegion;
+            LocalRectangle phaseRegion;
+            using (var fieldDialog = new FieldBoxSelectDialog(editor, inverse))
+            {
+                if (ShowModalDialog(fieldDialog) != DialogResult.OK)
+                {
+                    AddBlockLog("Optional field selection cancelled.");
+                    return;
+                }
+
+                dateRegion = fieldDialog.DateRegion;
+                revisionRegion = fieldDialog.RevisionRegion;
+                phaseRegion = fieldDialog.PhaseRegion;
+            }
+
+            if (dateRegion.HasArea()) AddBlockLog($"Date region: ({dateRegion.MinX:0.###},{dateRegion.MinY:0.###})-({dateRegion.MaxX:0.###},{dateRegion.MaxY:0.###})");
+            if (revisionRegion.HasArea()) AddBlockLog($"Revision region: ({revisionRegion.MinX:0.###},{revisionRegion.MinY:0.###})-({revisionRegion.MaxX:0.###},{revisionRegion.MaxY:0.###})");
+            if (phaseRegion.HasArea()) AddBlockLog($"Phase region: ({phaseRegion.MinX:0.###},{phaseRegion.MinY:0.###})-({phaseRegion.MaxX:0.###},{phaseRegion.MaxY:0.###})");
+
             var printExtents = hasPrintRegion
                 ? TransformRegion(printRegion, blockTransform)
                 : blockExtents;
@@ -168,6 +189,9 @@ public sealed partial class BatchPlotCommands
                 PaperHeightMm = paperForm.PaperHeightMm,
                 TitleRegion = ToFrameRelative(titleRegion, referenceFrame),
                 DrawingNumberRegion = ToFrameRelative(numberRegion, referenceFrame),
+                DateRegion = dateRegion.HasArea() ? ToFrameRelative(dateRegion, referenceFrame) : new LocalRectangle(),
+                RevisionRegion = revisionRegion.HasArea() ? ToFrameRelative(revisionRegion, referenceFrame) : new LocalRectangle(),
+                PhaseRegion = phaseRegion.HasArea() ? ToFrameRelative(phaseRegion, referenceFrame) : new LocalRectangle(),
                 CreatedAt = now,
                 UpdatedAt = now
             };

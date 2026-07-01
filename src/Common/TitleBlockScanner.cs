@@ -137,6 +137,9 @@ public static class TitleBlockScanner
                 Extents3d extents;
                 LocalRectangle titleRegion;
                 LocalRectangle numberRegion;
+                LocalRectangle dateRegion = new();
+                LocalRectangle revisionRegion = new();
+                LocalRectangle phaseRegion = new();
                 RegionCoordinateMode coordinateMode;
                 LocalRectangle referenceFrame;
                 try
@@ -146,6 +149,15 @@ public static class TitleBlockScanner
                     extents = ResolveWorldExtents(definition, blockRef, coordinateMode, referenceFrame);
                     titleRegion = ResolveLocalRegion(definition.TitleRegion, effectiveBlockTransform, coordinateMode, referenceFrame);
                     numberRegion = ResolveLocalRegion(definition.DrawingNumberRegion, effectiveBlockTransform, coordinateMode, referenceFrame);
+                    dateRegion = definition.DateRegion.HasArea()
+                        ? ResolveLocalRegion(definition.DateRegion, effectiveBlockTransform, coordinateMode, referenceFrame)
+                        : new LocalRectangle();
+                    revisionRegion = definition.RevisionRegion.HasArea()
+                        ? ResolveLocalRegion(definition.RevisionRegion, effectiveBlockTransform, coordinateMode, referenceFrame)
+                        : new LocalRectangle();
+                    phaseRegion = definition.PhaseRegion.HasArea()
+                        ? ResolveLocalRegion(definition.PhaseRegion, effectiveBlockTransform, coordinateMode, referenceFrame)
+                        : new LocalRectangle();
                 }
                 catch (Exception ex)
                 {
@@ -169,10 +181,19 @@ public static class TitleBlockScanner
                 var paper = ApplyFixedPaper(definition, detectedPaper);
                 string title;
                 string number;
+                string date = "";
+                string revision = "";
+                string phase = "";
                 try
                 {
                     title = CadTextExtractor.ExtractRegionText(tr, blockRef, owner, titleRegion, ownerTextCache);
                     number = CadTextExtractor.ExtractRegionText(tr, blockRef, owner, numberRegion, ownerTextCache);
+                    if (dateRegion.HasArea())
+                        date = CadTextExtractor.ExtractRegionText(tr, blockRef, owner, dateRegion, ownerTextCache);
+                    if (revisionRegion.HasArea())
+                        revision = CadTextExtractor.ExtractRegionText(tr, blockRef, owner, revisionRegion, ownerTextCache);
+                    if (phaseRegion.HasArea())
+                        phase = CadTextExtractor.ExtractRegionText(tr, blockRef, owner, phaseRegion, ownerTextCache);
                 }
                 catch (Exception ex)
                 {
@@ -211,8 +232,14 @@ public static class TitleBlockScanner
                     MatchIndex = matchIndex++,
                     DrawingNumber = number,
                     Title = title,
+                    Date = date,
+                    Revision = revision,
+                    Phase = phase,
                     CadDrawingNumber = number,
                     CadTitle = title,
+                    CadDate = date,
+                    CadRevision = revision,
+                    CadPhase = phase,
                     PaperName = paper.PaperName,
                     ScaleText = paper.ScaleText,
                     SizeText = $"{Math.Abs(width):0.##} x {Math.Abs(height):0.##}",
@@ -637,9 +664,8 @@ public static class TitleBlockScanner
     }
 
     /// <summary>
-    /// When a top-level block reference doesn't directly match the library, peek one level
-    /// deeper into its definition for nested block references that do match (e.g. the visible
-    /// inner block of a dynamic-block container with visibility states).
+    /// When a top-level block reference doesn't directly match the library, recursively
+    /// search nested blocks up to 6 levels deep for a visible inner block that matches.
     /// </summary>
     private static TitleBlockDefinition? ResolveNestedLibraryMatch(
         Transaction tr,
@@ -656,6 +682,23 @@ public static class TitleBlockScanner
         }
 
         var definition = (BlockTableRecord)tr.GetObject(definitionId, OpenMode.ForRead);
+        return ResolveNestedLibraryMatchRecursive(tr, definition, Matrix3d.Identity, library, out nestedTransform, new HashSet<ObjectId>(), 0);
+    }
+
+    private static TitleBlockDefinition? ResolveNestedLibraryMatchRecursive(
+        Transaction tr,
+        BlockTableRecord definition,
+        Matrix3d accumulatedTransform,
+        TitleBlockLibrary library,
+        out Matrix3d nestedTransform,
+        ISet<ObjectId> visited,
+        int depth)
+    {
+        nestedTransform = Matrix3d.Identity;
+        if (depth > 6 || !visited.Add(definition.ObjectId))
+        {
+            return null;
+        }
 
         foreach (ObjectId id in definition)
         {
@@ -664,7 +707,6 @@ public static class TitleBlockScanner
                 continue;
             }
 
-            // Skip nested blocks hidden by dynamic-block visibility states.
             if (!IsEntityVisible(nested))
             {
                 continue;
@@ -684,11 +726,28 @@ public static class TitleBlockScanner
                 string.Equals(x.BlockName, nestedName, StringComparison.OrdinalIgnoreCase));
             if (match != null)
             {
-                nestedTransform = nested.BlockTransform;
+                nestedTransform = nested.BlockTransform * accumulatedTransform;
                 return match;
+            }
+
+            // 继续向更深层搜索
+            try
+            {
+                var nestedDef = (BlockTableRecord)tr.GetObject(nested.BlockTableRecord, OpenMode.ForRead);
+                var innerTransform = nested.BlockTransform * accumulatedTransform;
+                var deeper = ResolveNestedLibraryMatchRecursive(tr, nestedDef, innerTransform, library, out var deeperTransform, visited, depth + 1);
+                if (deeper != null)
+                {
+                    nestedTransform = deeperTransform;
+                    return deeper;
+                }
+            }
+            catch
+            {
             }
         }
 
+        visited.Remove(definition.ObjectId);
         return null;
     }
 

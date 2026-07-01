@@ -148,7 +148,9 @@ public static class PaperSizeDetector
 
     private static PaperDetection ToDetection(PaperCandidate best)
     {
-        var paperName = best.IsLong ? best.Paper.Name + "+" : best.Paper.Name;
+        var paperName = best.IsLong
+            ? best.Paper.Name + "+" + LongPaperExtension(best.PaperWidthMm, best.PaperHeightMm, best.Paper)
+            : best.Paper.Name;
         var paperSizeText = $"{best.PaperWidthMm:0.##} x {best.PaperHeightMm:0.##} mm";
         return new PaperDetection
         {
@@ -256,6 +258,21 @@ public static class PaperSizeDetector
     {
         var quarters = Math.Max(5, (int)Math.Round(measuredLong / standardLong * 4, MidpointRounding.AwayFromZero));
         return standardLong * quarters / 4d;
+    }
+
+    private static string LongPaperExtension(double paperWidthMm, double paperHeightMm, StandardPaper standard)
+    {
+        var longSide = Math.Max(paperWidthMm, paperHeightMm);
+        var quarters = (int)Math.Round(longSide / standard.LongSide * 4, MidpointRounding.AwayFromZero);
+        var ext = quarters - 4;
+        if (ext <= 0) return "";
+        return ext switch
+        {
+            1 => "1/4",
+            2 => "1/2",
+            3 => "3/4",
+            _ => $"{ext}/4"
+        };
     }
 
     private static PaperDetection FallbackDetect(double actualWidth, double actualHeight)

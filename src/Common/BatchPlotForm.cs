@@ -178,9 +178,6 @@ public sealed class BatchPlotForm : Form
         var openLogButton = MakeButton("打开日志", 92);
         openLogButton.Click += (_, _) => OpenLastLog();
 
-        var settingsButton = MakeButton("设置", 72);
-        settingsButton.Click += (_, _) => ShowSettings();
-
         var chooseOutputButton = MakeButton("浏览...", 84);
         chooseOutputButton.Click += (_, _) => ChooseOutputDirectory();
 
@@ -219,7 +216,6 @@ public sealed class BatchPlotForm : Form
         SetTip(generateDirectoryButton, "在当前 CAD 指定基点，生成图纸目录表。");
         SetTip(splitDwgButton, "按当前勾选图纸拆成单独 DWG。模型空间生成轻量新图，布局空间保留原模型并清理目标布局。");
         SetTip(openLogButton, "打开最近一次运行日志。");
-        SetTip(settingsButton, "打开批量打印设置。");
         SetTip(chooseOutputButton, "选择 PDF 输出目录。");
         SetTip(currentFolderButton, "输出到所选 CAD 文件所在目录。");
         SetTip(currentPdfButton, "输出到所选 CAD 文件所在目录下的 PDF 文件夹。");
@@ -269,8 +265,6 @@ public sealed class BatchPlotForm : Form
         actionRow.Controls.Add(splitDwgButton);
         actionRow.Controls.Add(MakeSeparator());
         actionRow.Controls.Add(openLogButton);
-        actionRow.Controls.Add(settingsButton);
-
         settingsRow.Controls.Add(MakeLabel("输出:"), 0, 0);
         settingsRow.Controls.Add(_outputDirectory, 1, 0);
         settingsRow.Controls.Add(chooseOutputButton, 2, 0);
@@ -374,6 +368,9 @@ public sealed class BatchPlotForm : Form
         _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.ScaleText), "比例", 82));
         _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.SizeText), "实际尺寸", 150));
         _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.PaperSizeText), "输出纸张", 150));
+        _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.Date), "日期", 90));
+        _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.Revision), "版次", 70));
+        _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.Phase), "设计阶段", 90));
 
         static DataGridViewTextBoxColumn MakeTextColumn(string propertyName, string header, int width, bool readOnly = true)
         {
@@ -1038,8 +1035,45 @@ public sealed class BatchPlotForm : Form
 
     private string BuildOutputPath(PlotJob job, string seqPrefix, ISet<string> reservedPaths)
     {
-        var baseName = $"{seqPrefix}{job.DrawingNumber}{_settings.PdfFileNameSeparator}{job.Title}";
+        var fields = _settings.PdfFileNameFields;
+        if (fields == null || fields.Count == 0)
+        {
+            fields = new System.Collections.Generic.List<string> { "DrawingNumber", "Title" };
+        }
+
+        var parts = GetFileNameParts(job, fields);
+        if (parts.Count == 0)
+        {
+            parts.Add(job.DrawingNumber); // fallback
+        }
+
+        var separator = _settings.PdfFileNameSeparator;
+        var baseName = seqPrefix + string.Join(separator, parts);
         return FileNameSanitizer.MakeUnique(_outputDirectory.Text, baseName, reservedPaths, _settings.AddSequenceWhenPdfExists);
+    }
+
+    private static List<string> GetFileNameParts(PlotJob job, List<string> fieldKeys)
+    {
+        var parts = new List<string>();
+        foreach (var key in fieldKeys)
+        {
+            var value = key switch
+            {
+                "DrawingNumber" => job.DrawingNumber,
+                "Title" => job.Title,
+                "Date" => job.Date,
+                "Revision" => job.Revision,
+                "Phase" => job.Phase,
+                "PaperName" => job.PaperName,
+                _ => ""
+            };
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                parts.Add(value.Trim());
+            }
+        }
+
+        return parts;
     }
 
     private string GetDefaultOutputDirectory()

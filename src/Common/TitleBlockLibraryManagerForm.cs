@@ -131,6 +131,18 @@ public sealed class TitleBlockLibraryManagerForm : Form
         _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.NumberMinY), HeaderText = "图号MinY", Width = UiLayout.Scale(96) });
         _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.NumberMaxX), HeaderText = "图号MaxX", Width = UiLayout.Scale(96) });
         _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.NumberMaxY), HeaderText = "图号MaxY", Width = UiLayout.Scale(96) });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.DateMinX), HeaderText = "日期MinX", Width = UiLayout.Scale(96) });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.DateMinY), HeaderText = "日期MinY", Width = UiLayout.Scale(96) });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.DateMaxX), HeaderText = "日期MaxX", Width = UiLayout.Scale(96) });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.DateMaxY), HeaderText = "日期MaxY", Width = UiLayout.Scale(96) });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.RevisionMinX), HeaderText = "版次MinX", Width = UiLayout.Scale(96) });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.RevisionMinY), HeaderText = "版次MinY", Width = UiLayout.Scale(96) });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.RevisionMaxX), HeaderText = "版次MaxX", Width = UiLayout.Scale(96) });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.RevisionMaxY), HeaderText = "版次MaxY", Width = UiLayout.Scale(96) });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.PhaseMinX), HeaderText = "设计阶段MinX", Width = UiLayout.Scale(96) });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.PhaseMinY), HeaderText = "设计阶段MinY", Width = UiLayout.Scale(96) });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.PhaseMaxX), HeaderText = "设计阶段MaxX", Width = UiLayout.Scale(96) });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.PhaseMaxY), HeaderText = "设计阶段MaxY", Width = UiLayout.Scale(96) });
         _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.UpdatedAt), HeaderText = "更新时间", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill, MinimumWidth = UiLayout.Scale(170), ReadOnly = true });
     }
 
@@ -388,6 +400,18 @@ public sealed class TitleBlockLibraryManagerForm : Form
         public double NumberMinY { get; set; }
         public double NumberMaxX { get; set; }
         public double NumberMaxY { get; set; }
+        public double DateMinX { get; set; }
+        public double DateMinY { get; set; }
+        public double DateMaxX { get; set; }
+        public double DateMaxY { get; set; }
+        public double RevisionMinX { get; set; }
+        public double RevisionMinY { get; set; }
+        public double RevisionMaxX { get; set; }
+        public double RevisionMaxY { get; set; }
+        public double PhaseMinX { get; set; }
+        public double PhaseMinY { get; set; }
+        public double PhaseMaxX { get; set; }
+        public double PhaseMaxY { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
 
@@ -413,6 +437,18 @@ public sealed class TitleBlockLibraryManagerForm : Form
                 NumberMinY = definition.DrawingNumberRegion.MinY,
                 NumberMaxX = definition.DrawingNumberRegion.MaxX,
                 NumberMaxY = definition.DrawingNumberRegion.MaxY,
+                DateMinX = definition.DateRegion.MinX,
+                DateMinY = definition.DateRegion.MinY,
+                DateMaxX = definition.DateRegion.MaxX,
+                DateMaxY = definition.DateRegion.MaxY,
+                RevisionMinX = definition.RevisionRegion.MinX,
+                RevisionMinY = definition.RevisionRegion.MinY,
+                RevisionMaxX = definition.RevisionRegion.MaxX,
+                RevisionMaxY = definition.RevisionRegion.MaxY,
+                PhaseMinX = definition.PhaseRegion.MinX,
+                PhaseMinY = definition.PhaseRegion.MinY,
+                PhaseMaxX = definition.PhaseRegion.MaxX,
+                PhaseMaxY = definition.PhaseRegion.MaxY,
                 CreatedAt = definition.CreatedAt,
                 UpdatedAt = definition.UpdatedAt
             };
@@ -431,6 +467,9 @@ public sealed class TitleBlockLibraryManagerForm : Form
                 PrintRegion = LocalRectangle.FromPoints(PrintMinX, PrintMinY, PrintMaxX, PrintMaxY),
                 TitleRegion = LocalRectangle.FromPoints(TitleMinX, TitleMinY, TitleMaxX, TitleMaxY),
                 DrawingNumberRegion = LocalRectangle.FromPoints(NumberMinX, NumberMinY, NumberMaxX, NumberMaxY),
+                DateRegion = LocalRectangle.FromPoints(DateMinX, DateMinY, DateMaxX, DateMaxY),
+                RevisionRegion = LocalRectangle.FromPoints(RevisionMinX, RevisionMinY, RevisionMaxX, RevisionMaxY),
+                PhaseRegion = LocalRectangle.FromPoints(PhaseMinX, PhaseMinY, PhaseMaxX, PhaseMaxY),
                 CreatedAt = CreatedAt == default ? DateTime.Now : CreatedAt,
                 UpdatedAt = DateTime.Now
             };
@@ -451,7 +490,10 @@ public sealed class TitleBlockLibraryManagerForm : Form
                 && IsFinite(NumberMinX)
                 && IsFinite(NumberMinY)
                 && IsFinite(NumberMaxX)
-                && IsFinite(NumberMaxY);
+                && IsFinite(NumberMaxY)
+                && IsFinite(DateMinX) && IsFinite(DateMinY) && IsFinite(DateMaxX) && IsFinite(DateMaxY)
+                && IsFinite(RevisionMinX) && IsFinite(RevisionMinY) && IsFinite(RevisionMaxX) && IsFinite(RevisionMaxY)
+                && IsFinite(PhaseMinX) && IsFinite(PhaseMinY) && IsFinite(PhaseMaxX) && IsFinite(PhaseMaxY);
         }
 
         private static bool IsFinite(double value)

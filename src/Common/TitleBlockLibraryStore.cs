@@ -83,6 +83,9 @@ public static class TitleBlockLibraryStore
             existing.PaperHeightMm = definition.PaperHeightMm;
             existing.TitleRegion = definition.TitleRegion;
             existing.DrawingNumberRegion = definition.DrawingNumberRegion;
+            existing.DateRegion = definition.DateRegion;
+            existing.RevisionRegion = definition.RevisionRegion;
+            existing.PhaseRegion = definition.PhaseRegion;
             existing.UpdatedAt = DateTime.Now;
         }
 

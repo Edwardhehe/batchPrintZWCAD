@@ -291,7 +291,7 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
 #endif
     }
 
-    private static bool TryGetRegion(Editor editor, string firstPrompt, string secondPrompt, Matrix3d inverseBlockTransform, out LocalRectangle region)
+    internal static bool TryGetRegion(Editor editor, string firstPrompt, string secondPrompt, Matrix3d inverseBlockTransform, out LocalRectangle region)
     {
         region = new LocalRectangle();
         var first = editor.GetPoint(new PromptPointOptions(firstPrompt));

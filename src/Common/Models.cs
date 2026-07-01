@@ -15,13 +15,16 @@ public sealed class TitleBlockDefinition
     public double PaperHeightMm { get; set; }
     public LocalRectangle TitleRegion { get; set; } = new();
     public LocalRectangle DrawingNumberRegion { get; set; } = new();
+    public LocalRectangle DateRegion { get; set; } = new();
+    public LocalRectangle RevisionRegion { get; set; } = new();
+    public LocalRectangle PhaseRegion { get; set; } = new();
     public DateTime CreatedAt { get; set; } = DateTime.Now;
     public DateTime UpdatedAt { get; set; } = DateTime.Now;
 }
 
 public sealed class TitleBlockLibrary
 {
-    public int Version { get; set; } = 1;
+    public int Version { get; set; } = 2;
     public List<TitleBlockDefinition> Blocks { get; set; } = new();
 }
 
@@ -57,6 +60,13 @@ public sealed class LocalRectangle
             && y >= MinY - tolerance
             && y <= MaxY + tolerance;
     }
+
+    /// <summary>区域是否有实际面积（非零区域）。零区域表示该字段未配置。</summary>
+    public bool HasArea(double tolerance = 1e-6)
+    {
+        return Math.Abs(MaxX - MinX) > tolerance
+            && Math.Abs(MaxY - MinY) > tolerance;
+    }
 }
 
 public sealed class PlotJob
@@ -75,6 +85,12 @@ public sealed class PlotJob
     public string Title { get; set; } = "";
     public string CadDrawingNumber { get; set; } = "";
     public string CadTitle { get; set; } = "";
+    public string Date { get; set; } = "";
+    public string Revision { get; set; } = "";
+    public string Phase { get; set; } = "";
+    public string CadDate { get; set; } = "";
+    public string CadRevision { get; set; } = "";
+    public string CadPhase { get; set; } = "";
     public string PaperName { get; set; } = "";
     public string ScaleText { get; set; } = "";
     public string SizeText { get; set; } = "";
