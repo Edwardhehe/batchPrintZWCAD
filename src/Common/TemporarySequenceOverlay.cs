@@ -121,7 +121,7 @@ public sealed class TemporarySequenceOverlay
             AddEntity(tr, owner, frame);
 
             var center = new Point3d((minX + maxX) / 2d, (minY + maxY) / 2d, 0);
-            AddBoldLabel(tr, owner, layerId, textStyleId, color, center, (i + 1).ToString(), textHeight, ucsAngle, isHighlight);
+            AddBoldLabel(tr, owner, layerId, textStyleId, color, center, job.DrawingNumber, textHeight, ucsAngle, isHighlight);
         }
 
         tr.Commit();

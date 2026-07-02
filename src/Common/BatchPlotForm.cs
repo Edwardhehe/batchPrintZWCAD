@@ -163,6 +163,9 @@ public sealed class BatchPlotForm : Form
         var clearButton = MakeButton("清空清单", 92);
         clearButton.Click += (_, _) => ClearJobs();
 
+        var renumberButton = MakeButton("图号重排", 92);
+        renumberButton.Click += (_, _) => RenumberDrawingNumbers();
+
         var refreshNameButton = MakeButton("刷新文件名", 104);
         refreshNameButton.Click += (_, _) => SortAndRefreshOutputPaths();
 
@@ -211,6 +214,7 @@ public sealed class BatchPlotForm : Form
         SetTip(invertButton, "反转打印勾选状态。");
         SetTip(removeHighlightedButton, "删除鼠标高亮的行，可 Ctrl/Shift 多选。");
         SetTip(clearButton, "清空当前清单，不影响 CAD 文件和图框库。");
+        SetTip(renumberButton, "按空间位置重新排序图框，按顺序分配前缀+递增图号。");
         SetTip(refreshNameButton, "按当前图号、图名和设置重新生成输出 PDF 文件名。");
         SetTip(exportCsvButton, "导出当前清单为 CSV。");
         SetTip(generateDirectoryButton, "在当前 CAD 指定基点，生成图纸目录表。");
@@ -259,6 +263,7 @@ public sealed class BatchPlotForm : Form
         actionRow.Controls.Add(removeHighlightedButton);
         actionRow.Controls.Add(clearButton);
         actionRow.Controls.Add(MakeSeparator());
+        actionRow.Controls.Add(renumberButton);
         actionRow.Controls.Add(refreshNameButton);
         actionRow.Controls.Add(exportCsvButton);
         actionRow.Controls.Add(generateDirectoryButton);
@@ -1013,6 +1018,107 @@ public sealed class BatchPlotForm : Form
             ShowSequenceOverlayForCurrentJobs();
         }
     }
+
+    private void RenumberDrawingNumbers()
+    {
+        if (_jobs.Count == 0) return;
+
+        // 仅对当前文档的图框重排
+        var currentJobs = _jobs.Where(j => IsCurrentDocumentJob(j)).ToList();
+        if (currentJobs.Count == 0)
+        {
+            MessageBox.Show("当前没有本图文档的图框可重排。", "图号重排", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        // 保存原始图号，取消时恢复
+        var originalNumbers = currentJobs.ToDictionary(j => j, j => j.DrawingNumber);
+
+        using var dialog = new DrawingNumberReorderDialog(currentJobs.Count);
+        dialog.PreviewRequested += () =>
+        {
+            var sorted = SortSpatially(currentJobs, dialog.HorizontalFirst);
+            ApplyRenumbering(sorted, dialog.Prefix, dialog.StartNumber);
+            _grid.Refresh();
+            ShowSequenceOverlayForCurrentJobs();
+        };
+
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+        {
+            // 恢复原始图号
+            foreach (var kv in originalNumbers)
+            {
+                kv.Key.DrawingNumber = kv.Value;
+            }
+            _grid.Refresh();
+            SortAndRefreshOutputPaths();
+            ShowSequenceOverlayForCurrentJobs();
+            return;
+        }
+
+        var finalSorted = SortSpatially(currentJobs, dialog.HorizontalFirst);
+        ApplyRenumbering(finalSorted, dialog.Prefix, dialog.StartNumber);
+        _grid.Refresh();
+        SortAndRefreshOutputPaths();
+        ShowSequenceOverlayForCurrentJobs();
+
+        // 反写 CAD 文件中的图号
+        var updated = 0;
+        foreach (var job in finalSorted)
+        {
+            if (CadTextUpdater.TryUpdateOpenDocument(job, null, job.DrawingNumber, _currentDocument, out _))
+            {
+                updated++;
+            }
+        }
+
+        AppendLog("INFO", $"图号重排完成，{finalSorted.Count} 张图框按" + (dialog.HorizontalFirst ? "从左到右、从上到下" : "从上到下、从左到右") + $"排序，已反写 CAD {updated} 处。");
+    }
+
+    private static void ApplyRenumbering(IReadOnlyList<PlotJob> sorted, string prefix, int start)
+    {
+        var digits = Math.Max(2, (sorted.Count + start - 1).ToString().Length);
+        for (var i = 0; i < sorted.Count; i++)
+        {
+            sorted[i].DrawingNumber = prefix + (start + i).ToString($"D{digits}");
+            sorted[i].CadDrawingNumber = sorted[i].DrawingNumber;
+        }
+    }
+
+    private static List<PlotJob> SortSpatially(IReadOnlyList<PlotJob> jobs, bool horizontalFirst)
+    {
+        if (jobs.Count <= 1) return jobs.ToList();
+
+        var centers = horizontalFirst
+            ? jobs.Select(CenterX).Distinct().OrderBy(x => x).ToList()
+            : jobs.Select(CenterY).Distinct().OrderBy(y => y).ToList();
+        var gaps = centers.Zip(centers.Skip(1), (a, b) => Math.Abs(b - a))
+            .Where(g => g > 1e-6).OrderBy(g => g).ToList();
+        var medianGap = gaps.Count > 0 ? gaps[gaps.Count / 2] : 1.0;
+        var bandTolerance = Math.Max(medianGap * 0.5, 1e-6);
+
+        var remaining = horizontalFirst
+            ? jobs.OrderBy(CenterX).ToList()
+            : jobs.OrderByDescending(CenterY).ToList();
+        var result = new List<PlotJob>();
+
+        while (remaining.Count > 0)
+        {
+            var anchor = horizontalFirst ? CenterX(remaining[0]) : CenterY(remaining[0]);
+            var band = remaining
+                .Where(j => Math.Abs((horizontalFirst ? CenterX(j) : CenterY(j)) - anchor) <= bandTolerance)
+                .ToList();
+            foreach (var j in band) remaining.Remove(j);
+            result.AddRange(horizontalFirst
+                ? band.OrderByDescending(CenterY)
+                : band.OrderBy(CenterX));
+        }
+
+        return result;
+    }
+
+    private static double CenterX(PlotJob job) => (job.MinX + job.MaxX) / 2d;
+    private static double CenterY(PlotJob job) => (job.MinY + job.MaxY) / 2d;
 
     private void ClearJobs()
     {
