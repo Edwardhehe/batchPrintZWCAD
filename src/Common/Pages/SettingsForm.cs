@@ -54,7 +54,7 @@ public sealed class SettingsForm : Form
     {
         Text = "批量打印设置";
         UiLayout.ConfigureForm(this, 680, 560, 680, 560);
-        FormBorderStyle = FormBorderStyle.FixedDialog;
+        FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
 
         var root = new TableLayoutPanel
         {

@@ -29,9 +29,7 @@ public sealed class DrawingNumberReorderDialog : Form
         _jobCount = jobCount;
 
         Text = "图号重排";
-        FormBorderStyle = FormBorderStyle.FixedDialog;
-        MaximizeBox = false;
-        MinimizeBox = false;
+        FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.CenterParent;
         ClientSize = new Size(UiLayout.Scale(420), UiLayout.Scale(320));

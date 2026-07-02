@@ -28,7 +28,7 @@ public sealed class TitleBlockLibraryManagerForm : Form
     private void InitializeComponents()
     {
         Text = "图框信息库管理";
-        UiLayout.ConfigureForm(this, 1100, 620, 1100, 620);
+        UiLayout.ConfigureForm(this, 800, 400, 800, 400);
         FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
 
         var top = new FlowLayoutPanel

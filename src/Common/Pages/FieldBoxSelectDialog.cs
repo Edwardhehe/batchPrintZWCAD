@@ -34,9 +34,7 @@ public sealed class FieldBoxSelectDialog : Form
         _inverseBlockTransform = inverseBlockTransform;
 
         Text = "选择图框可选字段";
-        FormBorderStyle = FormBorderStyle.FixedDialog;
-        MaximizeBox = false;
-        MinimizeBox = false;
+        FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.CenterParent;
         ClientSize = new Size(UiLayout.Scale(460), UiLayout.Scale(340));
