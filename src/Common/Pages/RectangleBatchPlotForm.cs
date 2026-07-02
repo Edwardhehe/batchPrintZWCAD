@@ -62,7 +62,10 @@ public sealed class RectangleBatchPlotForm : Form
     private void InitializeComponents()
     {
         Text = "批量打印(选矩形框)";
-        UiLayout.ConfigureBatchPlotForm(this);
+        FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
+        ClientSize = new Size(UiLayout.Scale(900), UiLayout.Scale(560));
+        StartPosition = FormStartPosition.CenterScreen;
+        Font = UiLayout.DefaultFont;
         BackColor = Color.FromArgb(245, 247, 250);
         var tips = new ToolTip { AutoPopDelay = 8000, InitialDelay = 400, ReshowDelay = 100, ShowAlways = true };
 
@@ -362,72 +365,7 @@ public sealed class RectangleBatchPlotForm : Form
         }
     }
 
-    private TitleBlockScanScope? PromptScanScope()
-    {
-        using var form = new Form
-        {
-            Text = "扫描当前图",
-            StartPosition = FormStartPosition.CenterParent,
-            FormBorderStyle = FormBorderStyle.FixedDialog,
-            MaximizeBox = false,
-            MinimizeBox = false,
-            ShowInTaskbar = false,
-            ClientSize = new Size(UiLayout.Scale(360), UiLayout.Scale(220))
-        };
-
-        var panel = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            ColumnCount = 1,
-            RowCount = 6,
-            Padding = new Padding(UiLayout.Scale(16), UiLayout.Scale(12), UiLayout.Scale(16), UiLayout.Scale(12))
-        };
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(28)));
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(30)));
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(30)));
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(30)));
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(30)));
-        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-
-        var title = new Label { Text = "选择扫描范围", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
-        var all = new RadioButton { Text = "扫描本图全部模型和布局", Dock = DockStyle.Fill, Checked = true };
-        var layouts = new RadioButton { Text = "扫描全部布局", Dock = DockStyle.Fill };
-        var current = new RadioButton { Text = "扫描当前布局/模型", Dock = DockStyle.Fill };
-        var model = new RadioButton { Text = "扫描模型空间", Dock = DockStyle.Fill };
-
-        var buttons = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            FlowDirection = System.Windows.Forms.FlowDirection.RightToLeft,
-            Padding = new Padding(0, UiLayout.Scale(10), 0, 0)
-        };
-        var ok = UiLayout.CreateButton("确定", 76);
-        var cancel = UiLayout.CreateButton("取消", 76);
-        ok.DialogResult = DialogResult.OK;
-        cancel.DialogResult = DialogResult.Cancel;
-        buttons.Controls.Add(ok);
-        buttons.Controls.Add(cancel);
-
-        panel.Controls.Add(title, 0, 0);
-        panel.Controls.Add(all, 0, 1);
-        panel.Controls.Add(layouts, 0, 2);
-        panel.Controls.Add(current, 0, 3);
-        panel.Controls.Add(model, 0, 4);
-        panel.Controls.Add(buttons, 0, 5);
-        form.Controls.Add(panel);
-        form.AcceptButton = ok;
-        form.CancelButton = cancel;
-
-        if (form.ShowDialog(this) != DialogResult.OK)
-        {
-            return null;
-        }
-
-        if (all.Checked) return TitleBlockScanScope.AllSpaces;
-        if (layouts.Checked) return TitleBlockScanScope.PaperLayouts;
-        if (current.Checked) return TitleBlockScanScope.CurrentSpace;
-        return TitleBlockScanScope.ModelSpace;
-    }
+    private TitleBlockScanScope? PromptScanScope() => BatchPlotCommands.PromptScanScope(this);
 
     private void ScanCurrentDrawing()
     {

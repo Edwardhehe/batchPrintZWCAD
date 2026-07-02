@@ -26,9 +26,7 @@ public sealed class CustomScaleForm : Form
 
         Text = "自定义打印比例";
         StartPosition = FormStartPosition.CenterParent;
-        FormBorderStyle = FormBorderStyle.FixedDialog;
-        MaximizeBox = false;
-        MinimizeBox = false;
+        FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
         ShowInTaskbar = false;
         ClientSize = new Size(UiLayout.Scale(380), UiLayout.Scale(210));
 

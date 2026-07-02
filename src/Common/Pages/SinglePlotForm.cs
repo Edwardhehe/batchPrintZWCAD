@@ -46,9 +46,8 @@ public sealed class SinglePlotForm : Form
     private void InitializeComponents(string sourceFile, double width, double height)
     {
         Text = "单张打印";
-        UiLayout.ConfigureForm(this, 540, 320, 480, 280);
-        MaximizeBox = false;
-        MinimizeBox = false;
+        UiLayout.ConfigureForm(this, 540, 320, 540, 320);
+        FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
         ShowInTaskbar = false;
 
         var root = new TableLayoutPanel

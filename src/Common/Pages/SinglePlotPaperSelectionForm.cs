@@ -27,9 +27,8 @@ public sealed class SinglePlotPaperSelectionForm : Form
     private void InitializeComponents()
     {
         Text = "单张打印 - 选择纸张";
-        UiLayout.ConfigureForm(this, 560, 190, 500, 170);
-        MaximizeBox = false;
-        MinimizeBox = false;
+        UiLayout.ConfigureForm(this, 560, 190, 560, 190);
+        FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
         ShowInTaskbar = false;
 
         var root = new TableLayoutPanel

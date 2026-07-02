@@ -1,6 +1,5 @@
 using System;
 using System.Drawing;
-using System.Globalization;
 using System.Windows.Forms;
 
 namespace ZwcadBatchPlot;
@@ -24,9 +23,8 @@ public sealed class PaperSizeSelectionForm : Form
     private void InitializeComponents()
     {
         Text = "设置图框输出纸张";
-        UiLayout.ConfigureForm(this, 460, 230, 420, 210);
-        MaximizeBox = false;
-        MinimizeBox = false;
+        UiLayout.ConfigureForm(this, 460, 230, 460, 230);
+        FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
         ShowInTaskbar = false;
 
         var root = new TableLayoutPanel
@@ -57,9 +55,9 @@ public sealed class PaperSizeSelectionForm : Form
         ConfigureNumber(_width);
         ConfigureNumber(_height);
 
-        AddRow(fields, 0, "纸张", _paperName);
-        AddRow(fields, 1, "宽度(mm)", _width);
-        AddRow(fields, 2, "高度(mm)", _height);
+        UiLayout.AddRow(fields, 0, "纸张", _paperName);
+        UiLayout.AddRow(fields, 1, "宽度(mm)", _width);
+        UiLayout.AddRow(fields, 2, "高度(mm)", _height);
 
         var hint = new Label
         {
@@ -101,18 +99,6 @@ public sealed class PaperSizeSelectionForm : Form
         input.Width = UiLayout.Scale(120);
     }
 
-    private static void AddRow(TableLayoutPanel table, int row, string labelText, Control control)
-    {
-        table.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(42)));
-        table.Controls.Add(new Label
-        {
-            Text = labelText,
-            Dock = DockStyle.Fill,
-            TextAlign = ContentAlignment.MiddleLeft,
-            Margin = Padding.Empty
-        }, 0, row);
-        table.Controls.Add(control, 1, row);
-    }
 
     private void ApplyDetected(PaperDetection detected)
     {
@@ -139,13 +125,8 @@ public sealed class PaperSizeSelectionForm : Form
 
     private void SetDimensions(double width, double height)
     {
-        _width.Value = Clamp(width);
-        _height.Value = Clamp(height);
-    }
-
-    private decimal Clamp(double value)
-    {
-        return (decimal)Math.Max((double)_width.Minimum, Math.Min((double)_width.Maximum, value));
+        _width.Value = UiLayout.Clamp(_width, width);
+        _height.Value = UiLayout.Clamp(_height, height);
     }
 
     private void SaveAndClose()
@@ -156,9 +137,6 @@ public sealed class PaperSizeSelectionForm : Form
             return;
         }
 
-        _paperName.Text = PaperName;
-        _width.Text = PaperWidthMm.ToString("0.##", CultureInfo.InvariantCulture);
-        _height.Text = PaperHeightMm.ToString("0.##", CultureInfo.InvariantCulture);
         DialogResult = DialogResult.OK;
         Close();
     }

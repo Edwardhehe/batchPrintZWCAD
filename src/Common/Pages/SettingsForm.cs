@@ -53,9 +53,8 @@ public sealed class SettingsForm : Form
     private void InitializeComponents()
     {
         Text = "批量打印设置";
-        UiLayout.ConfigureForm(this, 800, 720, 720, 580);
-        MaximizeBox = false;
-        MinimizeBox = false;
+        UiLayout.ConfigureForm(this, 680, 560, 680, 560);
+        FormBorderStyle = FormBorderStyle.FixedDialog;
 
         var root = new TableLayoutPanel
         {
@@ -137,14 +136,14 @@ public sealed class SettingsForm : Form
         _openExternalDwgForPlot.AutoSize = true;
         _openExternalDwgForPlot.Dock = DockStyle.Fill;
 
-        AddRow(table, 0, "", _rememberOutput);
-        AddRow(table, 1, "默认输出子文件夹", _outputSubfolder);
-        AddRow(table, 2, "", _autoScan);
-        AddRow(table, 3, "纸张匹配容差(mm)", _paperTolerance);
-        AddRow(table, 4, "", _allowPaperNameFallback);
-        AddRow(table, 5, "", _showProgress);
-        AddRow(table, 6, "", _addSequenceWhenPdfExists);
-        AddRow(table, 7, "", _openExternalDwgForPlot);
+        UiLayout.AddRow(table, 0, "", _rememberOutput);
+        UiLayout.AddRow(table, 1, "默认输出子文件夹", _outputSubfolder);
+        UiLayout.AddRow(table, 2, "", _autoScan);
+        UiLayout.AddRow(table, 3, "纸张匹配容差(mm)", _paperTolerance);
+        UiLayout.AddRow(table, 4, "", _allowPaperNameFallback);
+        UiLayout.AddRow(table, 5, "", _showProgress);
+        UiLayout.AddRow(table, 6, "", _addSequenceWhenPdfExists);
+        UiLayout.AddRow(table, 7, "", _openExternalDwgForPlot);
         page.Controls.Add(table);
         return page;
     }
@@ -176,7 +175,7 @@ public sealed class SettingsForm : Form
         _fileNameSeparator.Dock = DockStyle.Left;
         _fileNameSeparator.Width = UiLayout.Scale(120);
         _fileNameSeparator.TextChanged += (_, _) => UpdateFileNamePreview();
-        AddRow(table, 0, "字段连接符", _fileNameSeparator);
+        UiLayout.AddRow(table, 0, "字段连接符", _fileNameSeparator);
 
         // 双列表：可用字段 → 已选字段
         var fieldLabel = new Label
@@ -385,16 +384,16 @@ public sealed class SettingsForm : Form
         pickButton.Click += (_, _) => PickDirectoryCellSizes();
         pickButton.Enabled = _document != null;
 
-        AddRow(table, 0, "序号列宽", _directoryIndexWidth);
-        AddRow(table, 1, "图号列宽", _directoryNumberWidth);
-        AddRow(table, 2, "图名列宽", _directoryTitleWidth);
-        AddRow(table, 3, "图幅列宽", _directoryPaperWidth);
-        AddRow(table, 4, "备注列宽", _directoryRemarkWidth);
-        AddRow(table, 5, "行高", _directoryRowHeight);
-        AddRow(table, 6, "文字高度比例", _directoryTextRatio);
-        AddRow(table, 7, "目录文字样式", _directoryTextStyle);
-        AddRow(table, 8, "", pickButton);
-        AddRow(table, 9, "", new Label
+        UiLayout.AddRow(table, 0, "序号列宽", _directoryIndexWidth);
+        UiLayout.AddRow(table, 1, "图号列宽", _directoryNumberWidth);
+        UiLayout.AddRow(table, 2, "图名列宽", _directoryTitleWidth);
+        UiLayout.AddRow(table, 3, "图幅列宽", _directoryPaperWidth);
+        UiLayout.AddRow(table, 4, "备注列宽", _directoryRemarkWidth);
+        UiLayout.AddRow(table, 5, "行高", _directoryRowHeight);
+        UiLayout.AddRow(table, 6, "文字高度比例", _directoryTextRatio);
+        UiLayout.AddRow(table, 7, "目录文字样式", _directoryTextStyle);
+        UiLayout.AddRow(table, 8, "", pickButton);
+        UiLayout.AddRow(table, 9, "", new Label
         {
             Text = "框选时依次选择：序号、图号、图名、图幅、备注单元格。行高取第一个单元格高度。",
             Dock = DockStyle.Fill,
@@ -430,18 +429,6 @@ public sealed class SettingsForm : Form
         input.Width = UiLayout.Scale(130);
     }
 
-    private static void AddRow(TableLayoutPanel table, int row, string labelText, Control control)
-    {
-        table.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(42)));
-        table.Controls.Add(new Label
-        {
-            Text = labelText,
-            Dock = DockStyle.Fill,
-            TextAlign = ContentAlignment.MiddleLeft,
-            Margin = Padding.Empty
-        }, 0, row);
-        table.Controls.Add(control, 1, row);
-    }
 
     private void LoadSettings()
     {
@@ -453,26 +440,21 @@ public sealed class SettingsForm : Form
         _rememberOutput.Checked = settings.RememberLastOutputDirectory;
         _outputSubfolder.Text = settings.DefaultOutputSubfolder;
         _autoScan.Checked = false;
-        _paperTolerance.Value = Clamp(_paperTolerance, settings.PaperMatchToleranceMm);
+        _paperTolerance.Value = UiLayout.Clamp(_paperTolerance, settings.PaperMatchToleranceMm);
         _allowPaperNameFallback.Checked = settings.AllowStandardPaperNameFallback;
         _showProgress.Checked = settings.ShowPlotProgress;
         _addSequenceWhenPdfExists.Checked = settings.AddSequenceWhenPdfExists;
         _fileNameSeparator.Text = string.IsNullOrWhiteSpace(settings.PdfFileNameSeparator) ? "_" : settings.PdfFileNameSeparator;
         LoadFileNameFields(settings.PdfFileNameFields);
         _openExternalDwgForPlot.Checked = settings.OpenExternalDwgForPlot;
-        _directoryIndexWidth.Value = Clamp(_directoryIndexWidth, settings.DirectoryIndexWidth);
-        _directoryNumberWidth.Value = Clamp(_directoryNumberWidth, settings.DirectoryNumberWidth);
-        _directoryTitleWidth.Value = Clamp(_directoryTitleWidth, settings.DirectoryTitleWidth);
-        _directoryPaperWidth.Value = Clamp(_directoryPaperWidth, settings.DirectoryPaperWidth);
-        _directoryRemarkWidth.Value = Clamp(_directoryRemarkWidth, settings.DirectoryRemarkWidth);
-        _directoryRowHeight.Value = Clamp(_directoryRowHeight, settings.DirectoryRowHeight);
-        _directoryTextRatio.Value = Clamp(_directoryTextRatio, settings.DirectoryTextHeightRatio);
+        _directoryIndexWidth.Value = UiLayout.Clamp(_directoryIndexWidth, settings.DirectoryIndexWidth);
+        _directoryNumberWidth.Value = UiLayout.Clamp(_directoryNumberWidth, settings.DirectoryNumberWidth);
+        _directoryTitleWidth.Value = UiLayout.Clamp(_directoryTitleWidth, settings.DirectoryTitleWidth);
+        _directoryPaperWidth.Value = UiLayout.Clamp(_directoryPaperWidth, settings.DirectoryPaperWidth);
+        _directoryRemarkWidth.Value = UiLayout.Clamp(_directoryRemarkWidth, settings.DirectoryRemarkWidth);
+        _directoryRowHeight.Value = UiLayout.Clamp(_directoryRowHeight, settings.DirectoryRowHeight);
+        _directoryTextRatio.Value = UiLayout.Clamp(_directoryTextRatio, settings.DirectoryTextHeightRatio);
         SelectTextStyle(settings.DirectoryTextStyleName);
-    }
-
-    private static decimal Clamp(NumericUpDown input, double value)
-    {
-        return (decimal)Math.Max((double)input.Minimum, Math.Min((double)input.Maximum, value));
     }
 
     private void SaveSettings()

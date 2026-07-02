@@ -8,46 +8,43 @@ public static class UiLayout
 {
     public static readonly Font DefaultFont = new("Microsoft YaHei UI", 8F, FontStyle.Regular, GraphicsUnit.Point);
 
-    public static void ConfigureForm(Form form, int designWidth, int designHeight, int minimumWidth, int minimumHeight)
+    private static readonly float DpiX;
+    private static readonly float DpiY;
+
+    static UiLayout()
+    {
+        using var graphics = Graphics.FromHwnd(IntPtr.Zero);
+        DpiX = graphics.DpiX;
+        DpiY = graphics.DpiY;
+    }
+
+    public static void ConfigureForm(Form form, int designWidth, int designHeight, int minimumWidth, int minimumHeight,
+        FormStartPosition startPosition = FormStartPosition.CenterParent)
     {
         form.AutoScaleMode = AutoScaleMode.Dpi;
         form.AutoScaleDimensions = new SizeF(96F, 96F);
         form.Font = DefaultFont;
-        form.StartPosition = FormStartPosition.CenterParent;
+        form.StartPosition = startPosition;
 
         var workingArea = Screen.FromPoint(Cursor.Position).WorkingArea;
-        var width = Math.Min(designWidth, Math.Max(minimumWidth, workingArea.Width - Scale(80)));
-        var height = Math.Min(designHeight, Math.Max(minimumHeight, workingArea.Height - Scale(80)));
-
-        form.Size = new Size(width, height);
-        form.MinimumSize = new Size(Math.Min(minimumWidth, workingArea.Width - Scale(40)), Math.Min(minimumHeight, workingArea.Height - Scale(40)));
+        var maxWidth = workingArea.Width - Scale(80);
+        var maxHeight = workingArea.Height - Scale(80);
+        form.Size = new Size(
+            Math.Min(designWidth, Math.Max(minimumWidth, maxWidth)),
+            Math.Min(designHeight, Math.Max(minimumHeight, maxHeight)));
+        form.MinimumSize = new Size(
+            Math.Min(minimumWidth, workingArea.Width - Scale(40)),
+            Math.Min(minimumHeight, workingArea.Height - Scale(40)));
     }
 
     public static void ConfigureBatchPlotForm(Form form)
     {
-        form.AutoScaleMode = AutoScaleMode.Dpi;
-        form.AutoScaleDimensions = new SizeF(96F, 96F);
-        form.Font = DefaultFont;
-        form.StartPosition = FormStartPosition.CenterScreen;
-
-        var workingArea = Screen.FromPoint(Cursor.Position).WorkingArea;
-        var designWidth = Scale(980);
-        var designHeight = Scale(620);
-        var minimumWidth = Scale(720);
-        var minimumHeight = Scale(460);
-        var maxWidth = workingArea.Width - Scale(80);
-        var maxHeight = workingArea.Height - Scale(80);
-        var width = Math.Min(designWidth, Math.Max(minimumWidth, maxWidth));
-        var height = Math.Min(designHeight, Math.Max(minimumHeight, maxHeight));
-
-        form.Size = new Size(width, height);
-        form.MinimumSize = new Size(Math.Min(minimumWidth, workingArea.Width - Scale(40)), Math.Min(minimumHeight, workingArea.Height - Scale(40)));
+        ConfigureForm(form, Scale(980), Scale(620), Scale(720), Scale(460), FormStartPosition.CenterScreen);
     }
 
     public static int Scale(int value)
     {
-        using var graphics = Graphics.FromHwnd(IntPtr.Zero);
-        return Math.Max(1, (int)Math.Round(value * graphics.DpiX / 96F));
+        return Math.Max(1, (int)Math.Round(value * DpiX / 96F));
     }
 
     public static int ButtonWidth(string text, int minimumWidth)
@@ -81,6 +78,26 @@ public static class UiLayout
             Margin = new Padding(0, Scale(2), Scale(6), Scale(2)),
             UseVisualStyleBackColor = true
         };
+    }
+
+    /// <summary>向 TableLayoutPanel 添加标签+控件行。</summary>
+    public static void AddRow(TableLayoutPanel table, int row, string labelText, Control control)
+    {
+        table.RowStyles.Add(new RowStyle(SizeType.Absolute, Scale(42)));
+        table.Controls.Add(new Label
+        {
+            Text = labelText,
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Margin = Padding.Empty
+        }, 0, row);
+        table.Controls.Add(control, 1, row);
+    }
+
+    /// <summary>将 double 值限定到 NumericUpDown 的范围内。</summary>
+    public static decimal Clamp(NumericUpDown input, double value)
+    {
+        return (decimal)Math.Max((double)input.Minimum, Math.Min((double)input.Maximum, value));
     }
 
     public static void StyleGrid(DataGridView grid, Font font)
