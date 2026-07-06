@@ -1179,6 +1179,8 @@ public sealed class BatchPlotForm : Form
                 "Date" => job.Date,
                 "Revision" => job.Revision,
                 "Phase" => job.Phase,
+                "Info1" => job.Info1,
+                "Info2" => job.Info2,
                 "PaperName" => job.PaperName,
                 _ => ""
             };

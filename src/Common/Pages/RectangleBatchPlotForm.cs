@@ -162,9 +162,11 @@ public sealed class RectangleBatchPlotForm : Form
             Padding = Padding.Empty
         };
         options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(52)));
-        options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(205)));
-        options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(132)));
-        options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(70)));
+        // 高 DPI 下 ComboBox/CheckBox 的文字会明显变宽，这几个列不能按普通 96DPI 宽度估算。
+        // 这里直接给排序、合并、周边留白预留完整文字宽度，避免文字被后续列挤掉。
+        options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(260)));
+        options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(160)));
+        options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(120)));
         options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(52)));
         options.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55));
         options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(42)));
@@ -174,8 +176,8 @@ public sealed class RectangleBatchPlotForm : Form
         options.Controls.Add(LabelFor("排序"), 0, 0);
         _sortOrder.DropDownStyle = ComboBoxStyle.DropDownList;
         _sortOrder.Height = UiLayout.ButtonHeight();
-        _sortOrder.Anchor = AnchorStyles.Left | AnchorStyles.Top;
-        _sortOrder.Margin = new Padding(0, UiLayout.Scale(3), UiLayout.Scale(8), 0);
+        _sortOrder.Dock = DockStyle.Fill;
+        _sortOrder.Margin = new Padding(0, UiLayout.Scale(3), UiLayout.Scale(8), UiLayout.Scale(3));
         _sortOrder.Items.AddRange(new object[] { "从上到下，从左到右", "从左到右，从上到下" });
         _sortOrder.SelectedIndex = 0;
         _sortOrder.SelectedIndexChanged += (_, _) => SortRows();
@@ -192,7 +194,7 @@ public sealed class RectangleBatchPlotForm : Form
         _leaveMargin.Checked = false;
         _leaveMargin.AutoSize = true;
         _leaveMargin.Anchor = AnchorStyles.Left | AnchorStyles.Top;
-        _leaveMargin.Margin = new Padding(UiLayout.Scale(4), UiLayout.Scale(7), UiLayout.Scale(8), 0);
+        _leaveMargin.Margin = new Padding(UiLayout.Scale(4), UiLayout.Scale(7), 0, 0);
         options.Controls.Add(_leaveMargin, 3, 0);
         options.Controls.Add(LabelFor("打印机"), 4, 0);
         _device.DropDownStyle = ComboBoxStyle.DropDownList;

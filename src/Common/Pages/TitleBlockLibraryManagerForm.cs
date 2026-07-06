@@ -144,6 +144,14 @@ public sealed class TitleBlockLibraryManagerForm : Form
         _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.PhaseMinY), HeaderText = "设计阶段MinY", Width = UiLayout.Scale(96) });
         _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.PhaseMaxX), HeaderText = "设计阶段MaxX", Width = UiLayout.Scale(96) });
         _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.PhaseMaxY), HeaderText = "设计阶段MaxY", Width = UiLayout.Scale(96) });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.Info1MinX), HeaderText = "信息1MinX", Width = UiLayout.Scale(96) });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.Info1MinY), HeaderText = "信息1MinY", Width = UiLayout.Scale(96) });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.Info1MaxX), HeaderText = "信息1MaxX", Width = UiLayout.Scale(96) });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.Info1MaxY), HeaderText = "信息1MaxY", Width = UiLayout.Scale(96) });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.Info2MinX), HeaderText = "信息2MinX", Width = UiLayout.Scale(96) });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.Info2MinY), HeaderText = "信息2MinY", Width = UiLayout.Scale(96) });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.Info2MaxX), HeaderText = "信息2MaxX", Width = UiLayout.Scale(96) });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.Info2MaxY), HeaderText = "信息2MaxY", Width = UiLayout.Scale(96) });
         _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.UpdatedAt), HeaderText = "更新时间", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill, MinimumWidth = UiLayout.Scale(170), ReadOnly = true });
     }
 
@@ -413,6 +421,14 @@ public sealed class TitleBlockLibraryManagerForm : Form
         public double PhaseMinY { get; set; }
         public double PhaseMaxX { get; set; }
         public double PhaseMaxY { get; set; }
+        public double Info1MinX { get; set; }
+        public double Info1MinY { get; set; }
+        public double Info1MaxX { get; set; }
+        public double Info1MaxY { get; set; }
+        public double Info2MinX { get; set; }
+        public double Info2MinY { get; set; }
+        public double Info2MaxX { get; set; }
+        public double Info2MaxY { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
 
@@ -450,6 +466,14 @@ public sealed class TitleBlockLibraryManagerForm : Form
                 PhaseMinY = definition.PhaseRegion.MinY,
                 PhaseMaxX = definition.PhaseRegion.MaxX,
                 PhaseMaxY = definition.PhaseRegion.MaxY,
+                Info1MinX = definition.Info1Region.MinX,
+                Info1MinY = definition.Info1Region.MinY,
+                Info1MaxX = definition.Info1Region.MaxX,
+                Info1MaxY = definition.Info1Region.MaxY,
+                Info2MinX = definition.Info2Region.MinX,
+                Info2MinY = definition.Info2Region.MinY,
+                Info2MaxX = definition.Info2Region.MaxX,
+                Info2MaxY = definition.Info2Region.MaxY,
                 CreatedAt = definition.CreatedAt,
                 UpdatedAt = definition.UpdatedAt
             };
@@ -471,6 +495,8 @@ public sealed class TitleBlockLibraryManagerForm : Form
                 DateRegion = LocalRectangle.FromPoints(DateMinX, DateMinY, DateMaxX, DateMaxY),
                 RevisionRegion = LocalRectangle.FromPoints(RevisionMinX, RevisionMinY, RevisionMaxX, RevisionMaxY),
                 PhaseRegion = LocalRectangle.FromPoints(PhaseMinX, PhaseMinY, PhaseMaxX, PhaseMaxY),
+                Info1Region = LocalRectangle.FromPoints(Info1MinX, Info1MinY, Info1MaxX, Info1MaxY),
+                Info2Region = LocalRectangle.FromPoints(Info2MinX, Info2MinY, Info2MaxX, Info2MaxY),
                 CreatedAt = CreatedAt == default ? DateTime.Now : CreatedAt,
                 UpdatedAt = DateTime.Now
             };
@@ -494,7 +520,9 @@ public sealed class TitleBlockLibraryManagerForm : Form
                 && IsFinite(NumberMaxY)
                 && IsFinite(DateMinX) && IsFinite(DateMinY) && IsFinite(DateMaxX) && IsFinite(DateMaxY)
                 && IsFinite(RevisionMinX) && IsFinite(RevisionMinY) && IsFinite(RevisionMaxX) && IsFinite(RevisionMaxY)
-                && IsFinite(PhaseMinX) && IsFinite(PhaseMinY) && IsFinite(PhaseMaxX) && IsFinite(PhaseMaxY);
+                && IsFinite(PhaseMinX) && IsFinite(PhaseMinY) && IsFinite(PhaseMaxX) && IsFinite(PhaseMaxY)
+                && IsFinite(Info1MinX) && IsFinite(Info1MinY) && IsFinite(Info1MaxX) && IsFinite(Info1MaxY)
+                && IsFinite(Info2MinX) && IsFinite(Info2MinY) && IsFinite(Info2MaxX) && IsFinite(Info2MaxY);
         }
 
         private static bool IsFinite(double value)

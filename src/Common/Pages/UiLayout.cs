@@ -29,12 +29,18 @@ public static class UiLayout
         var workingArea = Screen.FromPoint(Cursor.Position).WorkingArea;
         var maxWidth = workingArea.Width - Scale(80);
         var maxHeight = workingArea.Height - Scale(80);
+        var scaledDesignWidth = Scale(designWidth);
+        var scaledDesignHeight = Scale(designHeight);
+        var scaledMinimumWidth = Scale(minimumWidth);
+        var scaledMinimumHeight = Scale(minimumHeight);
+
+        // WinForms 会按 Dpi 自动放大子控件；窗体本身也必须用同一套比例放大，避免高分屏下内容被裁切。
         form.Size = new Size(
-            Math.Min(designWidth, Math.Max(minimumWidth, maxWidth)),
-            Math.Min(designHeight, Math.Max(minimumHeight, maxHeight)));
+            Math.Min(scaledDesignWidth, Math.Max(scaledMinimumWidth, maxWidth)),
+            Math.Min(scaledDesignHeight, Math.Max(scaledMinimumHeight, maxHeight)));
         form.MinimumSize = new Size(
-            Math.Min(minimumWidth, workingArea.Width - Scale(40)),
-            Math.Min(minimumHeight, workingArea.Height - Scale(40)));
+            Math.Min(scaledMinimumWidth, workingArea.Width - Scale(40)),
+            Math.Min(scaledMinimumHeight, workingArea.Height - Scale(40)));
     }
 
     public static void ConfigureBatchPlotForm(Form form)

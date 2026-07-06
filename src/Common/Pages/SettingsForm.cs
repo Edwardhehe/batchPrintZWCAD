@@ -155,6 +155,8 @@ public sealed class SettingsForm : Form
         ("Date", "日期"),
         ("Revision", "版次"),
         ("Phase", "设计阶段"),
+        ("Info1", "信息1"),
+        ("Info2", "信息2"),
         ("PaperName", "纸张尺寸"),
     };
 

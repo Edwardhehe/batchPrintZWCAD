@@ -135,10 +135,12 @@ public sealed partial class BatchPlotCommands
                 return;
             }
 
-            // 可选字段（日期/版次/设计阶段）框选
+            // 可选字段（日期/版次/设计阶段/信息1/信息2）框选
             LocalRectangle dateRegion;
             LocalRectangle revisionRegion;
             LocalRectangle phaseRegion;
+            LocalRectangle info1Region;
+            LocalRectangle info2Region;
             using (var fieldDialog = new FieldBoxSelectDialog(editor, inverse))
             {
                 if (ShowModalDialog(fieldDialog) != DialogResult.OK)
@@ -150,11 +152,15 @@ public sealed partial class BatchPlotCommands
                 dateRegion = fieldDialog.DateRegion;
                 revisionRegion = fieldDialog.RevisionRegion;
                 phaseRegion = fieldDialog.PhaseRegion;
+                info1Region = fieldDialog.Info1Region;
+                info2Region = fieldDialog.Info2Region;
             }
 
             if (dateRegion.HasArea()) AddBlockLog($"Date region: ({dateRegion.MinX:0.###},{dateRegion.MinY:0.###})-({dateRegion.MaxX:0.###},{dateRegion.MaxY:0.###})");
             if (revisionRegion.HasArea()) AddBlockLog($"Revision region: ({revisionRegion.MinX:0.###},{revisionRegion.MinY:0.###})-({revisionRegion.MaxX:0.###},{revisionRegion.MaxY:0.###})");
             if (phaseRegion.HasArea()) AddBlockLog($"Phase region: ({phaseRegion.MinX:0.###},{phaseRegion.MinY:0.###})-({phaseRegion.MaxX:0.###},{phaseRegion.MaxY:0.###})");
+            if (info1Region.HasArea()) AddBlockLog($"Info1 region: ({info1Region.MinX:0.###},{info1Region.MinY:0.###})-({info1Region.MaxX:0.###},{info1Region.MaxY:0.###})");
+            if (info2Region.HasArea()) AddBlockLog($"Info2 region: ({info2Region.MinX:0.###},{info2Region.MinY:0.###})-({info2Region.MaxX:0.###},{info2Region.MaxY:0.###})");
 
             var printExtents = hasPrintRegion
                 ? TransformRegion(printRegion, blockTransform)
@@ -192,6 +198,9 @@ public sealed partial class BatchPlotCommands
                 DateRegion = dateRegion.HasArea() ? ToFrameRelative(dateRegion, referenceFrame) : new LocalRectangle(),
                 RevisionRegion = revisionRegion.HasArea() ? ToFrameRelative(revisionRegion, referenceFrame) : new LocalRectangle(),
                 PhaseRegion = phaseRegion.HasArea() ? ToFrameRelative(phaseRegion, referenceFrame) : new LocalRectangle(),
+                // 信息1/信息2是用户自定义可选字段，未框选时保持空区域，后续命名会自动跳过空值。
+                Info1Region = info1Region.HasArea() ? ToFrameRelative(info1Region, referenceFrame) : new LocalRectangle(),
+                Info2Region = info2Region.HasArea() ? ToFrameRelative(info2Region, referenceFrame) : new LocalRectangle(),
                 CreatedAt = now,
                 UpdatedAt = now
             };

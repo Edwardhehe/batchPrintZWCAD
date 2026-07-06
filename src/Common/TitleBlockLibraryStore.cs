@@ -86,6 +86,8 @@ public static class TitleBlockLibraryStore
             existing.DateRegion = definition.DateRegion;
             existing.RevisionRegion = definition.RevisionRegion;
             existing.PhaseRegion = definition.PhaseRegion;
+            existing.Info1Region = definition.Info1Region;
+            existing.Info2Region = definition.Info2Region;
             existing.UpdatedAt = DateTime.Now;
         }
 
@@ -105,6 +107,12 @@ public static class TitleBlockLibraryStore
 
             definition.TitleRegion = ToFrameRelative(definition.TitleRegion, definition.PrintRegion);
             definition.DrawingNumberRegion = ToFrameRelative(definition.DrawingNumberRegion, definition.PrintRegion);
+            // 旧版图框库若保存了可选字段的块内坐标，也一并迁移为相对打印框坐标。
+            definition.DateRegion = HasArea(definition.DateRegion) ? ToFrameRelative(definition.DateRegion, definition.PrintRegion) : definition.DateRegion;
+            definition.RevisionRegion = HasArea(definition.RevisionRegion) ? ToFrameRelative(definition.RevisionRegion, definition.PrintRegion) : definition.RevisionRegion;
+            definition.PhaseRegion = HasArea(definition.PhaseRegion) ? ToFrameRelative(definition.PhaseRegion, definition.PrintRegion) : definition.PhaseRegion;
+            definition.Info1Region = HasArea(definition.Info1Region) ? ToFrameRelative(definition.Info1Region, definition.PrintRegion) : definition.Info1Region;
+            definition.Info2Region = HasArea(definition.Info2Region) ? ToFrameRelative(definition.Info2Region, definition.PrintRegion) : definition.Info2Region;
             definition.CoordinateMode = "Frame";
         }
     }

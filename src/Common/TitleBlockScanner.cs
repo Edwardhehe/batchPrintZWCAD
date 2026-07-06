@@ -140,6 +140,8 @@ public static class TitleBlockScanner
                 LocalRectangle dateRegion = new();
                 LocalRectangle revisionRegion = new();
                 LocalRectangle phaseRegion = new();
+                LocalRectangle info1Region = new();
+                LocalRectangle info2Region = new();
                 RegionCoordinateMode coordinateMode;
                 LocalRectangle referenceFrame;
                 try
@@ -157,6 +159,12 @@ public static class TitleBlockScanner
                         : new LocalRectangle();
                     phaseRegion = definition.PhaseRegion.HasArea()
                         ? ResolveLocalRegion(definition.PhaseRegion, effectiveBlockTransform, coordinateMode, referenceFrame)
+                        : new LocalRectangle();
+                    info1Region = definition.Info1Region.HasArea()
+                        ? ResolveLocalRegion(definition.Info1Region, effectiveBlockTransform, coordinateMode, referenceFrame)
+                        : new LocalRectangle();
+                    info2Region = definition.Info2Region.HasArea()
+                        ? ResolveLocalRegion(definition.Info2Region, effectiveBlockTransform, coordinateMode, referenceFrame)
                         : new LocalRectangle();
                 }
                 catch (Exception ex)
@@ -184,6 +192,8 @@ public static class TitleBlockScanner
                 string date = "";
                 string revision = "";
                 string phase = "";
+                string info1 = "";
+                string info2 = "";
                 try
                 {
                     title = CadTextExtractor.ExtractRegionText(tr, blockRef, owner, titleRegion, ownerTextCache);
@@ -194,6 +204,10 @@ public static class TitleBlockScanner
                         revision = CadTextExtractor.ExtractRegionText(tr, blockRef, owner, revisionRegion, ownerTextCache);
                     if (phaseRegion.HasArea())
                         phase = CadTextExtractor.ExtractRegionText(tr, blockRef, owner, phaseRegion, ownerTextCache);
+                    if (info1Region.HasArea())
+                        info1 = CadTextExtractor.ExtractRegionText(tr, blockRef, owner, info1Region, ownerTextCache);
+                    if (info2Region.HasArea())
+                        info2 = CadTextExtractor.ExtractRegionText(tr, blockRef, owner, info2Region, ownerTextCache);
                 }
                 catch (Exception ex)
                 {
@@ -235,11 +249,15 @@ public static class TitleBlockScanner
                     Date = date,
                     Revision = revision,
                     Phase = phase,
+                    Info1 = info1,
+                    Info2 = info2,
                     CadDrawingNumber = number,
                     CadTitle = title,
                     CadDate = date,
                     CadRevision = revision,
                     CadPhase = phase,
+                    CadInfo1 = info1,
+                    CadInfo2 = info2,
                     PaperName = paper.PaperName,
                     ScaleText = paper.ScaleText,
                     SizeText = $"{Math.Abs(width):0.##} x {Math.Abs(height):0.##}",

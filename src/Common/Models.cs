@@ -18,6 +18,8 @@ public sealed class TitleBlockDefinition
     public LocalRectangle DateRegion { get; set; } = new();
     public LocalRectangle RevisionRegion { get; set; } = new();
     public LocalRectangle PhaseRegion { get; set; } = new();
+    public LocalRectangle Info1Region { get; set; } = new();
+    public LocalRectangle Info2Region { get; set; } = new();
     public DateTime CreatedAt { get; set; } = DateTime.Now;
     public DateTime UpdatedAt { get; set; } = DateTime.Now;
 }
@@ -88,9 +90,13 @@ public sealed class PlotJob
     public string Date { get; set; } = "";
     public string Revision { get; set; } = "";
     public string Phase { get; set; } = "";
+    public string Info1 { get; set; } = "";
+    public string Info2 { get; set; } = "";
     public string CadDate { get; set; } = "";
     public string CadRevision { get; set; } = "";
     public string CadPhase { get; set; } = "";
+    public string CadInfo1 { get; set; } = "";
+    public string CadInfo2 { get; set; } = "";
     public string PaperName { get; set; } = "";
     public string ScaleText { get; set; } = "";
     public string SizeText { get; set; } = "";

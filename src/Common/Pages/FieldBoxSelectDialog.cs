@@ -13,7 +13,7 @@ namespace ZwcadBatchPlot;
 
 /// <summary>
 /// 新增图框可选字段框选对话框。
-/// 图名/图号为已选（不可操作），日期/版次/设计阶段可选框选。
+/// 图名/图号为已选（不可操作），日期/版次/设计阶段/信息1/信息2可选框选。
 /// </summary>
 public sealed class FieldBoxSelectDialog : Form
 {
@@ -23,10 +23,14 @@ public sealed class FieldBoxSelectDialog : Form
     private readonly Label _dateStatus;
     private readonly Label _revisionStatus;
     private readonly Label _phaseStatus;
+    private readonly Label _info1Status;
+    private readonly Label _info2Status;
 
     public LocalRectangle DateRegion { get; private set; } = new();
     public LocalRectangle RevisionRegion { get; private set; } = new();
     public LocalRectangle PhaseRegion { get; private set; } = new();
+    public LocalRectangle Info1Region { get; private set; } = new();
+    public LocalRectangle Info2Region { get; private set; } = new();
 
     public FieldBoxSelectDialog(Editor editor, Matrix3d inverseBlockTransform)
     {
@@ -34,9 +38,9 @@ public sealed class FieldBoxSelectDialog : Form
         _inverseBlockTransform = inverseBlockTransform;
 
         Text = "选择图框可选字段";
-        UiLayout.ConfigureForm(this, 500, 360, 460, 320);
+        UiLayout.ConfigureForm(this, 500, 440, 460, 400);
         // 新增图框流程会在 CAD 内弹窗，按 DPI 配置窗口后再给足内容区，避免高分屏按钮/状态文字挤压。
-        ClientSize = new Size(UiLayout.Scale(500), UiLayout.Scale(340));
+        ClientSize = new Size(UiLayout.Scale(500), UiLayout.Scale(420));
         FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
         ShowInTaskbar = false;
 
@@ -54,13 +58,15 @@ public sealed class FieldBoxSelectDialog : Form
         table.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(36)));
         // Row 2: 分隔
         table.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(10)));
-        // Row 3-5: 可选字段
+        // Row 3-7: 可选字段
         table.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(42)));
         table.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(42)));
         table.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(42)));
-        // Row 6: 提示
+        table.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(42)));
+        table.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(42)));
+        // Row 8: 提示
         table.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        // Row 7: 按钮
+        // Row 9: 按钮
         table.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(44)));
 
         // 图名
@@ -90,6 +96,15 @@ public sealed class FieldBoxSelectDialog : Form
         _phaseStatus = MakeStatusLabel();
         table.Controls.Add(MakeFieldRow(_phaseStatus, SelectPhase, ClearPhase), 1, 5);
 
+        // 信息1/信息2为用户自定义可选字段，可用于后续文件名命名。
+        table.Controls.Add(MakeLabel("信息1"), 0, 6);
+        _info1Status = MakeStatusLabel();
+        table.Controls.Add(MakeFieldRow(_info1Status, SelectInfo1, ClearInfo1), 1, 6);
+
+        table.Controls.Add(MakeLabel("信息2"), 0, 7);
+        _info2Status = MakeStatusLabel();
+        table.Controls.Add(MakeFieldRow(_info2Status, SelectInfo2, ClearInfo2), 1, 7);
+
         // 提示
         var hint = new Label
         {
@@ -100,7 +115,7 @@ public sealed class FieldBoxSelectDialog : Form
             Font = new Font(Font.FontFamily, Math.Max(Font.Size - 1, 8))
         };
         table.SetColumnSpan(hint, 2);
-        table.Controls.Add(hint, 0, 6);
+        table.Controls.Add(hint, 0, 8);
 
         // 按钮
         var buttons = new FlowLayoutPanel
@@ -118,6 +133,8 @@ public sealed class FieldBoxSelectDialog : Form
             DateRegion = new LocalRectangle();
             RevisionRegion = new LocalRectangle();
             PhaseRegion = new LocalRectangle();
+            Info1Region = new LocalRectangle();
+            Info2Region = new LocalRectangle();
             DialogResult = DialogResult.OK;
             Close();
         };
@@ -128,7 +145,7 @@ public sealed class FieldBoxSelectDialog : Form
         buttons.Controls.Add(skip);
         buttons.Controls.Add(cancel);
         table.SetColumnSpan(buttons, 2);
-        table.Controls.Add(buttons, 0, 7);
+        table.Controls.Add(buttons, 0, 9);
 
         Controls.Add(table);
     }
@@ -141,6 +158,12 @@ public sealed class FieldBoxSelectDialog : Form
 
     private void SelectPhase() { if (TryBoxSelect("设计阶段", out var r)) { PhaseRegion = r; UpdateStatus(_phaseStatus, PhaseRegion); } }
     private void ClearPhase() { PhaseRegion = new LocalRectangle(); UpdateStatus(_phaseStatus, PhaseRegion); }
+
+    private void SelectInfo1() { if (TryBoxSelect("信息1", out var r)) { Info1Region = r; UpdateStatus(_info1Status, Info1Region); } }
+    private void ClearInfo1() { Info1Region = new LocalRectangle(); UpdateStatus(_info1Status, Info1Region); }
+
+    private void SelectInfo2() { if (TryBoxSelect("信息2", out var r)) { Info2Region = r; UpdateStatus(_info2Status, Info2Region); } }
+    private void ClearInfo2() { Info2Region = new LocalRectangle(); UpdateStatus(_info2Status, Info2Region); }
 
     private bool TryBoxSelect(string fieldName, out LocalRectangle region)
     {
@@ -208,25 +231,38 @@ public sealed class FieldBoxSelectDialog : Form
     private static Label MakeStatusLabel() => new()
     {
         Text = "(未选择)",
-        Dock = DockStyle.Left,
+        Dock = DockStyle.Fill,
         TextAlign = ContentAlignment.MiddleLeft,
         ForeColor = Color.DimGray,
-        Width = UiLayout.Scale(300),
         AutoEllipsis = true
     };
 
-    private static Panel MakeFieldRow(Label statusLabel, Action select, Action clear)
+    private static Control MakeFieldRow(Label statusLabel, Action select, Action clear)
     {
-        var panel = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, WrapContents = false };
-        panel.Controls.Add(statusLabel);
+        // 高 DPI 下状态文字和按钮都会放大，用表格布局让状态列自动收缩，避免右侧“清除”按钮被裁切。
+        var panel = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 3,
+            RowCount = 1,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty
+        };
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.ButtonWidth("框选", 60) + UiLayout.Scale(8)));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.ButtonWidth("清除", 60) + UiLayout.Scale(2)));
 
         var selectBtn = UiLayout.CreateButton("框选", 60);
+        selectBtn.Dock = DockStyle.Fill;
         selectBtn.Click += (_, _) => select();
-        panel.Controls.Add(selectBtn);
 
         var clearBtn = UiLayout.CreateButton("清除", 60);
+        clearBtn.Dock = DockStyle.Fill;
         clearBtn.Click += (_, _) => clear();
-        panel.Controls.Add(clearBtn);
+
+        panel.Controls.Add(statusLabel, 0, 0);
+        panel.Controls.Add(selectBtn, 1, 0);
+        panel.Controls.Add(clearBtn, 2, 0);
 
         return panel;
     }
