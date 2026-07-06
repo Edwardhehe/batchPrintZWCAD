@@ -34,10 +34,11 @@ public sealed class FieldBoxSelectDialog : Form
         _inverseBlockTransform = inverseBlockTransform;
 
         Text = "选择图框可选字段";
+        UiLayout.ConfigureForm(this, 500, 360, 460, 320);
+        // 新增图框流程会在 CAD 内弹窗，按 DPI 配置窗口后再给足内容区，避免高分屏按钮/状态文字挤压。
+        ClientSize = new Size(UiLayout.Scale(500), UiLayout.Scale(340));
         FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
         ShowInTaskbar = false;
-        StartPosition = FormStartPosition.CenterParent;
-        ClientSize = new Size(UiLayout.Scale(460), UiLayout.Scale(340));
 
         var table = new TableLayoutPanel
         {
@@ -49,18 +50,18 @@ public sealed class FieldBoxSelectDialog : Form
         table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
         // Row 0-1: 必选字段（灰色已选）
-        table.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(32)));
-        table.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(32)));
+        table.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(36)));
+        table.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(36)));
         // Row 2: 分隔
-        table.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(8)));
+        table.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(10)));
         // Row 3-5: 可选字段
-        table.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(38)));
-        table.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(38)));
-        table.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(38)));
+        table.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(42)));
+        table.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(42)));
+        table.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(42)));
         // Row 6: 提示
         table.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         // Row 7: 按钮
-        table.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(38)));
+        table.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(44)));
 
         // 图名
         table.Controls.Add(MakeLabel("图名"), 0, 0);
@@ -210,7 +211,7 @@ public sealed class FieldBoxSelectDialog : Form
         Dock = DockStyle.Left,
         TextAlign = ContentAlignment.MiddleLeft,
         ForeColor = Color.DimGray,
-        Width = UiLayout.Scale(260),
+        Width = UiLayout.Scale(300),
         AutoEllipsis = true
     };
 

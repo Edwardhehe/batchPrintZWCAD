@@ -23,7 +23,9 @@ public sealed class PaperSizeSelectionForm : Form
     private void InitializeComponents()
     {
         Text = "设置图框输出纸张";
-        UiLayout.ConfigureForm(this, 460, 230, 460, 230);
+        UiLayout.ConfigureForm(this, 480, 270, 460, 250);
+        // 纸张设置是新增图框流程的最后一步，内容区按 DPI 放宽，避免输入框和按钮在高分屏下挤压。
+        ClientSize = new Size(UiLayout.Scale(480), UiLayout.Scale(240));
         FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
         ShowInTaskbar = false;
 
@@ -35,8 +37,8 @@ public sealed class PaperSizeSelectionForm : Form
             Padding = new Padding(UiLayout.Scale(14))
         };
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(34)));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(42)));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(40)));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(46)));
 
         var fields = new TableLayoutPanel
         {
@@ -69,9 +71,11 @@ public sealed class PaperSizeSelectionForm : Form
 
         var buttons = new FlowLayoutPanel
         {
-            Dock = DockStyle.Fill,
+            Dock = DockStyle.Bottom,
+            Height = UiLayout.Scale(40),
             FlowDirection = FlowDirection.RightToLeft,
-            WrapContents = false
+            WrapContents = false,
+            Padding = new Padding(0, UiLayout.Scale(4), 0, 0)
         };
         var ok = UiLayout.CreateButton("确定", 82);
         ok.Click += (_, _) => SaveAndClose();
