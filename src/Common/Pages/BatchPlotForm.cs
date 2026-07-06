@@ -261,7 +261,7 @@ public sealed class BatchPlotForm : Form
         _addSeqCheckBox.CheckedChanged += (_, _) => SortAndRefreshOutputPaths();
         SetTip(_addSeqCheckBox, "勾选后文件名前自动加序号，序号与图号的连接符使用设置中的连接符。");
 
-        _leaveMarginCheckBox.Text = "留白";
+        _leaveMarginCheckBox.Text = "周边留白";
         _leaveMarginCheckBox.AutoSize = true;
         _leaveMarginCheckBox.Checked = false;
         _leaveMarginCheckBox.TextAlign = ContentAlignment.MiddleLeft;
@@ -1726,8 +1726,11 @@ public sealed class BatchPlotForm : Form
 
         job.LeavePaperMargin = _leaveMarginCheckBox.Checked;
         var wasVisible = Visible;
+        var selectedRows = _grid.SelectedRows.Cast<DataGridViewRow>().ToList();
+        var currentCell = _grid.CurrentCell;
         try
         {
+            _grid.ClearSelection();
             Hide();
             System.Windows.Forms.Application.DoEvents();
             AppendLog("INFO", $"CAD 内部预览 {job.DrawingNumber}_{job.Title}");
@@ -1745,6 +1748,33 @@ public sealed class BatchPlotForm : Form
                 Show();
                 Activate();
             }
+            RestoreGridSelection(selectedRows, currentCell);
+        }
+    }
+
+    private void RestoreGridSelection(IReadOnlyList<DataGridViewRow> selectedRows, DataGridViewCell? currentCell)
+    {
+        try
+        {
+            _grid.ClearSelection();
+            foreach (var row in selectedRows)
+            {
+                if (row.Index >= 0 && row.Index < _grid.Rows.Count)
+                {
+                    row.Selected = true;
+                }
+            }
+
+            if (currentCell != null
+                && currentCell.RowIndex >= 0 && currentCell.RowIndex < _grid.Rows.Count
+                && currentCell.ColumnIndex >= 0 && currentCell.ColumnIndex < _grid.Columns.Count)
+            {
+                _grid.CurrentCell = _grid.Rows[currentCell.RowIndex].Cells[currentCell.ColumnIndex];
+            }
+        }
+        catch
+        {
+            // 预览窗口退出后 CAD/WinForms 可能重置选择状态，恢复失败不影响打印主流程。
         }
     }
 

@@ -38,6 +38,7 @@ public sealed class RectangleBatchPlotForm : Form
     private readonly TemporarySequenceOverlay _overlay;
     private int _highlightedJobIndex = -1;
     private readonly BindingList<Row> _rows = new();
+    private readonly BindingList<Row> _displayRows = new();
     private readonly DataGridView _grid = new();
     private readonly TextBox _outputDirectory = new();
     private readonly ComboBox _sortOrder = new();
@@ -50,6 +51,8 @@ public sealed class RectangleBatchPlotForm : Form
     private TitleBlockScanScope? _lastScanScope;
     private bool _updating;
     private bool _updatingPrintSelection;
+    private bool _viewSortedByHeader;
+    private int _viewSortColumnIndex = -1;
     private List<Row>? _pendingPrintToggleRows;
 
     public RectangleBatchPlotForm(Document document)
@@ -185,7 +188,7 @@ public sealed class RectangleBatchPlotForm : Form
         _mergePdf.Margin = new Padding(UiLayout.Scale(4), UiLayout.Scale(7), UiLayout.Scale(8), 0);
         options.Controls.Add(_mergePdf, 2, 0);
 
-        _leaveMargin.Text = "留白";
+        _leaveMargin.Text = "周边留白";
         _leaveMargin.Checked = false;
         _leaveMargin.AutoSize = true;
         _leaveMargin.Anchor = AnchorStyles.Left | AnchorStyles.Top;
@@ -229,13 +232,18 @@ public sealed class RectangleBatchPlotForm : Form
         _grid.BorderStyle = BorderStyle.None;
         _grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
         _grid.DefaultCellStyle.Padding = new Padding(UiLayout.Scale(3), 0, UiLayout.Scale(3), 0);
-        _grid.DataSource = _rows;
+        _grid.DataSource = _displayRows;
         var indexCol = new DataGridViewTextBoxColumn { HeaderText = "编号", Width = UiLayout.Scale(52), ReadOnly = true };
         _grid.Columns.Add(indexCol);
         _grid.CellFormatting += (_, e) =>
         {
             if (e.ColumnIndex == indexCol.Index && e.RowIndex >= 0)
-                e.Value = (e.RowIndex + 1).ToString();
+            {
+                if (_grid.Rows[e.RowIndex].DataBoundItem is Row row)
+                {
+                    e.Value = (_rows.IndexOf(row) + 1).ToString();
+                }
+            }
         };
 
         _grid.Columns.Add(new DataGridViewButtonColumn
@@ -266,7 +274,12 @@ public sealed class RectangleBatchPlotForm : Form
             DataPropertyName = nameof(Row.GraphicSize), HeaderText = "图形尺寸", ReadOnly = true,
             AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill, FillWeight = 22, MinimumWidth = UiLayout.Scale(130)
         });
+        foreach (DataGridViewColumn column in _grid.Columns)
+        {
+            column.SortMode = DataGridViewColumnSortMode.Programmatic;
+        }
         _grid.DataBindingComplete += (_, _) => ConfigurePaperCells();
+        _grid.ColumnHeaderMouseClick += GridColumnHeaderMouseClick;
         _grid.CellValueChanged += GridCellValueChanged;
         _grid.CurrentCellDirtyStateChanged += (_, _) =>
         {
@@ -279,13 +292,13 @@ public sealed class RectangleBatchPlotForm : Form
         _grid.CellMouseDown += GridCellMouseDown;
         _grid.CellClick += (_, e) =>
         {
-            if (e.RowIndex >= 0 && e.RowIndex < _rows.Count)
+            if (e.RowIndex >= 0 && e.RowIndex < _displayRows.Count)
             {
-                _highlightedJobIndex = e.RowIndex;
+                _highlightedJobIndex = _rows.IndexOf(_displayRows[e.RowIndex]);
                 try
                 {
                     var selectedJobs = _rows.Where(row => row.Selected).Select(row => row.Job).ToList();
-                    var targetJob = _rows[e.RowIndex].Job;
+                    var targetJob = _displayRows[e.RowIndex].Job;
                     var idx = selectedJobs.FindIndex(j => ReferenceEquals(j, targetJob));
                     _overlay.Show(selectedJobs, idx);
                 }
@@ -346,6 +359,13 @@ public sealed class RectangleBatchPlotForm : Form
             });
         }
 
+        _displayRows.Clear();
+        foreach (var row in _rows)
+        {
+            _displayRows.Add(row);
+        }
+        _viewSortedByHeader = false;
+        _viewSortColumnIndex = -1;
         SortRows();
     }
 
@@ -510,10 +530,13 @@ public sealed class RectangleBatchPlotForm : Form
     {
         if (_rows.Count == 0)
         {
+            RefreshDisplayRows();
             UpdateVisuals();
             return;
         }
 
+        _viewSortedByHeader = false;
+        _viewSortColumnIndex = -1;
         var horizontalFirst = _sortOrder.SelectedIndex == 1;
 
         // 多布局按 TabOrder 分组（Scanner 已按 TabOrder 排序），组内空间排序，组间保持布局顺序
@@ -536,6 +559,7 @@ public sealed class RectangleBatchPlotForm : Form
             }
         }
         _updating = false;
+        RefreshDisplayRows();
         RefreshFileNames();
         ConfigurePaperCells();
         UpdateVisuals();
@@ -584,6 +608,76 @@ public sealed class RectangleBatchPlotForm : Form
 
     private static double CenterX(PlotJob job) => (job.MinX + job.MaxX) / 2d;
     private static double CenterY(PlotJob job) => (job.MinY + job.MaxY) / 2d;
+
+    private void RefreshDisplayRows()
+    {
+        _displayRows.Clear();
+        foreach (var row in _rows)
+        {
+            _displayRows.Add(row);
+        }
+        ConfigurePaperCells();
+        _grid.Refresh();
+    }
+
+    private void GridColumnHeaderMouseClick(object? sender, DataGridViewCellMouseEventArgs e)
+    {
+        if (e.ColumnIndex < 0 || e.ColumnIndex >= _grid.Columns.Count)
+        {
+            return;
+        }
+
+        if (_viewSortedByHeader && _viewSortColumnIndex == e.ColumnIndex)
+        {
+            _viewSortedByHeader = false;
+            _viewSortColumnIndex = -1;
+            RefreshDisplayRows();
+            return;
+        }
+
+        _viewSortedByHeader = true;
+        _viewSortColumnIndex = e.ColumnIndex;
+        var sorted = _rows.OrderBy(row => GetHeaderSortValue(row, e.ColumnIndex), NaturalStringComparer.Instance).ToList();
+        _displayRows.Clear();
+        foreach (var row in sorted)
+        {
+            _displayRows.Add(row);
+        }
+        ConfigurePaperCells();
+        _grid.Refresh();
+    }
+
+    private string GetHeaderSortValue(Row row, int columnIndex)
+    {
+        var column = _grid.Columns[columnIndex];
+        if (column.DataPropertyName == nameof(Row.Selected))
+        {
+            return row.Selected ? "1" : "0";
+        }
+
+        if (column.DataPropertyName == nameof(Row.FileName))
+        {
+            return row.FileName;
+        }
+
+        if (column.Name == "PaperChoice" || column.DataPropertyName == nameof(Row.PaperChoice))
+        {
+            return row.PaperChoice;
+        }
+
+        if (column.DataPropertyName == nameof(Row.Scale))
+        {
+            return row.Scale;
+        }
+
+        if (column.DataPropertyName == nameof(Row.GraphicSize))
+        {
+            return row.GraphicSize;
+        }
+
+        // 编号列按真实打印顺序排序；预览按钮列保持原始顺序。
+        return _rows.IndexOf(row).ToString("D8");
+    }
 
     private void RefreshFileNames()
     {
@@ -902,6 +996,8 @@ public sealed class RectangleBatchPlotForm : Form
         if (_grid.Columns[e.ColumnIndex].Name == "Preview"
             && _grid.Rows[e.RowIndex].DataBoundItem is Row row)
         {
+            var selectedRows = _grid.SelectedRows.Cast<DataGridViewRow>().ToList();
+            var currentCell = _grid.CurrentCell;
             Hide();
             System.Windows.Forms.Application.DoEvents();
             try
@@ -918,7 +1014,34 @@ public sealed class RectangleBatchPlotForm : Form
             {
                 Show();
                 Activate();
+                RestoreGridSelection(selectedRows, currentCell);
             }
+        }
+    }
+
+    private void RestoreGridSelection(IReadOnlyList<DataGridViewRow> selectedRows, DataGridViewCell? currentCell)
+    {
+        try
+        {
+            _grid.ClearSelection();
+            foreach (var row in selectedRows)
+            {
+                if (row.Index >= 0 && row.Index < _grid.Rows.Count)
+                {
+                    row.Selected = true;
+                }
+            }
+
+            if (currentCell != null
+                && currentCell.RowIndex >= 0 && currentCell.RowIndex < _grid.Rows.Count
+                && currentCell.ColumnIndex >= 0 && currentCell.ColumnIndex < _grid.Columns.Count)
+            {
+                _grid.CurrentCell = _grid.Rows[currentCell.RowIndex].Cells[currentCell.ColumnIndex];
+            }
+        }
+        catch
+        {
+            // CAD 预览退出后可能触发 DataGrid 选择状态变化；恢复失败不影响后续打印。
         }
     }
 

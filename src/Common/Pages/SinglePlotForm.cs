@@ -160,7 +160,7 @@ public sealed class SinglePlotForm : Form
         outputRow.Controls.Add(browseButton, 2, 0);
         root.Controls.Add(outputRow, 0, 3);
 
-        _leaveMargin.Text = "留白（短边两侧各约 3mm）";
+        _leaveMargin.Text = "周边留白（短边两侧各约 3mm）";
         _leaveMargin.AutoSize = true;
         _leaveMargin.Checked = false;
         _leaveMargin.Dock = DockStyle.Fill;
