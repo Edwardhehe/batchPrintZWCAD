@@ -188,11 +188,13 @@ public sealed partial class BatchPlotCommands
 
             if (form.IsPreview)
             {
+                SaveLastPlotOptions(settings, deviceName, styleSheet);
                 PlotterService.Preview(job, deviceName, styleSheet, doc);
                 editor.WriteMessage("\n单张打印预览已打开。");
             }
             else
             {
+                SaveLastPlotOptions(settings, deviceName, styleSheet);
                 PlotterService.Plot(job, deviceName, styleSheet, doc, settings);
                 editor.WriteMessage($"\n单张打印完成: {outputPath}");
                 RevealFileInExplorer(outputPath);
@@ -244,6 +246,14 @@ public sealed partial class BatchPlotCommands
             ?? styles.FirstOrDefault(value => value.IndexOf("monochrome", StringComparison.OrdinalIgnoreCase) >= 0)
             ?? "";
         return (device, style);
+    }
+
+    private static void SaveLastPlotOptions(AppSettings settings, string deviceName, string styleSheet)
+    {
+        // 单张打印没有独立样式下拉框，仍然把实际使用的设备/CTB 写回统一设置，供其它模块下次默认选中。
+        settings.LastPlotDevice = deviceName;
+        settings.LastStyleSheet = styleSheet;
+        AppSettingsStore.Save(settings);
     }
 
     private static string? FindPlotOption(System.Collections.Generic.IEnumerable<string> values, string expected)

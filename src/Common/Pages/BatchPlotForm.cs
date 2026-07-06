@@ -235,10 +235,13 @@ public sealed class BatchPlotForm : Form
         _deviceCombo.Dock = DockStyle.Fill;
         _deviceCombo.Margin = new Padding(0, UiLayout.Scale(3), UiLayout.Scale(10), UiLayout.Scale(8));
         _deviceCombo.DropDownStyle = ComboBoxStyle.DropDownList;
+        _deviceCombo.SelectionChangeCommitted += (_, _) => SaveCurrentSettings();
 
         _styleCombo.Dock = DockStyle.Fill;
         _styleCombo.Margin = new Padding(0, UiLayout.Scale(3), 0, UiLayout.Scale(8));
         _styleCombo.DropDownStyle = ComboBoxStyle.DropDownList;
+        // 用户手动切换 CTB 后立即保存，保证其它打印入口下次默认沿用上一次选择。
+        _styleCombo.SelectionChangeCommitted += (_, _) => SaveCurrentSettings();
 
         _mergePdfCheckBox.Text = "合并为单个 PDF";
         _mergePdfCheckBox.AutoSize = true;

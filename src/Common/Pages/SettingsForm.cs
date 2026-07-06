@@ -193,7 +193,8 @@ public sealed class SettingsForm : Form
             MinimumSize = new Size(0, UiLayout.Scale(200))
         };
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(56)));
+        // 中间操作按钮实际宽度大于原列宽，预留足够空间避免按钮压到右侧“已选字段”列表。
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(92)));
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55));
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(22)));
         panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
@@ -213,11 +214,15 @@ public sealed class SettingsForm : Form
         {
             Dock = DockStyle.Fill,
             FlowDirection = System.Windows.Forms.FlowDirection.TopDown,
-            Padding = new Padding(UiLayout.Scale(4), UiLayout.Scale(10), UiLayout.Scale(4), 0)
+            WrapContents = false,
+            AutoScroll = false,
+            Padding = new Padding(UiLayout.Scale(6), UiLayout.Scale(10), UiLayout.Scale(6), 0)
         };
-        var addBtn = UiLayout.CreateButton("添加 →", 72);
+        var addBtn = UiLayout.CreateButton("添加 →", 76);
+        addBtn.Margin = new Padding(0, 0, 0, UiLayout.Scale(6));
         addBtn.Click += (_, _) => MoveSelectedItems(_availableFields, _selectedFields);
-        var removeBtn = UiLayout.CreateButton("← 移除", 72);
+        var removeBtn = UiLayout.CreateButton("← 移除", 76);
+        removeBtn.Margin = Padding.Empty;
         removeBtn.Click += (_, _) => MoveSelectedItems(_selectedFields, _availableFields);
         midButtons.Controls.Add(addBtn);
         midButtons.Controls.Add(removeBtn);

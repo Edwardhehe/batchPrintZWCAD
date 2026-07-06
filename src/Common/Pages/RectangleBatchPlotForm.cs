@@ -72,15 +72,15 @@ public sealed class RectangleBatchPlotForm : Form
         var top = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
-            Height = UiLayout.Scale(202),
+            Height = UiLayout.Scale(126),
             ColumnCount = 1,
             RowCount = 3,
             Padding = new Padding(UiLayout.Scale(10), UiLayout.Scale(8), UiLayout.Scale(10), UiLayout.Scale(6)),
             BackColor = Color.FromArgb(245, 247, 250)
         };
-        top.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(42)));
-        top.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(76)));
-        top.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(68)));
+        top.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(38)));
+        top.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(34)));
+        top.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(34)));
 
         var actions = NewFlow();
         var scanCurrent = UiLayout.CreateButton("扫描当前图", 108);
@@ -111,65 +111,64 @@ public sealed class RectangleBatchPlotForm : Form
         tips.SetToolTip(scanWindow, "回到 CAD 框选区域，只识别框内矩形框。");
         tips.SetToolTip(refresh, "按上次扫描方式重新扫描，并刷新矩形框列表。");
 
-        var outputGroup = new GroupBox
-        {
-            Text = "PDF 输出位置",
-            Dock = DockStyle.Fill,
-            Padding = new Padding(UiLayout.Scale(10), UiLayout.Scale(5), UiLayout.Scale(10), UiLayout.Scale(5)),
-            Margin = new Padding(0, 0, 0, UiLayout.Scale(5))
-        };
-        var outputLayout = new TableLayoutPanel
+        var outputRow = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 1,
-            RowCount = 2,
-            Margin = Padding.Empty
+            ColumnCount = 5,
+            RowCount = 1,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty
         };
-        outputLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(27)));
-        outputLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(30)));
+        outputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(52)));
+        outputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        outputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.ButtonWidth("源文件路径", 98) + UiLayout.Scale(8)));
+        outputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.ButtonWidth("源文件路径/PDF", 126) + UiLayout.Scale(8)));
+        outputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.ButtonWidth("指定路径...", 88)));
+        outputRow.Controls.Add(LabelFor("输出"), 0, 0);
         _outputDirectory.Dock = DockStyle.Fill;
         _outputDirectory.Text = Path.Combine(SourceDirectory(), "PDF");
-        _outputDirectory.Margin = new Padding(0, 0, 0, UiLayout.Scale(2));
+        _outputDirectory.Margin = new Padding(0, UiLayout.Scale(3), UiLayout.Scale(8), UiLayout.Scale(4));
         _outputDirectory.TextChanged += (_, _) => RefreshOutputPaths();
-        outputLayout.Controls.Add(_outputDirectory, 0, 0);
-
-        var pathButtons = NewFlow();
+        outputRow.Controls.Add(_outputDirectory, 1, 0);
+        // 输出路径快捷按钮放在同一行，避免 GroupBox 标题和内部行高造成按钮被裁切。
         var sourceButton = UiLayout.CreateButton("源文件路径", 98);
+        sourceButton.Margin = new Padding(0, UiLayout.Scale(2), UiLayout.Scale(6), UiLayout.Scale(2));
         sourceButton.Click += (_, _) => SetOutputDirectory(SourceDirectory());
         var pdfButton = UiLayout.CreateButton("源文件路径/PDF", 126);
+        pdfButton.Margin = new Padding(0, UiLayout.Scale(2), UiLayout.Scale(6), UiLayout.Scale(2));
         pdfButton.Click += (_, _) => SetOutputDirectory(Path.Combine(SourceDirectory(), "PDF"));
         var customButton = UiLayout.CreateButton("指定路径...", 88);
+        customButton.Margin = new Padding(0, UiLayout.Scale(2), 0, UiLayout.Scale(2));
         customButton.Click += (_, _) => ChooseOutputDirectory();
-        pathButtons.Controls.Add(sourceButton);
-        pathButtons.Controls.Add(pdfButton);
-        pathButtons.Controls.Add(customButton);
-        outputLayout.Controls.Add(pathButtons, 0, 1);
-        outputGroup.Controls.Add(outputLayout);
+        outputRow.Controls.Add(sourceButton, 2, 0);
+        outputRow.Controls.Add(pdfButton, 3, 0);
+        outputRow.Controls.Add(customButton, 4, 0);
         tips.SetToolTip(sourceButton, "输出到当前 DWG 所在文件夹。");
-        tips.SetToolTip(pdfButton, "输出到当前 DWG 所在文件夹下的 PDF 子文件夹。");
+        tips.SetToolTip(pdfButton, "输出到当前 DWG 所在文件夹下的 PDF 子文件夹。 ");
         tips.SetToolTip(customButton, "选择其他 PDF 输出文件夹。");
 
-        var printGroup = new GroupBox
+        var options = new TableLayoutPanel
         {
-            Text = "打印设置",
             Dock = DockStyle.Fill,
-            Padding = new Padding(UiLayout.Scale(10), UiLayout.Scale(5), UiLayout.Scale(10), UiLayout.Scale(5)),
-            Margin = Padding.Empty
+            ColumnCount = 8,
+            RowCount = 1,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty
         };
-        var options = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 8, RowCount = 1, Margin = Padding.Empty };
-        options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(42)));
+        options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(52)));
         options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(205)));
-        options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(128)));
-        options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(58)));
+        options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(132)));
+        options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(52)));
         options.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55));
-        options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(38)));
+        options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(42)));
         options.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45));
-        options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(112)));
+        options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.ButtonWidth("开始打印", 98)));
 
         options.Controls.Add(LabelFor("排序"), 0, 0);
         _sortOrder.DropDownStyle = ComboBoxStyle.DropDownList;
-        _sortOrder.Dock = DockStyle.Fill;
-        _sortOrder.Margin = new Padding(0, UiLayout.Scale(3), UiLayout.Scale(8), UiLayout.Scale(4));
+        _sortOrder.Height = UiLayout.ButtonHeight();
+        _sortOrder.Anchor = AnchorStyles.Left | AnchorStyles.Top;
+        _sortOrder.Margin = new Padding(0, UiLayout.Scale(3), UiLayout.Scale(8), 0);
         _sortOrder.Items.AddRange(new object[] { "从上到下，从左到右", "从左到右，从上到下" });
         _sortOrder.SelectedIndex = 0;
         _sortOrder.SelectedIndexChanged += (_, _) => SortRows();
@@ -178,35 +177,41 @@ public sealed class RectangleBatchPlotForm : Form
         _mergePdf.Text = "合并为一个 PDF";
         _mergePdf.Checked = true;
         _mergePdf.AutoSize = true;
+        _mergePdf.Anchor = AnchorStyles.Left | AnchorStyles.Top;
         _mergePdf.Margin = new Padding(UiLayout.Scale(4), UiLayout.Scale(7), UiLayout.Scale(8), 0);
         options.Controls.Add(_mergePdf, 2, 0);
         options.Controls.Add(LabelFor("打印机"), 3, 0);
         _device.DropDownStyle = ComboBoxStyle.DropDownList;
-        _device.Dock = DockStyle.Fill;
-        _device.Margin = new Padding(0, UiLayout.Scale(3), UiLayout.Scale(8), UiLayout.Scale(4));
+        _device.Height = UiLayout.ButtonHeight();
+        _device.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
+        _device.Margin = new Padding(0, UiLayout.Scale(3), UiLayout.Scale(8), 0);
+        _device.SelectionChangeCommitted += (_, _) => SaveCurrentPlotOptions();
         options.Controls.Add(_device, 4, 0);
         options.Controls.Add(LabelFor("CTB"), 5, 0);
         _style.DropDownStyle = ComboBoxStyle.DropDownList;
-        _style.Dock = DockStyle.Fill;
-        _style.Margin = new Padding(0, UiLayout.Scale(3), UiLayout.Scale(8), UiLayout.Scale(4));
+        _style.Height = UiLayout.ButtonHeight();
+        _style.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
+        _style.Margin = new Padding(0, UiLayout.Scale(3), UiLayout.Scale(8), 0);
+        // 用户手动切换 CTB 后立即写入设置，图框块/矩形框/单张打印都会读取同一份上次选择。
+        _style.SelectionChangeCommitted += (_, _) => SaveCurrentPlotOptions();
         options.Controls.Add(_style, 6, 0);
 
         var print = UiLayout.CreateButton("开始打印", 98);
-        print.Dock = DockStyle.Fill;
-        print.Margin = new Padding(UiLayout.Scale(6), UiLayout.Scale(2), 0, UiLayout.Scale(4));
+        // 开始打印按钮使用普通按钮高度并居中，不再 Fill 整行，避免撑高打印设置行导致其它控件看起来不对齐。
+        print.Anchor = AnchorStyles.Left | AnchorStyles.Top;
+        print.Margin = new Padding(0, UiLayout.Scale(2), 0, 0);
         print.BackColor = Color.FromArgb(0, 120, 215);
         print.ForeColor = Color.White;
         print.FlatStyle = FlatStyle.Flat;
         print.FlatAppearance.BorderColor = Color.FromArgb(0, 95, 170);
         print.Click += (_, _) => Print();
         options.Controls.Add(print, 7, 0);
-        printGroup.Controls.Add(options);
         tips.SetToolTip(_sortOrder, "改变列表、红框编号和最终 PDF 页面的顺序。");
         tips.SetToolTip(_mergePdf, "勾选后只保留一个合并 PDF；取消后输出每张单独 PDF。");
 
         top.Controls.Add(actions, 0, 0);
-        top.Controls.Add(outputGroup, 0, 1);
-        top.Controls.Add(printGroup, 0, 2);
+        top.Controls.Add(outputRow, 0, 1);
+        top.Controls.Add(options, 0, 2);
 
         UiLayout.StyleGrid(_grid, Font);
         _grid.BorderStyle = BorderStyle.None;
@@ -302,8 +307,8 @@ public sealed class RectangleBatchPlotForm : Form
         {
             Text = text,
             Dock = DockStyle.Fill,
-            TextAlign = ContentAlignment.MiddleLeft,
-            Margin = new Padding(0, 0, UiLayout.Scale(4), 0)
+            TextAlign = ContentAlignment.TopLeft,
+            Margin = new Padding(0, UiLayout.Scale(7), UiLayout.Scale(4), 0)
         };
 
         static Control Separator() => new Label
@@ -744,6 +749,7 @@ public sealed class RectangleBatchPlotForm : Form
             System.Windows.Forms.Application.DoEvents();
             try
             {
+                SaveCurrentPlotOptions();
                 PlotterService.Preview(row.Job, SelectedDevice(), SelectedStyle(), _document);
             }
             catch (Exception ex)
@@ -777,6 +783,7 @@ public sealed class RectangleBatchPlotForm : Form
         }
 
         Directory.CreateDirectory(directory);
+        SaveCurrentPlotOptions();
         var originalPaths = selected.ToDictionary(job => job, job => job.OutputPath);
         string? temporaryDirectory = null;
         var mergedOutput = Path.Combine(directory, SourceStem() + ".pdf");
@@ -945,6 +952,13 @@ public sealed class RectangleBatchPlotForm : Form
 
     private string SelectedDevice() => _device.SelectedItem?.ToString() ?? "";
     private string SelectedStyle() => _style.SelectedItem?.ToString() ?? "";
+
+    private void SaveCurrentPlotOptions()
+    {
+        _settings.LastPlotDevice = SelectedDevice();
+        _settings.LastStyleSheet = SelectedStyle();
+        AppSettingsStore.Save(_settings);
+    }
 
     private static string FormatPaper(PaperDetection paper)
     {
