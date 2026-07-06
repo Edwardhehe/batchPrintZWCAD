@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Text.RegularExpressions;
 #if !ZWCAD
@@ -96,9 +97,9 @@ public static class PmpCustomPaper
         if (desc == null || size == null) return null;
 
         // 检查同尺寸是否已存在
-        var wFmt = widthMm.ToString("0.##");
-        var hFmt = heightMm.ToString("0.##");
-        var paperName = $"自定义 ({wFmt} x {hFmt} 毫米)";
+        var wFmt = FormatMm(widthMm);
+        var hFmt = FormatMm(heightMm);
+        var paperName = CustomPaperName(widthMm, heightMm);
         foreach (var prop in desc.Properties())
         {
             var entry = prop.Value as JObject;
@@ -122,7 +123,7 @@ public static class PmpCustomPaper
 
         // 添加 description 条目
         var area = widthMm * heightMm;
-        var descName = $"UserDefinedMetric 自定义 {wFmt}W x {hFmt}H - (0, 0) x ({wFmt}, {hFmt}) ={area:0.} 毫米";
+        var descName = MediaDescriptionName(paperName, widthMm, heightMm);
         var descEntry = new JObject
         {
             ["caps_type"] = 2,
@@ -138,7 +139,7 @@ public static class PmpCustomPaper
         };
         desc[index] = descEntry;
 
-        // 添加 size 条目
+        // 添加 size 条目。AutoCAD 的 canonical media name 尽量使用 ASCII，避免中文名在 PIA2/PIA3 下编码不一致导致选纸失败。
         var sizeEntry = new JObject
         {
             ["caps_type"] = 2,
@@ -146,7 +147,7 @@ public static class PmpCustomPaper
             ["localized_name"] = paperName,
             ["media_description_name"] = descName,
             ["media_group"] = 15,
-            ["name"] = paperName
+            ["name"] = $"UserDefinedMetric {paperName} ({wFmt} x {hFmt}mm)"
         };
         size[index] = sizeEntry;
 
@@ -168,9 +169,7 @@ public static class PmpCustomPaper
             var size = config["udm"]?["media"]?["size"];
             if (desc == null || size == null) return null;
 
-            var wFmt = widthMm.ToString("0.##");
-            var hFmt = heightMm.ToString("0.##");
-            var paperName = $"自定义 ({wFmt} x {hFmt} 毫米)";
+            var paperName = CustomPaperName(widthMm, heightMm);
 
             // 检查同尺寸是否已存在
             foreach (var child in desc)
@@ -197,27 +196,27 @@ public static class PmpCustomPaper
 
             // 添加 description 条目
             var area = widthMm * heightMm;
-            var descName = $"UserDefinedMetric 自定义 {wFmt}W x {hFmt}H - (0, 0) x ({wFmt}, {hFmt}) ={area:0.} 毫米";
+            var descName = MediaDescriptionName(paperName, widthMm, heightMm);
             var descEntry = desc.Add(index);
             descEntry.SetValue("caps_type", "2");
             descEntry.SetValue("dimensional", "TRUE");
-            descEntry.SetValue("media_bounds_urx", widthMm.ToString("0.##"));
-            descEntry.SetValue("media_bounds_ury", heightMm.ToString("0.##"));
+            descEntry.SetValue("media_bounds_urx", FormatNumber(widthMm));
+            descEntry.SetValue("media_bounds_ury", FormatNumber(heightMm));
             descEntry.SetValue("name", descName);
-            descEntry.SetValue("printable_area", area.ToString("0.##"));
+            descEntry.SetValue("printable_area", FormatNumber(area));
             descEntry.SetValue("printable_bounds_llx", "0.0");
             descEntry.SetValue("printable_bounds_lly", "0.0");
-            descEntry.SetValue("printable_bounds_urx", widthMm.ToString("0.##"));
-            descEntry.SetValue("printable_bounds_ury", heightMm.ToString("0.##"));
+            descEntry.SetValue("printable_bounds_urx", FormatNumber(widthMm));
+            descEntry.SetValue("printable_bounds_ury", FormatNumber(heightMm));
 
-            // 添加 size 条目
+            // AutoCAD 的 canonical media name 尽量使用 ASCII，避免中文 localized_name 在 PIA2/PIA3 下编码不一致导致选纸失败。
             var sizeEntry = size.Add(index);
             sizeEntry.SetValue("caps_type", "2");
             sizeEntry.SetValue("landscape_mode", "TRUE");
             sizeEntry.SetValue("localized_name", paperName);
             sizeEntry.SetValue("media_description_name", descName);
             sizeEntry.SetValue("media_group", "15");
-            sizeEntry.SetValue("name", paperName);
+            sizeEntry.SetValue("name", $"UserDefinedMetric {paperName} ({FormatMm(widthMm)} x {FormatMm(heightMm)}mm)");
 
             config.Saves(pmpPath);
             return paperName;
@@ -299,6 +298,23 @@ public static class PmpCustomPaper
 
         return null;
     }
+
+    private static string CustomPaperName(double widthMm, double heightMm)
+    {
+        return $"LA_Custom_{widthMm:0.#}x{heightMm:0.#}";
+    }
+
+    private static string MediaDescriptionName(string paperName, double widthMm, double heightMm)
+    {
+        var area = widthMm * heightMm;
+        return $"UserDefinedMetric {paperName} Landscape {FormatMm(widthMm)}W x {FormatMm(heightMm)}H - (0, 0) x ({FormatPlain(widthMm)}, {FormatPlain(heightMm)}) ={FormatPlain(area)} mm";
+    }
+
+    private static string FormatMm(double value) => value.ToString("0.00", CultureInfo.InvariantCulture);
+
+    private static string FormatPlain(double value) => value.ToString("0.##", CultureInfo.InvariantCulture);
+
+    private static string FormatNumber(double value) => value.ToString("0.0#########", CultureInfo.InvariantCulture);
 
 #if !ZWCAD
     private static void RemovePia3(string pmpPath, string raw, string paperName)
