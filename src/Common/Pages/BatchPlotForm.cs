@@ -43,7 +43,7 @@ public sealed class BatchPlotForm : Form
     private readonly TemporarySequenceOverlay _sequenceOverlay;
     private readonly AppSettings _settings;
     private bool _sequenceOverlayFollowsCurrentJobs;
-    private int _highlightedJobIndex = -1;
+    private PlotJob? _highlightedJob;
     private string _lastLogPath = "";
     private string _mergedOutputPath = "";
     private long _nextSortPriority;
@@ -314,10 +314,11 @@ public sealed class BatchPlotForm : Form
         _grid.CellMouseDown += GridCellMouseDown;
         _grid.CellClick += (_, e) =>
         {
-            if (e.RowIndex >= 0 && e.RowIndex < _jobs.Count)
+            if (e.RowIndex >= 0 && e.RowIndex < _jobs.Count
+                && _grid.Rows[e.RowIndex].DataBoundItem is PlotJob job)
             {
-                _highlightedJobIndex = e.RowIndex;
-                ShowSequenceOverlayForCurrentJobs();
+                // 换行只切换已有标注的高亮属性，避免整批删除重画导致 CAD 卡顿。
+                HighlightSequenceOverlayJob(job);
             }
         };
         _grid.ContextMenuStrip = CreateGridContextMenu();
@@ -816,7 +817,9 @@ public sealed class BatchPlotForm : Form
         _sequenceOverlayFollowsCurrentJobs = true;
         try
         {
-            _sequenceOverlay.Show(_jobs.Where(job => job.Selected && IsCurrentDocumentJob(job)).ToList(), _highlightedJobIndex);
+            var currentJobs = _jobs.Where(job => job.Selected && IsCurrentDocumentJob(job)).ToList();
+            var highlightJob = _highlightedJob != null && currentJobs.Contains(_highlightedJob) ? _highlightedJob : null;
+            _sequenceOverlay.Show(currentJobs, highlightJob);
         }
         catch (Exception ex)
         {
@@ -824,6 +827,24 @@ public sealed class BatchPlotForm : Form
             _sequenceOverlay.Clear();
             AppendLog("WARN", "临时序号标注显示失败: " + ex.Message);
         }
+    }
+
+    private void HighlightSequenceOverlayJob(PlotJob job)
+    {
+        _highlightedJob = job;
+        if (!_sequenceOverlayFollowsCurrentJobs)
+        {
+            return;
+        }
+
+        if (!job.Selected || !IsCurrentDocumentJob(job))
+        {
+            // 当前行不在临时标注集合里时，只记录选择，避免传入不存在的实体导致无效刷新。
+            _sequenceOverlay.SetHighlight(null);
+            return;
+        }
+
+        _sequenceOverlay.SetHighlight(job);
     }
 
     private void ClearSequenceOverlay()

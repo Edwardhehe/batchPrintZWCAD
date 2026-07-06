@@ -25,15 +25,33 @@ public sealed class TemporarySequenceOverlay
     private const string TextStyleName = "ZBP_TEMP_SEQUENCE_TEXT";
     private readonly Document _document;
     private readonly List<ObjectId> _entityIds = new();
+    private readonly Dictionary<PlotJob, OverlayEntityGroup> _entityGroups = new();
+    private PlotJob? _highlightedJob;
+
+    private sealed class OverlayEntityGroup
+    {
+        public ObjectId FrameId { get; set; }
+        public List<ObjectId> LabelIds { get; } = new();
+        public double NormalFrameWidth { get; set; }
+        public double HighlightFrameWidth { get; set; }
+    }
 
     public TemporarySequenceOverlay(Document document)
     {
         _document = document;
     }
 
-    public void Show(IReadOnlyList<PlotJob> jobs, int highlightIndex = -1)
+    public void Show(IReadOnlyList<PlotJob> jobs, int highlightIndex)
     {
-        Clear();
+        // 兼容矩形批量窗口的旧调用：先把过滤后下标转换成具体 Job，核心逻辑统一按对象引用高亮。
+        var highlightJob = highlightIndex >= 0 && highlightIndex < jobs.Count ? jobs[highlightIndex] : null;
+        Show(jobs, highlightJob);
+    }
+
+    public void Show(IReadOnlyList<PlotJob> jobs, PlotJob? highlightJob = null)
+    {
+        // 整批重建时 Clear 不立即刷新，避免“清空一次 + 绘制一次”造成两次 Regen。
+        Clear(repaint: false);
 
         using var docLock = _document.LockDocument();
         using var tr = _document.Database.TransactionManager.StartTransaction();
@@ -63,9 +81,8 @@ public sealed class TemporarySequenceOverlay
         {
         }
 
-        for (var i = 0; i < jobs.Count; i++)
+        foreach (var job in jobs)
         {
-            var job = jobs[i];
             if (!TryGetBounds(job, dcsToWcs, out var minX, out var minY, out var maxX, out var maxY))
             {
                 continue;
@@ -76,15 +93,13 @@ public sealed class TemporarySequenceOverlay
             var minSide = Math.Min(width, height);
             var padding = Math.Max(minSide * 0.035, 10d);
             var textHeight = GetTextHeight(width, height);
-            // 高亮行：黄色 (ACI 2)、加粗边框、加粗数字；普通行：红色 (ACI 1)
-            var isHighlight = i == highlightIndex;
-            var color = isHighlight
-                ? Color.FromColorIndex(ColorMethod.ByAci, 2)
-                : Color.FromColorIndex(ColorMethod.ByAci, 1);
-            // 高亮通过 PL 线宽（ConstantWidth）实现，不动 LineWeight——用户不一定会开线宽显示
-            var frameWidth = isHighlight
-                ? Math.Max(GetFrameWidth(minSide) * 3d, minSide / 20d)
-                : GetFrameWidth(minSide);
+            // 高亮行：黄色 (ACI 2)、加粗边框；普通行：红色 (ACI 1)
+            var isHighlight = ReferenceEquals(job, highlightJob);
+            var color = GetOverlayColor(isHighlight);
+            // 保存普通/高亮两套宽度，后续 DataGrid 换行只改实体属性，不再整批删除重画。
+            var normalFrameWidth = GetFrameWidth(minSide);
+            var highlightFrameWidth = Math.Max(normalFrameWidth * 3d, minSide / 20d);
+            var frameWidth = isHighlight ? highlightFrameWidth : normalFrameWidth;
             var lineWeight = GetLineWeight(minSide);
 
             var ownerId = GetJobOwnerId(tr, db, job);
@@ -118,17 +133,25 @@ public sealed class TemporarySequenceOverlay
             frame.AddVertexAt(1, Rot(+hw, -hh), 0, 0, 0);
             frame.AddVertexAt(2, Rot(+hw, +hh), 0, 0, 0);
             frame.AddVertexAt(3, Rot(-hw, +hh), 0, 0, 0);
-            AddEntity(tr, owner, frame);
+
+            var group = new OverlayEntityGroup
+            {
+                NormalFrameWidth = normalFrameWidth,
+                HighlightFrameWidth = highlightFrameWidth
+            };
+            group.FrameId = AddEntity(tr, owner, frame);
 
             var center = new Point3d((minX + maxX) / 2d, (minY + maxY) / 2d, 0);
-            AddBoldLabel(tr, owner, layerId, textStyleId, color, center, job.DrawingNumber, textHeight, ucsAngle, isHighlight);
+            AddBoldLabel(tr, owner, layerId, textStyleId, color, center, job.DrawingNumber, textHeight, ucsAngle, group.LabelIds);
+            _entityGroups[job] = group;
         }
 
+        _highlightedJob = highlightJob;
         tr.Commit();
         Regen();
     }
 
-    public void Clear()
+    public void Clear(bool repaint = true)
     {
         if (_entityIds.Count == 0)
         {
@@ -160,7 +183,12 @@ public sealed class TemporarySequenceOverlay
         finally
         {
             _entityIds.Clear();
-            Regen();
+            _entityGroups.Clear();
+            _highlightedJob = null;
+            if (repaint)
+            {
+                Regen();
+            }
         }
     }
 
@@ -215,11 +243,68 @@ public sealed class TemporarySequenceOverlay
         return id;
     }
 
-    private void AddEntity(Transaction tr, BlockTableRecord owner, Entity entity)
+    private ObjectId AddEntity(Transaction tr, BlockTableRecord owner, Entity entity)
     {
         var id = owner.AppendEntity(entity);
         tr.AddNewlyCreatedDBObject(entity, true);
         _entityIds.Add(id);
+        return id;
+    }
+
+    public void SetHighlight(PlotJob? highlightJob)
+    {
+        if (ReferenceEquals(_highlightedJob, highlightJob))
+        {
+            return;
+        }
+
+        try
+        {
+            using var docLock = _document.LockDocument();
+            using var tr = _document.Database.TransactionManager.StartTransaction();
+
+            // DataGrid 换行时只恢复上一行、点亮当前行，避免删除/重画整批 CAD 临时实体导致 ZWCAD 卡顿。
+            ApplyHighlight(tr, _highlightedJob, false);
+            ApplyHighlight(tr, highlightJob, true);
+
+            tr.Commit();
+            _highlightedJob = highlightJob;
+            UpdateScreenOnly();
+        }
+        catch
+        {
+            // 高亮切换失败不能影响批量打印主流程，下一次整批 Show 会重新同步状态。
+        }
+    }
+
+    private void ApplyHighlight(Transaction tr, PlotJob? job, bool highlight)
+    {
+        if (job == null || !_entityGroups.TryGetValue(job, out var group))
+        {
+            return;
+        }
+
+        var color = GetOverlayColor(highlight);
+        if (!group.FrameId.IsNull && !group.FrameId.IsErased
+            && tr.GetObject(group.FrameId, OpenMode.ForWrite, false) is Polyline frame
+            && !frame.IsErased)
+        {
+            frame.Color = color;
+            frame.ConstantWidth = highlight ? group.HighlightFrameWidth : group.NormalFrameWidth;
+        }
+
+        foreach (var id in group.LabelIds)
+        {
+            if (id.IsNull || id.IsErased)
+            {
+                continue;
+            }
+
+            if (tr.GetObject(id, OpenMode.ForWrite, false) is Entity label && !label.IsErased)
+            {
+                label.Color = color;
+            }
+        }
     }
 
     private static ObjectId GetJobOwnerId(Transaction tr, Database db, PlotJob job)
@@ -245,11 +330,10 @@ public sealed class TemporarySequenceOverlay
         }
     }
 
-    private void AddBoldLabel(Transaction tr, BlockTableRecord owner, ObjectId layerId, ObjectId textStyleId, Color color, Point3d center, string text, double height, double rotation, bool highlight = false)
+    private void AddBoldLabel(Transaction tr, BlockTableRecord owner, ObjectId layerId, ObjectId textStyleId, Color color, Point3d center, string text, double height, double rotation, List<ObjectId> labelIds)
     {
         var stroke = Math.Max(height * 0.035, 2d);
-        // 高亮时描边加粗：偏移量翻倍 + 额外一层中间描边
-        if (highlight) stroke *= 2;
+        // 文字始终只创建一套描边实体；换行高亮时只改颜色，避免为加粗效果重建文字。
         var cosR = Math.Cos(rotation);
         var sinR = Math.Sin(rotation);
         var offsets = new (double X, double Y)[]
@@ -283,7 +367,8 @@ public sealed class TemporarySequenceOverlay
             label.VerticalMode = TextVerticalMode.TextVerticalMid;
             label.Position = point;
             label.AlignmentPoint = point;
-            AddEntity(tr, owner, label);
+            var id = AddEntity(tr, owner, label);
+            labelIds.Add(id);
             try
             {
                 label.AdjustAlignment(_document.Database);
@@ -304,6 +389,23 @@ public sealed class TemporarySequenceOverlay
         catch (CadRuntimeException)
         {
         }
+    }
+
+    private void UpdateScreenOnly()
+    {
+        try
+        {
+            // 换行高亮只是属性变化，UpdateScreen 足够；避免频繁 Regen 拖慢 ZWCAD。
+            _document.Editor.UpdateScreen();
+        }
+        catch (CadRuntimeException)
+        {
+        }
+    }
+
+    private static Color GetOverlayColor(bool highlight)
+    {
+        return Color.FromColorIndex(ColorMethod.ByAci, highlight ? (short)2 : (short)1);
     }
 
     private static bool TryGetBounds(PlotJob job, Matrix3d dcsToWcs, out double minX, out double minY, out double maxX, out double maxY)
@@ -342,20 +444,6 @@ public sealed class TemporarySequenceOverlay
     private static double GetFrameWidth(double minSide)
     {
         return Math.Min(Math.Max(minSide * 0.08, 20d), minSide * 0.18);
-    }
-
-    private static LineWeight BumpLineWeight(LineWeight w)
-    {
-        return w switch
-        {
-            LineWeight.LineWeight000 => LineWeight.LineWeight025,
-            LineWeight.LineWeight025 => LineWeight.LineWeight050,
-            LineWeight.LineWeight050 => LineWeight.LineWeight080,
-            LineWeight.LineWeight080 => LineWeight.LineWeight100,
-            LineWeight.LineWeight100 => LineWeight.LineWeight140,
-            LineWeight.LineWeight140 => LineWeight.LineWeight200,
-            _ => LineWeight.LineWeight211
-        };
     }
 
     private static LineWeight GetLineWeight(double minSide)
