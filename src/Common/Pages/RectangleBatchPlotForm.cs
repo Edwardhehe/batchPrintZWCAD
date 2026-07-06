@@ -48,6 +48,8 @@ public sealed class RectangleBatchPlotForm : Form
     private Extents3d? _scanWindow;
     private TitleBlockScanScope? _lastScanScope;
     private bool _updating;
+    private bool _updatingPrintSelection;
+    private List<Row>? _pendingPrintToggleRows;
 
     public RectangleBatchPlotForm(Document document)
     {
@@ -629,13 +631,17 @@ public sealed class RectangleBatchPlotForm : Form
 
     private void GridCellValueChanged(object? sender, DataGridViewCellEventArgs e)
     {
-        if (_updating || e.RowIndex < 0 || e.ColumnIndex < 0
+        if (_updating || _updatingPrintSelection || e.RowIndex < 0 || e.ColumnIndex < 0
             || _grid.Rows[e.RowIndex].DataBoundItem is not Row row)
         {
             return;
         }
 
-        if (_grid.Columns[e.ColumnIndex].Name == "PaperChoice")
+        if (_grid.Columns[e.ColumnIndex].DataPropertyName == nameof(Row.Selected))
+        {
+            ApplyPrintSelectionToHighlightedRows(row);
+        }
+        else if (_grid.Columns[e.ColumnIndex].Name == "PaperChoice")
         {
             var value = _grid.Rows[e.RowIndex].Cells[e.ColumnIndex].Value?.ToString() ?? "";
             var option = row.Options.FirstOrDefault(candidate => string.Equals(FormatPaper(candidate), value, StringComparison.Ordinal));
@@ -652,6 +658,32 @@ public sealed class RectangleBatchPlotForm : Form
         UpdateVisuals();
     }
 
+    private void ApplyPrintSelectionToHighlightedRows(Row changedRow)
+    {
+        var targetRows = _pendingPrintToggleRows ?? HighlightedRows();
+        _pendingPrintToggleRows = null;
+        if (targetRows.Count <= 1 || !targetRows.Contains(changedRow))
+        {
+            return;
+        }
+
+        try
+        {
+            _updatingPrintSelection = true;
+            // 多行高亮后点击“打印”勾选框时，以当前行状态为准批量同步，支持 Shift/Ctrl 选中后一次切换。
+            foreach (var row in targetRows)
+            {
+                row.Selected = changedRow.Selected;
+            }
+        }
+        finally
+        {
+            _updatingPrintSelection = false;
+        }
+
+        _grid.Refresh();
+    }
+
     private ContextMenuStrip CreateContextMenu()
     {
         var menu = new ContextMenuStrip();
@@ -666,7 +698,23 @@ public sealed class RectangleBatchPlotForm : Form
 
     private void GridCellMouseDown(object? sender, DataGridViewCellMouseEventArgs e)
     {
-        if (e.Button != MouseButtons.Right || e.RowIndex < 0)
+        if (e.RowIndex < 0)
+        {
+            return;
+        }
+
+        if (e.Button == MouseButtons.Left
+            && e.ColumnIndex >= 0
+            && _grid.Columns[e.ColumnIndex].DataPropertyName == nameof(Row.Selected)
+            && _grid.SelectedRows.Count > 1
+            && _grid.Rows[e.RowIndex].DataBoundItem is Row clickedRow)
+        {
+            // 先记住点击前的多选行；DataGrid 点击复选框时可能会先改当前选择，后续 CellValueChanged 再统一同步这些行。
+            var highlightedRows = HighlightedRows();
+            _pendingPrintToggleRows = highlightedRows.Contains(clickedRow) ? highlightedRows : null;
+        }
+
+        if (e.Button != MouseButtons.Right)
         {
             return;
         }

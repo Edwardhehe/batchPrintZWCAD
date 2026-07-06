@@ -43,6 +43,8 @@ public sealed class BatchPlotForm : Form
     private readonly TemporarySequenceOverlay _sequenceOverlay;
     private readonly AppSettings _settings;
     private bool _sequenceOverlayFollowsCurrentJobs;
+    private bool _updatingPrintSelection;
+    private List<PlotJob>? _pendingPrintToggleJobs;
     private PlotJob? _highlightedJob;
     private string _lastLogPath = "";
     private string _mergedOutputPath = "";
@@ -783,7 +785,23 @@ public sealed class BatchPlotForm : Form
 
     private void GridCellMouseDown(object? sender, DataGridViewCellMouseEventArgs e)
     {
-        if (e.Button != MouseButtons.Right || e.RowIndex < 0)
+        if (e.RowIndex < 0)
+        {
+            return;
+        }
+
+        if (e.Button == MouseButtons.Left
+            && e.ColumnIndex >= 0
+            && _grid.Columns[e.ColumnIndex].DataPropertyName == nameof(PlotJob.Selected)
+            && _grid.SelectedRows.Count > 1
+            && _grid.Rows[e.RowIndex].DataBoundItem is PlotJob clickedJob)
+        {
+            // 先记住点击前的多选行；DataGrid 点击复选框时可能会先改当前选择，后续 CellValueChanged 再统一同步这些行。
+            var highlightedJobs = GetHighlightedJobs();
+            _pendingPrintToggleJobs = highlightedJobs.Contains(clickedJob) ? highlightedJobs : null;
+        }
+
+        if (e.Button != MouseButtons.Right)
         {
             return;
         }
@@ -951,14 +969,46 @@ public sealed class BatchPlotForm : Form
 
     private void GridCellValueChanged(object? sender, DataGridViewCellEventArgs e)
     {
-        if (e.RowIndex < 0 || e.ColumnIndex < 0
+        if (_updatingPrintSelection
+            || e.RowIndex < 0 || e.ColumnIndex < 0
             || _grid.Columns[e.ColumnIndex].DataPropertyName != nameof(PlotJob.Selected))
         {
             return;
         }
 
+        if (_grid.Rows[e.RowIndex].DataBoundItem is PlotJob changedJob)
+        {
+            ApplyPrintSelectionToHighlightedRows(changedJob);
+        }
+
         RefreshStatus();
         RefreshSelectedOverlay();
+    }
+
+    private void ApplyPrintSelectionToHighlightedRows(PlotJob changedJob)
+    {
+        var targetJobs = _pendingPrintToggleJobs ?? GetHighlightedJobs();
+        _pendingPrintToggleJobs = null;
+        if (targetJobs.Count <= 1 || !targetJobs.Contains(changedJob))
+        {
+            return;
+        }
+
+        try
+        {
+            _updatingPrintSelection = true;
+            // 多行高亮后点击“打印”勾选框时，以当前行状态为准批量同步，支持 Shift/Ctrl 选中后一次切换。
+            foreach (var job in targetJobs)
+            {
+                job.Selected = changedJob.Selected;
+            }
+        }
+        finally
+        {
+            _updatingPrintSelection = false;
+        }
+
+        _grid.Refresh();
     }
 
     private void RefreshSelectedOverlay()
