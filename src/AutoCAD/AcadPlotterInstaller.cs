@@ -315,17 +315,12 @@ public static class AcadPlotterInstaller
             new PaperSpec { Name = "A1", Width = 841, Height = 594 },
             new PaperSpec { Name = "A0", Width = 1189, Height = 841 }
         };
-        var multipliers = new[] { 1d, 1.25d, 1.5d, 1.75d, 2d, 2.25d, 2.5d, 2.75d, 3d };
+        var multipliers = Enumerable.Range(8, 17).Select(unit => unit / 8d);
 
         foreach (var paper in basePapers)
         {
             foreach (var multiplier in multipliers)
             {
-                if (paper.Name is "A4" or "A3" && multiplier > 2d)
-                {
-                    continue;
-                }
-
                 var suffix = Math.Abs(multiplier - 1d) < 1e-9
                     ? ""
                     : "_" + multiplier.ToString("0.##", CultureInfo.InvariantCulture) + "L";

@@ -7,6 +7,25 @@ namespace ZwcadBatchPlot;
 
 public static class PaperSizeDetector
 {
+    private const double StandardPaperTolerance = 0.04d;
+    private const double DefaultLongPaperShortSideTolerance = 0.04d;
+    private const double RectangleLongPaperShortSideTolerance = 0.02d;
+    private const double LongPaperSnapTolerance = 0.08d;
+    private const int LongPaperIncrementDenominator = 8;
+    private const int MinimumLongPaperUnits = LongPaperIncrementDenominator + 1;
+
+    public sealed class DetectionOptions
+    {
+        public double LongPaperShortSideTolerance { get; set; } = DefaultLongPaperShortSideTolerance;
+    }
+
+    public static readonly DetectionOptions DefaultDetectionOptions = new();
+
+    public static readonly DetectionOptions RectangleBatchDetectionOptions = new()
+    {
+        LongPaperShortSideTolerance = RectangleLongPaperShortSideTolerance
+    };
+
     private sealed class PaperCandidate
     {
         public StandardPaper Paper { get; set; } = null!;
@@ -96,7 +115,12 @@ public static class PaperSizeDetector
 
     public static PaperDetection Detect(double width, double height)
     {
-        var candidates = GetCandidateDetails(width, height);
+        return Detect(width, height, DefaultDetectionOptions);
+    }
+
+    public static PaperDetection Detect(double width, double height, DetectionOptions options)
+    {
+        var candidates = GetCandidateDetails(width, height, options);
         if (candidates.Count == 0)
         {
             return FallbackDetect(Math.Abs(width), Math.Abs(height));
@@ -107,7 +131,12 @@ public static class PaperSizeDetector
 
     public static IReadOnlyList<PaperDetection> DetectCandidates(double width, double height)
     {
-        var details = GetCandidateDetails(width, height);
+        return DetectCandidates(width, height, DefaultDetectionOptions);
+    }
+
+    public static IReadOnlyList<PaperDetection> DetectCandidates(double width, double height, DetectionOptions options)
+    {
+        var details = GetCandidateDetails(width, height, options);
         if (details.Count == 0)
         {
             return new PaperDetection[0];
@@ -125,7 +154,7 @@ public static class PaperSizeDetector
             .ToList();
     }
 
-    private static List<PaperCandidate> GetCandidateDetails(double width, double height)
+    private static List<PaperCandidate> GetCandidateDetails(double width, double height, DetectionOptions options)
     {
         var actualWidth = Math.Abs(width);
         var actualHeight = Math.Abs(height);
@@ -134,7 +163,7 @@ public static class PaperSizeDetector
         {
             foreach (var scale in CommonScales)
             {
-                AddCandidate(candidates, paper, scale, actualWidth, actualHeight);
+                AddCandidate(candidates, paper, scale, actualWidth, actualHeight, options);
             }
         }
 
@@ -183,17 +212,17 @@ public static class PaperSizeDetector
         var measuredLong = Math.Max(currentWidth, currentHeight);
         var longSide = measuredLong > standard.LongSide
             ? SnapLongSide(measuredLong, standard.LongSide)
-            : standard.LongSide * 1.25;
+            : standard.LongSide * MinimumLongPaperUnits / (double)LongPaperIncrementDenominator;
         return landscape ? (longSide, standard.ShortSide) : (standard.ShortSide, longSide);
     }
 
-    private static void AddCandidate(List<PaperCandidate> candidates, StandardPaper paper, double scale, double actualWidth, double actualHeight)
+    private static void AddCandidate(List<PaperCandidate> candidates, StandardPaper paper, double scale, double actualWidth, double actualHeight, DetectionOptions options)
     {
         var widthMm = actualWidth / scale;
         var heightMm = actualHeight / scale;
 
-        AddOrientation(candidates, paper, scale, widthMm, heightMm, actualWidth, actualHeight, paper.LongSide, paper.ShortSide);
-        AddOrientation(candidates, paper, scale, widthMm, heightMm, actualWidth, actualHeight, paper.ShortSide, paper.LongSide);
+        AddOrientation(candidates, paper, scale, widthMm, heightMm, actualWidth, actualHeight, paper.LongSide, paper.ShortSide, options);
+        AddOrientation(candidates, paper, scale, widthMm, heightMm, actualWidth, actualHeight, paper.ShortSide, paper.LongSide, options);
     }
 
     private static void AddOrientation(
@@ -205,11 +234,12 @@ public static class PaperSizeDetector
         double actualWidth,
         double actualHeight,
         double standardWidth,
-        double standardHeight)
+        double standardHeight,
+        DetectionOptions options)
     {
         var widthError = RelativeError(widthMm, standardWidth);
         var heightError = RelativeError(heightMm, standardHeight);
-        if (widthError <= 0.04 && heightError <= 0.04)
+        if (widthError <= StandardPaperTolerance && heightError <= StandardPaperTolerance)
         {
             candidates.Add(new PaperCandidate
             {
@@ -229,14 +259,14 @@ public static class PaperSizeDetector
         var actualLong = Math.Max(widthMm, heightMm);
         var shortError = RelativeError(actualShort, expectedShort);
         var isLong = actualLong > expectedLong * 1.03;
-        if (!isLong || shortError > 0.04)
+        if (!isLong || shortError > options.LongPaperShortSideTolerance)
         {
             return;
         }
 
         var snappedLong = SnapLongSide(actualLong, expectedLong);
         var longError = RelativeError(actualLong, snappedLong);
-        if (longError > 0.08)
+        if (longError > LongPaperSnapTolerance)
         {
             return;
         }
@@ -250,29 +280,47 @@ public static class PaperSizeDetector
             IsLong = true,
             PaperWidthMm = landscape ? snappedLong : expectedShort,
             PaperHeightMm = landscape ? expectedShort : snappedLong,
-            Reason = $"短边锁定 {expectedShort:0.##}mm，长边按标准长边的 1/4 倍数匹配为 {snappedLong:0.##}mm，短边误差 {shortError:P1}，长边误差 {longError:P1}，CAD尺寸 {actualWidth:0.##} x {actualHeight:0.##}"
+            Reason = $"短边锁定 {expectedShort:0.##}mm，长边按标准长边的 1/8 倍数匹配为 {snappedLong:0.##}mm，短边误差 {shortError:P1}，长边误差 {longError:P1}，CAD尺寸 {actualWidth:0.##} x {actualHeight:0.##}"
         });
     }
 
     private static double SnapLongSide(double measuredLong, double standardLong)
     {
-        var quarters = Math.Max(5, (int)Math.Round(measuredLong / standardLong * 4, MidpointRounding.AwayFromZero));
-        return standardLong * quarters / 4d;
+        var units = Math.Max(MinimumLongPaperUnits, (int)Math.Round(measuredLong / standardLong * LongPaperIncrementDenominator, MidpointRounding.AwayFromZero));
+        return standardLong * units / (double)LongPaperIncrementDenominator;
     }
 
     private static string LongPaperExtension(double paperWidthMm, double paperHeightMm, StandardPaper standard)
     {
         var longSide = Math.Max(paperWidthMm, paperHeightMm);
-        var quarters = (int)Math.Round(longSide / standard.LongSide * 4, MidpointRounding.AwayFromZero);
-        var ext = quarters - 4;
-        if (ext <= 0) return "";
-        return ext switch
+        var units = (int)Math.Round(longSide / standard.LongSide * LongPaperIncrementDenominator, MidpointRounding.AwayFromZero);
+        var ext = units - LongPaperIncrementDenominator;
+        return ext <= 0 ? "" : FormatLongPaperExtension(ext);
+    }
+
+    private static string FormatLongPaperExtension(int extensionUnits)
+    {
+        if (extensionUnits <= 0)
         {
-            1 => "1/4",
-            2 => "1/2",
-            3 => "3/4",
-            _ => $"{ext}/4"
-        };
+            return "";
+        }
+
+        var divisor = extensionUnits < LongPaperIncrementDenominator
+            ? GreatestCommonDivisor(extensionUnits, LongPaperIncrementDenominator)
+            : 1;
+        return $"{extensionUnits / divisor}/{LongPaperIncrementDenominator / divisor}";
+    }
+
+    private static int GreatestCommonDivisor(int left, int right)
+    {
+        while (right != 0)
+        {
+            var remainder = left % right;
+            left = right;
+            right = remainder;
+        }
+
+        return Math.Abs(left);
     }
 
     private static PaperDetection FallbackDetect(double actualWidth, double actualHeight)

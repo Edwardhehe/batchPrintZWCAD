@@ -209,7 +209,8 @@ public static class RectangleFrameScanner
         {
             var width = rectangle.ActualWidth > 0 ? rectangle.ActualWidth : rectangle.MaxX - rectangle.MinX;
             var height = rectangle.ActualHeight > 0 ? rectangle.ActualHeight : rectangle.MaxY - rectangle.MinY;
-            var options = PaperSizeDetector.DetectCandidates(width, height);
+            // 矩形框只靠几何边长识别图幅，短边误差过大会把普通长矩形误吸附为加长图；因此加长图短边容差收紧到 2%。
+            var options = PaperSizeDetector.DetectCandidates(width, height, PaperSizeDetector.RectangleBatchDetectionOptions);
             if (options.Count == 0)
             {
                 continue;
