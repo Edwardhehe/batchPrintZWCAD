@@ -26,8 +26,10 @@ public sealed class SinglePlotPaperSelectionForm : Form
 
     private void InitializeComponents()
     {
-        Text = "单张打印 - 选择纸张";
-        UiLayout.ConfigureForm(this, 560, 190, 560, 190);
+        Text = "选择纸张";
+        UiLayout.ConfigureForm(this, 560, 210, 560, 210);
+        // 高 DPI 下 Form.Size 会包含标题栏和边框，显式设置紧凑 ClientSize，避免内容重叠又不过度占屏。
+        ClientSize = new Size(UiLayout.Scale(560), UiLayout.Scale(180));
         FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
         ShowInTaskbar = false;
 
@@ -38,18 +40,18 @@ public sealed class SinglePlotPaperSelectionForm : Form
             RowCount = 3,
             Padding = new Padding(UiLayout.Scale(14))
         };
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(50)));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(34)));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(42)));
 
         root.Controls.Add(new Label
         {
-            Text = "该外框可匹配多种纸张和比例，请选择本次打印使用的纸张：",
+            Text = "该外框可匹配多种纸张和比例，\r\n请选择本次打印使用的纸张：",
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleLeft
         }, 0, 0);
 
-        _choices.Dock = DockStyle.Top;
+        _choices.Dock = DockStyle.Fill;
         _choices.DropDownStyle = ComboBoxStyle.DropDownList;
         _choices.Items.AddRange(_candidates
             .Select(candidate =>
@@ -61,9 +63,11 @@ public sealed class SinglePlotPaperSelectionForm : Form
 
         var buttons = new FlowLayoutPanel
         {
-            Dock = DockStyle.Fill,
+            Dock = DockStyle.Bottom,
+            Height = UiLayout.Scale(36),
             FlowDirection = FlowDirection.RightToLeft,
-            WrapContents = false
+            WrapContents = false,
+            Padding = new Padding(0, UiLayout.Scale(4), 0, 0)
         };
         var ok = UiLayout.CreateButton("确定", 82);
         ok.DialogResult = DialogResult.OK;

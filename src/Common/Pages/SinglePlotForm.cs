@@ -46,7 +46,9 @@ public sealed class SinglePlotForm : Form
     private void InitializeComponents(string sourceFile, double width, double height)
     {
         Text = "单张打印";
-        UiLayout.ConfigureForm(this, 540, 320, 540, 320);
+        UiLayout.ConfigureForm(this, 720, 420, 680, 380);
+        // 高 DPI 下 Size 包含标题栏和边框，显式设置紧凑 ClientSize 避免控件重叠。
+        ClientSize = new Size(UiLayout.Scale(720), UiLayout.Scale(380));
         FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
         ShowInTaskbar = false;
 
@@ -55,14 +57,14 @@ public sealed class SinglePlotForm : Form
             Dock = DockStyle.Fill,
             ColumnCount = 1,
             RowCount = 6,
-            Padding = new Padding(UiLayout.Scale(14))
+            Padding = new Padding(UiLayout.Scale(24))
         };
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(28))); // 区域
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(28))); // 比例
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(38))); // 纸张
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(38))); // 输出
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(42))); // 区域
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(42))); // 比例
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(50))); // 纸张
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(50))); // 输出
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));              // 间距
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(42))); // 按钮
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(52))); // 按钮
 
         // 第一行：打印区域
         _areaLabel.Text = $"打印区域: {width:0.##} × {height:0.##}（图纸单位）";
@@ -84,7 +86,7 @@ public sealed class SinglePlotForm : Form
             ColumnCount = 2,
             RowCount = 1
         };
-        paperRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(80)));
+        paperRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(96)));
         paperRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         paperRow.Controls.Add(new Label
         {
@@ -95,6 +97,7 @@ public sealed class SinglePlotForm : Form
 
         _paperCombo.Dock = DockStyle.Fill;
         _paperCombo.DropDownStyle = ComboBoxStyle.DropDownList;
+        _paperCombo.Margin = new Padding(0, UiLayout.Scale(5), 0, UiLayout.Scale(5));
         _paperCombo.Items.AddRange(_candidates
             .Select(candidate =>
                 $"{candidate.PaperName}    {candidate.ScaleText}    {candidate.PaperWidthMm:0.##} × {candidate.PaperHeightMm:0.##} mm")
@@ -116,9 +119,9 @@ public sealed class SinglePlotForm : Form
             ColumnCount = 3,
             RowCount = 1
         };
-        outputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(80)));
+        outputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(96)));
         outputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        outputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(82)));
+        outputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(104)));
 
         outputRow.Controls.Add(new Label
         {
@@ -128,10 +131,12 @@ public sealed class SinglePlotForm : Form
         }, 0, 0);
 
         _outputPath.Dock = DockStyle.Fill;
+        _outputPath.Margin = new Padding(0, UiLayout.Scale(5), UiLayout.Scale(8), UiLayout.Scale(5));
         _outputPath.Text = BuildDefaultPath(sourceFile);
         outputRow.Controls.Add(_outputPath, 1, 0);
 
-        var browseButton = UiLayout.CreateButton("浏览...", 82);
+        var browseButton = UiLayout.CreateButton("浏览...", 96);
+        browseButton.Margin = new Padding(0, UiLayout.Scale(4), 0, UiLayout.Scale(4));
         browseButton.Click += (_, _) =>
         {
             using var dialog = new SaveFileDialog
@@ -157,20 +162,22 @@ public sealed class SinglePlotForm : Form
         // 第六行：操作按钮（预览 / 打印 / 取消）
         var buttons = new FlowLayoutPanel
         {
-            Dock = DockStyle.Fill,
+            Dock = DockStyle.Bottom,
+            Height = UiLayout.Scale(42),
             FlowDirection = FlowDirection.RightToLeft,
-            WrapContents = false
+            WrapContents = false,
+            Padding = new Padding(0, UiLayout.Scale(5), 0, 0)
         };
-        var printButton = UiLayout.CreateButton("打印", 82);
+        var printButton = UiLayout.CreateButton("打印", 96);
         printButton.DialogResult = DialogResult.OK;
-        var previewButton = UiLayout.CreateButton("预览", 82);
+        var previewButton = UiLayout.CreateButton("预览", 96);
         previewButton.Click += (_, _) =>
         {
             IsPreview = true;
             DialogResult = DialogResult.OK;
             Close();
         };
-        var cancel = UiLayout.CreateButton("取消", 82);
+        var cancel = UiLayout.CreateButton("取消", 96);
         cancel.DialogResult = DialogResult.Cancel;
         buttons.Controls.Add(printButton);
         buttons.Controls.Add(previewButton);

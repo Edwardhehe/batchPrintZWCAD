@@ -81,8 +81,9 @@ public sealed class TemporarySequenceOverlay
         {
         }
 
-        foreach (var job in jobs)
+        for (var i = 0; i < jobs.Count; i++)
         {
+            var job = jobs[i];
             if (!TryGetBounds(job, dcsToWcs, out var minX, out var minY, out var maxX, out var maxY))
             {
                 continue;
@@ -142,7 +143,8 @@ public sealed class TemporarySequenceOverlay
             group.FrameId = AddEntity(tr, owner, frame);
 
             var center = new Point3d((minX + maxX) / 2d, (minY + maxY) / 2d, 0);
-            AddBoldLabel(tr, owner, layerId, textStyleId, color, center, job.DrawingNumber, textHeight, ucsAngle, group.LabelIds);
+            // 图框块界面临时标注只显示顺序编号，避免较长图号遮挡图纸内容。
+            AddBoldLabel(tr, owner, layerId, textStyleId, color, center, (i + 1).ToString(), textHeight, ucsAngle, group.LabelIds);
             _entityGroups[job] = group;
         }
 

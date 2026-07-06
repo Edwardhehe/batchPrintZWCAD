@@ -104,7 +104,7 @@ public sealed class RectangleBatchPlotForm : Form
         actions.Controls.Add(refresh);
         actions.Controls.Add(new Label
         {
-            Text = "右键条目可设为不打印或删除",
+            Text = "右键条目可设为不打印、删除或批量改纸张",
             AutoSize = true,
             ForeColor = Color.DimGray,
             Margin = new Padding(UiLayout.Scale(10), UiLayout.Scale(8), 0, 0)
@@ -687,12 +687,21 @@ public sealed class RectangleBatchPlotForm : Form
     private ContextMenuStrip CreateContextMenu()
     {
         var menu = new ContextMenuStrip();
+        var changePaper = new ToolStripMenuItem("批量修改纸张...");
+        changePaper.Click += (_, _) => BatchChangeHighlightedPaper();
         var markNotPrint = new ToolStripMenuItem("不打印");
         markNotPrint.Click += (_, _) => MarkHighlightedNotPrint();
         var delete = new ToolStripMenuItem("删除");
         delete.Click += (_, _) => DeleteHighlighted();
+        menu.Items.Add(changePaper);
+        menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(markNotPrint);
         menu.Items.Add(delete);
+        menu.Opening += (_, _) =>
+        {
+            // 只有多选行的候选纸张完全一致时，才允许统一修改纸张，避免套用到不适配的矩形框。
+            changePaper.Enabled = TryGetCommonPaperOptions(HighlightedRows(), out _);
+        };
         return menu;
     }
 
@@ -721,10 +730,18 @@ public sealed class RectangleBatchPlotForm : Form
 
         if (!_grid.Rows[e.RowIndex].Selected)
         {
-            _grid.ClearSelection();
-            _grid.Rows[e.RowIndex].Selected = true;
+            if (_grid.SelectedRows.Count <= 1)
+            {
+                _grid.ClearSelection();
+                _grid.Rows[e.RowIndex].Selected = true;
+            }
+            // 已经 Shift/Ctrl 多选后，即使鼠标移到其它行右键，也保留原多选集合用于批量操作。
         }
-        _grid.CurrentCell = _grid.Rows[e.RowIndex].Cells[Math.Max(e.ColumnIndex, 0)];
+
+        if (_grid.Rows[e.RowIndex].Selected)
+        {
+            _grid.CurrentCell = _grid.Rows[e.RowIndex].Cells[Math.Max(e.ColumnIndex, 0)];
+        }
     }
 
     private void GridCellFormatting(object? sender, DataGridViewCellFormattingEventArgs e)
@@ -770,6 +787,88 @@ public sealed class RectangleBatchPlotForm : Form
         _grid.Refresh();
         RefreshFileNames();
         UpdateVisuals();
+    }
+
+    private void BatchChangeHighlightedPaper()
+    {
+        _grid.EndEdit();
+        var rows = HighlightedRows();
+        if (!TryGetCommonPaperOptions(rows, out var options))
+        {
+            MessageBox.Show("只有所选矩形框的候选纸张尺寸完全一致时，才能批量修改纸张。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        using var dialog = new SinglePlotPaperSelectionForm(options);
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+        {
+            return;
+        }
+
+        var selectedPaper = dialog.SelectedPaper;
+        var paperChoice = FormatPaper(selectedPaper);
+        foreach (var row in rows)
+        {
+            row.PaperChoice = paperChoice;
+            ApplyPaper(row.Job, selectedPaper);
+        }
+
+        _grid.Refresh();
+        ConfigurePaperCells();
+        RefreshFileNames();
+        RefreshOutputPaths();
+        UpdateVisuals();
+    }
+
+    private static bool TryGetCommonPaperOptions(IReadOnlyList<Row> rows, out IReadOnlyList<PaperDetection> options)
+    {
+        options = new PaperDetection[0];
+        if (rows.Count == 0 || rows[0].Options.Count == 0)
+        {
+            return false;
+        }
+
+        var first = rows[0].Options;
+        // 候选列表按下拉顺序逐项比较，保证用户选中的第 N 项对每个矩形框含义一致。
+        foreach (var row in rows.Skip(1))
+        {
+            if (!HasSamePaperOptions(first, row.Options))
+            {
+                return false;
+            }
+        }
+
+        options = first;
+        return true;
+    }
+
+    private static bool HasSamePaperOptions(IReadOnlyList<PaperDetection> first, IReadOnlyList<PaperDetection> second)
+    {
+        if (first.Count != second.Count)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < first.Count; i++)
+        {
+            if (!IsSamePaperOption(first[i], second[i]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsSamePaperOption(PaperDetection first, PaperDetection second)
+    {
+        const double tolerance = 0.001;
+        return string.Equals(first.PaperName, second.PaperName, StringComparison.Ordinal)
+            && string.Equals(first.ScaleText, second.ScaleText, StringComparison.Ordinal)
+            && Math.Abs(first.PaperWidthMm - second.PaperWidthMm) <= tolerance
+            && Math.Abs(first.PaperHeightMm - second.PaperHeightMm) <= tolerance
+            && Math.Abs(first.ScaleValue - second.ScaleValue) <= tolerance
+            && first.IsLong == second.IsLong;
     }
 
     private void DeleteHighlighted()
