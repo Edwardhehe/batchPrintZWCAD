@@ -36,6 +36,7 @@ public sealed class BatchPlotForm : Form
     private readonly ComboBox _styleCombo = new();
     private readonly CheckBox _mergePdfCheckBox = new();
     private readonly CheckBox _addSeqCheckBox = new();
+    private readonly CheckBox _leaveMarginCheckBox = new();
     private readonly Button _printButton = new();
     private readonly Label _statusLabel = new();
     private readonly List<string> _logLines = new();
@@ -260,6 +261,13 @@ public sealed class BatchPlotForm : Form
         _addSeqCheckBox.CheckedChanged += (_, _) => SortAndRefreshOutputPaths();
         SetTip(_addSeqCheckBox, "勾选后文件名前自动加序号，序号与图号的连接符使用设置中的连接符。");
 
+        _leaveMarginCheckBox.Text = "留白";
+        _leaveMarginCheckBox.AutoSize = true;
+        _leaveMarginCheckBox.Checked = false;
+        _leaveMarginCheckBox.TextAlign = ContentAlignment.MiddleLeft;
+        _leaveMarginCheckBox.Margin = new Padding(UiLayout.Scale(12), UiLayout.Scale(7), UiLayout.Scale(12), 0);
+        SetTip(_leaveMarginCheckBox, "勾选后按纸张短边预留 3mm 边距，居中等比例缩小打印。");
+
         actionRow.Controls.Add(scanButton);
         actionRow.Controls.Add(scanWindowButton);
         actionRow.Controls.Add(addFilesButton);
@@ -298,6 +306,7 @@ public sealed class BatchPlotForm : Form
         });
         pathRow.Controls.Add(_mergePdfCheckBox);
         pathRow.Controls.Add(_addSeqCheckBox);
+        pathRow.Controls.Add(_leaveMarginCheckBox);
         pathRow.Controls.Add(currentFolderButton);
         pathRow.Controls.Add(currentPdfButton);
         pathRow.Controls.Add(specifiedFolderButton);
@@ -1505,6 +1514,7 @@ public sealed class BatchPlotForm : Form
         Directory.CreateDirectory(_outputDirectory.Text);
         SaveCurrentSettings();
         SortAndRefreshOutputPaths();
+        ApplyLeaveMarginSelection(selected);
         HasPendingPrint = true;
         DialogResult = DialogResult.OK;
         Close();
@@ -1679,6 +1689,16 @@ public sealed class BatchPlotForm : Form
         }
     }
 
+    private void ApplyLeaveMarginSelection(IEnumerable<PlotJob> jobs)
+    {
+        var leaveMargin = _leaveMarginCheckBox.Checked;
+        foreach (var job in jobs)
+        {
+            // 留白选项是本次打印设置，不改变图框识别数据，只在输出/预览时生效。
+            job.LeavePaperMargin = leaveMargin;
+        }
+    }
+
     private void GridCellContentClick(object? sender, DataGridViewCellEventArgs e)
     {
         if (e.RowIndex < 0
@@ -1704,6 +1724,7 @@ public sealed class BatchPlotForm : Form
             return;
         }
 
+        job.LeavePaperMargin = _leaveMarginCheckBox.Checked;
         var wasVisible = Visible;
         try
         {

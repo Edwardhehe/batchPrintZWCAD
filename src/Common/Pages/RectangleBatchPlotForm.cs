@@ -44,6 +44,7 @@ public sealed class RectangleBatchPlotForm : Form
     private readonly ComboBox _device = new();
     private readonly ComboBox _style = new();
     private readonly CheckBox _mergePdf = new();
+    private readonly CheckBox _leaveMargin = new();
     private readonly Label _status = new();
     private Extents3d? _scanWindow;
     private TitleBlockScanScope? _lastScanScope;
@@ -152,7 +153,7 @@ public sealed class RectangleBatchPlotForm : Form
         var options = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 8,
+            ColumnCount = 9,
             RowCount = 1,
             Margin = Padding.Empty,
             Padding = Padding.Empty
@@ -160,6 +161,7 @@ public sealed class RectangleBatchPlotForm : Form
         options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(52)));
         options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(205)));
         options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(132)));
+        options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(70)));
         options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(52)));
         options.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55));
         options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(42)));
@@ -182,21 +184,28 @@ public sealed class RectangleBatchPlotForm : Form
         _mergePdf.Anchor = AnchorStyles.Left | AnchorStyles.Top;
         _mergePdf.Margin = new Padding(UiLayout.Scale(4), UiLayout.Scale(7), UiLayout.Scale(8), 0);
         options.Controls.Add(_mergePdf, 2, 0);
-        options.Controls.Add(LabelFor("打印机"), 3, 0);
+
+        _leaveMargin.Text = "留白";
+        _leaveMargin.Checked = false;
+        _leaveMargin.AutoSize = true;
+        _leaveMargin.Anchor = AnchorStyles.Left | AnchorStyles.Top;
+        _leaveMargin.Margin = new Padding(UiLayout.Scale(4), UiLayout.Scale(7), UiLayout.Scale(8), 0);
+        options.Controls.Add(_leaveMargin, 3, 0);
+        options.Controls.Add(LabelFor("打印机"), 4, 0);
         _device.DropDownStyle = ComboBoxStyle.DropDownList;
         _device.Height = UiLayout.ButtonHeight();
         _device.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
         _device.Margin = new Padding(0, UiLayout.Scale(3), UiLayout.Scale(8), 0);
         _device.SelectionChangeCommitted += (_, _) => SaveCurrentPlotOptions();
-        options.Controls.Add(_device, 4, 0);
-        options.Controls.Add(LabelFor("CTB"), 5, 0);
+        options.Controls.Add(_device, 5, 0);
+        options.Controls.Add(LabelFor("CTB"), 6, 0);
         _style.DropDownStyle = ComboBoxStyle.DropDownList;
         _style.Height = UiLayout.ButtonHeight();
         _style.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
         _style.Margin = new Padding(0, UiLayout.Scale(3), UiLayout.Scale(8), 0);
         // 用户手动切换 CTB 后立即写入设置，图框块/矩形框/单张打印都会读取同一份上次选择。
         _style.SelectionChangeCommitted += (_, _) => SaveCurrentPlotOptions();
-        options.Controls.Add(_style, 6, 0);
+        options.Controls.Add(_style, 7, 0);
 
         var print = UiLayout.CreateButton("开始打印", 98);
         // 开始打印按钮使用普通按钮高度并居中，不再 Fill 整行，避免撑高打印设置行导致其它控件看起来不对齐。
@@ -207,9 +216,10 @@ public sealed class RectangleBatchPlotForm : Form
         print.FlatStyle = FlatStyle.Flat;
         print.FlatAppearance.BorderColor = Color.FromArgb(0, 95, 170);
         print.Click += (_, _) => Print();
-        options.Controls.Add(print, 7, 0);
+        options.Controls.Add(print, 8, 0);
         tips.SetToolTip(_sortOrder, "改变列表、红框编号和最终 PDF 页面的顺序。");
         tips.SetToolTip(_mergePdf, "勾选后只保留一个合并 PDF；取消后输出每张单独 PDF。");
+        tips.SetToolTip(_leaveMargin, "勾选后按纸张短边预留 3mm 边距，居中等比例缩小打印。");
 
         top.Controls.Add(actions, 0, 0);
         top.Controls.Add(outputRow, 0, 1);
@@ -897,6 +907,7 @@ public sealed class RectangleBatchPlotForm : Form
             try
             {
                 SaveCurrentPlotOptions();
+                row.Job.LeavePaperMargin = _leaveMargin.Checked;
                 PlotterService.Preview(row.Job, SelectedDevice(), SelectedStyle(), _document);
             }
             catch (Exception ex)
@@ -931,6 +942,7 @@ public sealed class RectangleBatchPlotForm : Form
 
         Directory.CreateDirectory(directory);
         SaveCurrentPlotOptions();
+        ApplyLeaveMarginSelection(selected);
         var originalPaths = selected.ToDictionary(job => job, job => job.OutputPath);
         string? temporaryDirectory = null;
         var mergedOutput = Path.Combine(directory, SourceStem() + ".pdf");
@@ -986,6 +998,16 @@ public sealed class RectangleBatchPlotForm : Form
             Show();
             Activate();
             UpdateVisuals();
+        }
+    }
+
+    private void ApplyLeaveMarginSelection(IEnumerable<PlotJob> jobs)
+    {
+        var leaveMargin = _leaveMargin.Checked;
+        foreach (var job in jobs)
+        {
+            // 留白是本次输出选项，预览和正式打印都写入同一个 PlotJob，保证效果一致。
+            job.LeavePaperMargin = leaveMargin;
         }
     }
 

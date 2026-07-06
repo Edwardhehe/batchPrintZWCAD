@@ -263,7 +263,7 @@ public static class PlotterService
         {
             using var tr = db.TransactionManager.StartTransaction();
             var layout = FindLayoutForJob(tr, db, job);
-            var window = GetPlotWindow(job, plotDocument);
+            var window = ApplyLeaveMargin(GetPlotWindow(job, plotDocument), job);
             using var plot = CreateValidatedPlot(layout, job, window, deviceName, styleSheet);
 
             PrepareOutputFile(job.OutputPath);
@@ -847,7 +847,7 @@ public static class PlotterService
         {
             using var tr = db.TransactionManager.StartTransaction();
             var layout = FindLayoutForJob(tr, db, job);
-            var window = GetPlotWindow(job, plotDocument);
+            var window = ApplyLeaveMargin(GetPlotWindow(job, plotDocument), job);
             using var plot = CreateValidatedPlot(layout, job, window, deviceName, styleSheet);
             RunPreview(plot.Info, documentName);
             tr.Commit();
@@ -892,6 +892,28 @@ public static class PlotterService
         {
             throw new InvalidOperationException("无法规范打印视图，已停止打印以避免输出空白或偏移页面。", ex);
         }
+    }
+
+    private static Extents2d ApplyLeaveMargin(Extents2d window, PlotJob job)
+    {
+        if (!job.LeavePaperMargin)
+        {
+            return window;
+        }
+
+        var shortSide = Math.Min(job.PaperWidthMm, job.PaperHeightMm);
+        if (shortSide <= 6d)
+        {
+            return window;
+        }
+
+        var scale = (shortSide - 6d) / shortSide;
+        var centerX = (window.MinPoint.X + window.MaxPoint.X) / 2d;
+        var centerY = (window.MinPoint.Y + window.MaxPoint.Y) / 2d;
+        var halfWidth = Math.Abs(window.MaxPoint.X - window.MinPoint.X) / scale / 2d;
+        var halfHeight = Math.Abs(window.MaxPoint.Y - window.MinPoint.Y) / scale / 2d;
+        // AutoCAD 保持 ScaleToFit + 居中；放大打印窗口，让原图框按短边 3mm 留白输出。
+        return new Extents2d(centerX - halfWidth, centerY - halfHeight, centerX + halfWidth, centerY + halfHeight);
     }
 
     private static Extents2d GetPlotWindow(PlotJob job, Document? plotDocument)

@@ -14,6 +14,7 @@ public sealed class SinglePlotForm : Form
     private readonly TextBox _outputPath = new();
     private readonly Label _areaLabel = new();
     private readonly Label _scaleLabel = new();
+    private readonly CheckBox _leaveMargin = new();
 
     public PaperDetection SelectedPaper
     {
@@ -26,6 +27,7 @@ public sealed class SinglePlotForm : Form
     }
 
     public string OutputPath => _outputPath.Text;
+    public bool LeavePaperMargin => _leaveMargin.Checked;
 
     /// <summary>DialogResult.OK 时，此属性区分是"打印"还是"预览"。</summary>
     public bool IsPreview { get; private set; }
@@ -56,13 +58,14 @@ public sealed class SinglePlotForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 6,
+            RowCount = 7,
             Padding = new Padding(UiLayout.Scale(24))
         };
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(42))); // 区域
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(42))); // 比例
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(50))); // 纸张
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(50))); // 输出
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(38))); // 留白
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));              // 间距
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(52))); // 按钮
 
@@ -157,9 +160,17 @@ public sealed class SinglePlotForm : Form
         outputRow.Controls.Add(browseButton, 2, 0);
         root.Controls.Add(outputRow, 0, 3);
 
-        // 第五行弹性空白（上面已有 RowStyles 定义）
+        _leaveMargin.Text = "留白（短边两侧各约 3mm）";
+        _leaveMargin.AutoSize = true;
+        _leaveMargin.Checked = false;
+        _leaveMargin.Dock = DockStyle.Fill;
+        _leaveMargin.TextAlign = ContentAlignment.MiddleLeft;
+        // 单张打印的预览和正式输出都读取这个值，保证留白效果一致。
+        root.Controls.Add(_leaveMargin, 0, 4);
 
-        // 第六行：操作按钮（预览 / 打印 / 取消）
+        // 第六行弹性空白（上面已有 RowStyles 定义）
+
+        // 第七行：操作按钮（预览 / 打印 / 取消）
         var buttons = new FlowLayoutPanel
         {
             Dock = DockStyle.Bottom,
@@ -182,7 +193,7 @@ public sealed class SinglePlotForm : Form
         buttons.Controls.Add(printButton);
         buttons.Controls.Add(previewButton);
         buttons.Controls.Add(cancel);
-        root.Controls.Add(buttons, 0, 5);
+        root.Controls.Add(buttons, 0, 6);
 
         AcceptButton = printButton;
         CancelButton = cancel;

@@ -418,7 +418,7 @@ public static class PlotterService
                 validator.SetCurrentStyleSheet(plotSettings, styleSheet);
             }
 
-            var plotWindow = GetPlotWindow(job, plotDocument);
+            var plotWindow = ApplyLeaveMargin(GetPlotWindow(job, plotDocument), job);
             validator.SetPlotWindowArea(plotSettings, plotWindow);
             validator.SetPlotType(plotSettings, ZwSoft.ZwCAD.DatabaseServices.PlotType.Window);
             validator.SetUseStandardScale(plotSettings, true);
@@ -473,6 +473,28 @@ public static class PlotterService
 
         throw new InvalidOperationException(
             $"未找到目标布局“{job.SpaceName}”。可用布局: {string.Join(", ", availableLayouts)}。请重新扫描图纸。");
+    }
+
+    private static Extents2d ApplyLeaveMargin(Extents2d window, PlotJob job)
+    {
+        if (!job.LeavePaperMargin)
+        {
+            return window;
+        }
+
+        var shortSide = Math.Min(job.PaperWidthMm, job.PaperHeightMm);
+        if (shortSide <= 6d)
+        {
+            return window;
+        }
+
+        var scale = (shortSide - 6d) / shortSide;
+        var centerX = (window.MinPoint.X + window.MaxPoint.X) / 2d;
+        var centerY = (window.MinPoint.Y + window.MaxPoint.Y) / 2d;
+        var halfWidth = Math.Abs(window.MaxPoint.X - window.MinPoint.X) / scale / 2d;
+        var halfHeight = Math.Abs(window.MaxPoint.Y - window.MinPoint.Y) / scale / 2d;
+        // 继续使用 ScaleToFit + 居中；放大打印窗口，让原图框在纸上等比例缩小并形成留白。
+        return new Extents2d(centerX - halfWidth, centerY - halfHeight, centerX + halfWidth, centerY + halfHeight);
     }
 
     private static Extents2d GetPlotWindow(PlotJob job, Document? plotDocument)
@@ -660,7 +682,7 @@ public static class PlotterService
                 validator.SetCurrentStyleSheet(plotSettings, styleSheet);
             }
 
-            var plotWindow = GetPlotWindow(job, plotDocument);
+            var plotWindow = ApplyLeaveMargin(GetPlotWindow(job, plotDocument), job);
             validator.SetPlotWindowArea(plotSettings, plotWindow);
             validator.SetPlotType(plotSettings, ZwSoft.ZwCAD.DatabaseServices.PlotType.Window);
             validator.SetUseStandardScale(plotSettings, true);
