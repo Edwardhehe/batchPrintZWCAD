@@ -243,7 +243,7 @@ public sealed class RectangleBatchPlotForm : Form
             {
                 if (_grid.Rows[e.RowIndex].DataBoundItem is Row row)
                 {
-                    e.Value = (_rows.IndexOf(row) + 1).ToString();
+                    e.Value = (_displayRows.IndexOf(row) + 1).ToString();
                 }
             }
         };
@@ -746,6 +746,7 @@ public sealed class RectangleBatchPlotForm : Form
         if (_grid.Columns[e.ColumnIndex].DataPropertyName == nameof(Row.Selected))
         {
             ApplyPrintSelectionToHighlightedRows(row);
+            RemoveUnselectedRows();
         }
         else if (_grid.Columns[e.ColumnIndex].Name == "PaperChoice")
         {
@@ -890,7 +891,7 @@ public sealed class RectangleBatchPlotForm : Form
         {
             row.Selected = false;
         }
-        _grid.Refresh();
+        RemoveUnselectedRows();
         RefreshFileNames();
         UpdateVisuals();
     }
@@ -983,9 +984,29 @@ public sealed class RectangleBatchPlotForm : Form
         {
             _rows.Remove(row);
         }
+        RefreshDisplayRows();
         RefreshFileNames();
-        ConfigurePaperCells();
         UpdateVisuals();
+    }
+
+    private void RemoveUnselectedRows()
+    {
+        var removed = false;
+        foreach (var row in _rows.Where(row => !row.Selected).ToList())
+        {
+            // 矩形框界面取消“打印”即表示从当前清单移除，避免列表编号和 CAD 红框编号不一致。
+            _rows.Remove(row);
+            removed = true;
+        }
+
+        if (removed)
+        {
+            RefreshDisplayRows();
+        }
+        else
+        {
+            _grid.Refresh();
+        }
     }
 
     private void GridCellContentClick(object? sender, DataGridViewCellEventArgs e)
@@ -1196,7 +1217,7 @@ public sealed class RectangleBatchPlotForm : Form
         _status.Text = $"识别 {_rows.Count} 个矩形框  |  打印 {selected} 个  |  顺序：{order}  |  输出：{_outputDirectory.Text}";
         try
         {
-            var selectedJobs = _rows.Where(row => row.Selected).Select(row => row.Job).ToList();
+            var selectedJobs = _displayRows.Where(row => row.Selected).Select(row => row.Job).ToList();
             var highlightIdx = -1;
             if (_highlightedJobIndex >= 0 && _highlightedJobIndex < _rows.Count)
             {

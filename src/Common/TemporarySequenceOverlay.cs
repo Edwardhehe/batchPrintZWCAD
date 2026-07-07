@@ -50,6 +50,11 @@ public sealed class TemporarySequenceOverlay
 
     public void Show(IReadOnlyList<PlotJob> jobs, PlotJob? highlightJob = null)
     {
+        Show(jobs, highlightJob, null);
+    }
+
+    public void Show(IReadOnlyList<PlotJob> jobs, PlotJob? highlightJob, Func<PlotJob, int, string>? labelProvider)
+    {
         // 整批重建时 Clear 不立即刷新，避免“清空一次 + 绘制一次”造成两次 Regen。
         Clear(repaint: false);
 
@@ -143,8 +148,9 @@ public sealed class TemporarySequenceOverlay
             group.FrameId = AddEntity(tr, owner, frame);
 
             var center = new Point3d((minX + maxX) / 2d, (minY + maxY) / 2d, 0);
-            // 图框块界面临时标注只显示顺序编号，避免较长图号遮挡图纸内容。
-            AddBoldLabel(tr, owner, layerId, textStyleId, color, center, (i + 1).ToString(), textHeight, ucsAngle, group.LabelIds);
+            // 默认临时标注显示打印顺序；图号重排预览时可临时显示预计写入的新图号。
+            var labelText = labelProvider?.Invoke(job, i) ?? (i + 1).ToString();
+            AddBoldLabel(tr, owner, layerId, textStyleId, color, center, labelText, textHeight, ucsAngle, group.LabelIds);
             _entityGroups[job] = group;
         }
 

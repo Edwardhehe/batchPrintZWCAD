@@ -46,6 +46,9 @@ public sealed class BatchPlotForm : Form
     private bool _sequenceOverlayFollowsCurrentJobs;
     private bool _updatingPrintSelection;
     private List<PlotJob>? _pendingPrintToggleJobs;
+    private DrawingNumberReorderDialog? _renumberDialog;
+    private Dictionary<PlotJob, string>? _renumberOriginalNumbers;
+    private List<PlotJob>? _renumberCurrentJobs;
     private PlotJob? _highlightedJob;
     private string _lastLogPath = "";
     private string _mergedOutputPath = "";
@@ -859,6 +862,26 @@ public sealed class BatchPlotForm : Form
         }
     }
 
+    private void ShowRenumberPreviewOverlay(IReadOnlyList<PlotJob> previewOrder)
+    {
+        _sequenceOverlayFollowsCurrentJobs = true;
+        try
+        {
+            var currentJobs = previewOrder
+                .Where(job => job.Selected && IsCurrentDocumentJob(job))
+                .ToList();
+            var highlightJob = _highlightedJob != null && currentJobs.Contains(_highlightedJob) ? _highlightedJob : null;
+            // 图号重排预览阶段，红框文字临时显示预计写入的新图号；窗口关闭后恢复为打印顺序数字。
+            _sequenceOverlay.Show(currentJobs, highlightJob, (job, _) => job.DrawingNumber);
+        }
+        catch (Exception ex)
+        {
+            _sequenceOverlayFollowsCurrentJobs = false;
+            _sequenceOverlay.Clear();
+            AppendLog("WARN", "图号重排预览标注显示失败: " + ex.Message);
+        }
+    }
+
     private void HighlightSequenceOverlayJob(PlotJob job)
     {
         _highlightedJob = job;
@@ -1031,6 +1054,11 @@ public sealed class BatchPlotForm : Form
     private void RenumberDrawingNumbers()
     {
         if (_jobs.Count == 0) return;
+        if (_renumberDialog != null)
+        {
+            _renumberDialog.Activate();
+            return;
+        }
 
         // 仅对当前文档的图框重排
         var currentJobs = _jobs.Where(j => IsCurrentDocumentJob(j)).ToList();
@@ -1040,21 +1068,41 @@ public sealed class BatchPlotForm : Form
             return;
         }
 
-        // 保存原始图号，取消时恢复
-        var originalNumbers = currentJobs.ToDictionary(j => j, j => j.DrawingNumber);
+        // 保存原始图号，非模态窗口取消/关闭时恢复。
+        _renumberCurrentJobs = currentJobs;
+        _renumberOriginalNumbers = currentJobs.ToDictionary(j => j, j => j.DrawingNumber);
+        _renumberDialog = new DrawingNumberReorderDialog(currentJobs.Count);
+        _renumberDialog.PreviewRequested += PreviewRenumberDrawingNumbers;
+        _renumberDialog.FormClosed += RenumberDialogClosed;
+        _renumberDialog.Show(this);
+        _renumberDialog.Activate();
+    }
 
-        using var dialog = new DrawingNumberReorderDialog(currentJobs.Count);
-        dialog.PreviewRequested += () =>
+    private void PreviewRenumberDrawingNumbers()
+    {
+        if (_renumberDialog == null || _renumberCurrentJobs == null)
         {
-            var sorted = SortSpatially(currentJobs, dialog.HorizontalFirst);
-            ApplyRenumbering(sorted, dialog.Prefix, dialog.StartNumber);
-            _grid.Refresh();
-            ShowSequenceOverlayForCurrentJobs();
-        };
+            return;
+        }
 
-        if (dialog.ShowDialog(this) != DialogResult.OK)
+        var sorted = SortSpatially(_renumberCurrentJobs, _renumberDialog.HorizontalFirst);
+        ApplyRenumbering(sorted, _renumberDialog.Prefix, _renumberDialog.StartNumber);
+        _grid.Refresh();
+        ShowRenumberPreviewOverlay(sorted);
+    }
+
+    private void RenumberDialogClosed(object? sender, FormClosedEventArgs e)
+    {
+        var dialog = (DrawingNumberReorderDialog)sender!;
+        var currentJobs = _renumberCurrentJobs ?? new List<PlotJob>();
+        var originalNumbers = _renumberOriginalNumbers ?? new Dictionary<PlotJob, string>();
+        _renumberDialog = null;
+        _renumberCurrentJobs = null;
+        _renumberOriginalNumbers = null;
+
+        if (dialog.DialogResult != DialogResult.OK)
         {
-            // 恢复原始图号
+            // 恢复原始图号，并把 CAD 红框恢复为打印顺序数字。
             foreach (var kv in originalNumbers)
             {
                 kv.Key.DrawingNumber = kv.Value;
@@ -1062,11 +1110,17 @@ public sealed class BatchPlotForm : Form
             _grid.Refresh();
             SortAndRefreshOutputPaths();
             ShowSequenceOverlayForCurrentJobs();
+            dialog.Dispose();
             return;
         }
 
         var finalSorted = SortSpatially(currentJobs, dialog.HorizontalFirst);
         ApplyRenumbering(finalSorted, dialog.Prefix, dialog.StartNumber);
+        foreach (var job in currentJobs)
+        {
+            // 图号重排后，打印顺序应重新按新图号计算，清掉右键“移到第一个”的手动优先级。
+            job.SortPriority = 0;
+        }
         _grid.Refresh();
         SortAndRefreshOutputPaths();
         ShowSequenceOverlayForCurrentJobs();
@@ -1082,6 +1136,7 @@ public sealed class BatchPlotForm : Form
         }
 
         AppendLog("INFO", $"图号重排完成，{finalSorted.Count} 张图框按" + (dialog.HorizontalFirst ? "从左到右、从上到下" : "从上到下、从左到右") + $"排序，已反写 CAD {updated} 处。");
+        dialog.Dispose();
     }
 
     private static void ApplyRenumbering(IReadOnlyList<PlotJob> sorted, string prefix, int start)
@@ -1877,6 +1932,11 @@ public sealed class BatchPlotForm : Form
         }
 
         AppendLog(ok ? "INFO" : "WARN", message);
+        if (numberChanged)
+        {
+            // 手工修改图号后，列表编号、实际打印顺序和 CAD 红框顺序都要按新图号刷新。
+            job.SortPriority = 0;
+        }
         SortAndRefreshOutputPaths();
     }
 
@@ -1895,6 +1955,7 @@ public sealed class BatchPlotForm : Form
     {
         if (!HasPendingPrint)
         {
+            _renumberDialog?.Close();
             ClearSequenceOverlay();
         }
 
