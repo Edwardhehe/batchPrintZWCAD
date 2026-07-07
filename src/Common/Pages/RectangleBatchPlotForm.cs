@@ -162,11 +162,11 @@ public sealed class RectangleBatchPlotForm : Form
             Padding = Padding.Empty
         };
         options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(52)));
-        // 高 DPI 下 ComboBox/CheckBox 的文字会明显变宽，这几个列不能按普通 96DPI 宽度估算。
-        // 这里直接给排序、合并、周边留白预留完整文字宽度，避免文字被后续列挤掉。
-        options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(260)));
-        options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(160)));
-        options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(120)));
+        // 高 DPI 下按实际显示内容预留宽度：排序下拉框要能显示完整选项，
+        // 但不能过宽挤占后面的打印机/CTB区域。
+        options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(180)));
+        options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(128)));
+        options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(86)));
         options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(52)));
         options.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55));
         options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(42)));
