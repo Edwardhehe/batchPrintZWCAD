@@ -115,6 +115,7 @@ public static class RectangleFrameScanner
     /// <param name="scope">扫描范围</param>
     public static List<Result> ScanScope(Document document, TitleBlockScanScope scope)
     {
+        LayerScannableCache.Clear();
         var sourceFile = string.IsNullOrWhiteSpace(document.Database.Filename)
             ? document.Name
             : document.Database.Filename;

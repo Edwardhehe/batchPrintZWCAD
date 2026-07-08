@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Windows.Forms;
 #if AUTOCAD
 using Autodesk.AutoCAD.ApplicationServices;
@@ -47,6 +48,8 @@ public sealed class RectangleBatchPlotForm : Form
     private readonly CheckBox _mergePdf = new();
     private readonly CheckBox _leaveMargin = new();
     private readonly Label _status = new();
+    private CancellationTokenSource? _printCts;
+    private Button? _printButton;
     private Extents3d? _scanWindow;
     private TitleBlockScanScope? _lastScanScope;
     private bool _updating;
@@ -212,16 +215,16 @@ public sealed class RectangleBatchPlotForm : Form
         _style.SelectionChangeCommitted += (_, _) => SaveCurrentPlotOptions();
         options.Controls.Add(_style, 7, 0);
 
-        var print = UiLayout.CreateButton("开始打印", 98);
+        _printButton = UiLayout.CreateButton("开始打印", 98);
         // 开始打印按钮使用普通按钮高度并居中，不再 Fill 整行，避免撑高打印设置行导致其它控件看起来不对齐。
-        print.Anchor = AnchorStyles.Left | AnchorStyles.Top;
-        print.Margin = new Padding(0, UiLayout.Scale(2), 0, 0);
-        print.BackColor = Color.FromArgb(0, 120, 215);
-        print.ForeColor = Color.White;
-        print.FlatStyle = FlatStyle.Flat;
-        print.FlatAppearance.BorderColor = Color.FromArgb(0, 95, 170);
-        print.Click += (_, _) => Print();
-        options.Controls.Add(print, 8, 0);
+        _printButton.Anchor = AnchorStyles.Left | AnchorStyles.Top;
+        _printButton.Margin = new Padding(0, UiLayout.Scale(2), 0, 0);
+        _printButton.BackColor = Color.FromArgb(0, 120, 215);
+        _printButton.ForeColor = Color.White;
+        _printButton.FlatStyle = FlatStyle.Flat;
+        _printButton.FlatAppearance.BorderColor = Color.FromArgb(0, 95, 170);
+        _printButton.Click += (_, _) => PrintOrStop();
+        options.Controls.Add(_printButton, 8, 0);
         tips.SetToolTip(_sortOrder, "改变列表、红框编号和最终 PDF 页面的顺序。");
         tips.SetToolTip(_mergePdf, "勾选后只保留一个合并 PDF；取消后输出每张单独 PDF。");
         tips.SetToolTip(_leaveMargin, "勾选后按纸张短边预留 3mm 边距，居中等比例缩小打印。");
@@ -1093,6 +1096,18 @@ public sealed class RectangleBatchPlotForm : Form
         }
     }
 
+    private void PrintOrStop()
+    {
+        if (_printCts != null)
+        {
+            // 正在打印中 → 停止
+            _printCts.Cancel();
+            return;
+        }
+
+        Print();
+    }
+
     private void Print()
     {
         _grid.EndEdit();
@@ -1117,10 +1132,18 @@ public sealed class RectangleBatchPlotForm : Form
         var originalPaths = selected.ToDictionary(job => job, job => job.OutputPath);
         string? temporaryDirectory = null;
         var mergedOutput = Path.Combine(directory, SourceStem() + ".pdf");
+        var completed = 0;
         try
         {
-            Hide();
-            System.Windows.Forms.Application.DoEvents();
+            // 切换按钮为"停止"状态
+            _printCts = new CancellationTokenSource();
+            if (_printButton != null)
+            {
+                _printButton.Text = "停止";
+                _printButton.BackColor = Color.FromArgb(200, 40, 40);
+                _printButton.FlatAppearance.BorderColor = Color.FromArgb(160, 30, 30);
+            }
+
             if (_mergePdf.Checked)
             {
                 temporaryDirectory = Path.Combine(Path.GetTempPath(), "ZwcadBatchPlot", "RectangleMerge_" + Guid.NewGuid().ToString("N"));
@@ -1131,7 +1154,19 @@ public sealed class RectangleBatchPlotForm : Form
                 }
             }
 
-            var results = PlotterService.PlotMany(selected, SelectedDevice(), SelectedStyle(), _document, _settings);
+            _status.Text = $"打印中... 0 / {selected.Count}";
+            System.Windows.Forms.Application.DoEvents();
+
+            var results = PlotterService.PlotMany(
+                selected, SelectedDevice(), SelectedStyle(), _document, _settings,
+                beforeJob: _ =>
+                {
+                    completed++;
+                    _status.Text = $"打印中... {completed} / {selected.Count}";
+                    System.Windows.Forms.Application.DoEvents();
+                },
+                cancellationToken: _printCts.Token);
+
             var failures = results.Where(result => !result.Succeeded).ToList();
             if (failures.Count > 0)
             {
@@ -1140,10 +1175,13 @@ public sealed class RectangleBatchPlotForm : Form
 
             if (_mergePdf.Checked)
             {
+                _status.Text = "正在合并 PDF...";
+                System.Windows.Forms.Application.DoEvents();
                 PdfDocumentService.Merge(selected.Select(job => job.OutputPath).ToList(), mergedOutput);
             }
 
             RevealOutput(_mergePdf.Checked ? mergedOutput : null, directory);
+            _status.Text = $"完成，共 {selected.Count} 张";
             MessageBox.Show(
                 _mergePdf.Checked
                     ? $"打印并合并完成，共 {selected.Count} 张。\n{mergedOutput}"
@@ -1152,12 +1190,28 @@ public sealed class RectangleBatchPlotForm : Form
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information);
         }
+        catch (OperationCanceledException)
+        {
+            _status.Text = $"已停止（已完成 {completed} / {selected.Count}）";
+            MessageBox.Show($"打印已停止。\n已完成 {completed} / {selected.Count} 张。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
         catch (Exception ex)
         {
+            _status.Text = "打印失败";
             MessageBox.Show("矩形框批量打印失败: " + ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
         finally
         {
+            _printCts?.Dispose();
+            _printCts = null;
+            // 恢复按钮
+            if (_printButton != null)
+            {
+                _printButton.Text = "开始打印";
+                _printButton.BackColor = Color.FromArgb(0, 120, 215);
+                _printButton.FlatAppearance.BorderColor = Color.FromArgb(0, 95, 170);
+            }
+
             foreach (var pair in originalPaths)
             {
                 pair.Key.OutputPath = pair.Value;
@@ -1166,8 +1220,6 @@ public sealed class RectangleBatchPlotForm : Form
             {
                 try { Directory.Delete(temporaryDirectory, true); } catch { }
             }
-            Show();
-            Activate();
             UpdateVisuals();
         }
     }

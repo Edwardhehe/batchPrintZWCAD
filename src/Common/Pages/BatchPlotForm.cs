@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Windows.Forms;
 #if AUTOCAD
 using Autodesk.AutoCAD.ApplicationServices;
@@ -38,6 +39,7 @@ public sealed class BatchPlotForm : Form
     private readonly CheckBox _addSeqCheckBox = new();
     private readonly CheckBox _leaveMarginCheckBox = new();
     private readonly Button _printButton = new();
+    private CancellationTokenSource? _printCts;
     private readonly Label _statusLabel = new();
     private readonly List<string> _logLines = new();
     private readonly List<string> _selectedDwgFiles = new();
@@ -212,7 +214,7 @@ public sealed class BatchPlotForm : Form
         _printButton.FlatStyle = FlatStyle.Flat;
         _printButton.FlatAppearance.BorderColor = Color.FromArgb(0, 95, 170);
         _printButton.UseVisualStyleBackColor = false;
-        _printButton.Click += (_, _) => PrintSelectedJobs();
+        _printButton.Click += (_, _) => PrintOrStop();
         tips.SetToolTip(_printButton, "打印当前勾选的图纸。");
 
         SetTip(scanButton, "扫描当前打开图纸中的全部匹配图框。");
@@ -1577,6 +1579,17 @@ public sealed class BatchPlotForm : Form
         Close();
     }
 
+    private void PrintOrStop()
+    {
+        if (_printCts != null)
+        {
+            _printCts.Cancel();
+            return;
+        }
+
+        PrintSelectedJobs();
+    }
+
     public void ExecutePendingPrint()
     {
         if (!HasPendingPrint)
@@ -1591,14 +1604,17 @@ public sealed class BatchPlotForm : Form
         var originalOutputPaths = selected.ToDictionary(job => job, job => job.OutputPath);
         string? temporaryDirectory = null;
         var mergedSuccessfully = false;
+        var completed = 0;
 
         ShowSequenceOverlayForPrint(selected);
-        _printButton.Enabled = false;
-        var wasVisible = Visible;
-        if (_settings.OpenExternalDwgForPlot)
+        // 切换按钮为"停止"状态
+        _printCts = new CancellationTokenSource();
+        if (_printButton != null)
         {
-            Hide();
-            System.Windows.Forms.Application.DoEvents();
+            _printButton.Text = "停止";
+            _printButton.BackColor = Color.FromArgb(200, 40, 40);
+            _printButton.FlatAppearance.BorderColor = Color.FromArgb(160, 30, 30);
+            _printButton.Enabled = true;
         }
 
         try
@@ -1615,13 +1631,23 @@ public sealed class BatchPlotForm : Form
                 }
             }
 
+            _statusLabel.Text = $"打印中... 0 / {selected.Count}";
+            System.Windows.Forms.Application.DoEvents();
+
             var results = PlotterService.PlotMany(
                 selected,
                 device,
                 style,
                 _currentDocument,
                 _settings,
-                job => AppendLog("INFO", $"开始打印 {job.DrawingNumber}_{job.Title} -> {job.OutputPath}"));
+                job =>
+                {
+                    completed++;
+                    _statusLabel.Text = $"打印中... {completed} / {selected.Count}";
+                    AppendLog("INFO", $"开始打印 {job.DrawingNumber}_{job.Title} -> {job.OutputPath}");
+                    System.Windows.Forms.Application.DoEvents();
+                },
+                _printCts.Token);
 
             foreach (var result in results)
             {
@@ -1651,6 +1677,8 @@ public sealed class BatchPlotForm : Form
             {
                 try
                 {
+                    _statusLabel.Text = "正在合并 PDF...";
+                    System.Windows.Forms.Application.DoEvents();
                     PdfDocumentService.Merge(selected.Select(job => job.OutputPath).ToList(), _mergedOutputPath);
                     mergedSuccessfully = true;
                     AppendLog("INFO", $"合并 PDF 成功 {_mergedOutputPath}");
@@ -1664,6 +1692,7 @@ public sealed class BatchPlotForm : Form
             }
 
             _lastLogPath = BatchPlotLogger.SaveRunLog(_logLines);
+            _statusLabel.Text = $"完成，共 {printed} 张";
             var summary = mergePdf
                 ? mergedSuccessfully
                     ? $"打印并合并完成: 共 {printed} 张。\n合并文件: {_mergedOutputPath}\n日志: {_lastLogPath}"
@@ -1681,8 +1710,16 @@ public sealed class BatchPlotForm : Form
                 OpenOutputDirectoryAfterPrint(mergePdf ? _mergedOutputPath : null);
             }
         }
+        catch (OperationCanceledException)
+        {
+            _statusLabel.Text = $"已停止（已完成 {completed} / {selected.Count}）";
+            AppendLog("INFO", $"用户取消打印，已完成 {completed} / {selected.Count}");
+            _lastLogPath = BatchPlotLogger.SaveRunLog(_logLines);
+            MessageBox.Show($"打印已停止。\n已完成 {completed} / {selected.Count} 张。\n日志: {_lastLogPath}", "批量打印", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
         catch (Exception ex)
         {
+            _statusLabel.Text = "打印失败";
             MessageBox.Show("打印失败: " + ex.Message, "批量打印", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
         finally
@@ -1698,13 +1735,17 @@ public sealed class BatchPlotForm : Form
             }
 
             ClearSequenceOverlay();
-            if (wasVisible && !Visible)
+
+            // 恢复按钮
+            _printCts?.Dispose();
+            _printCts = null;
+            if (_printButton != null)
             {
-                Show();
-                Activate();
+                _printButton.Text = "开始打印";
+                _printButton.BackColor = Color.FromArgb(0, 120, 215);
+                _printButton.FlatAppearance.BorderColor = Color.FromArgb(0, 95, 170);
             }
 
-            _printButton.Enabled = true;
             RefreshStatus();
         }
     }

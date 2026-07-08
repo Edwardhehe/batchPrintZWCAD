@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Threading;
 using ZwSoft.ZwCAD.ApplicationServices;
 using ZwSoft.ZwCAD.DatabaseServices;
 using ZwSoft.ZwCAD.Geometry;
@@ -34,7 +35,8 @@ public static class PlotterService
         string styleSheet,
         Document currentDocument,
         AppSettings settings,
-        Action<PlotJob>? beforeJob = null)
+        Action<PlotJob>? beforeJob = null,
+        CancellationToken cancellationToken = default)
     {
         var results = new List<PlotJobResult>();
         var oldActive = CadApp.DocumentManager.MdiActiveDocument;
@@ -43,22 +45,27 @@ public static class PlotterService
         {
             foreach (var group in jobs.GroupBy(job => GetPlotGroupKey(job, currentDocument, settings)))
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var groupJobs = group.ToList();
                 try
                 {
                     if (group.Key == "__CURRENT__")
                     {
-                        PlotCurrentDocumentGroup(groupJobs, currentDocument, deviceName, styleSheet, settings, beforeJob, results);
+                        PlotCurrentDocumentGroup(groupJobs, currentDocument, deviceName, styleSheet, settings, beforeJob, results, cancellationToken);
                         continue;
                     }
 
                     if (group.Key.StartsWith("__DB__:", StringComparison.OrdinalIgnoreCase))
                     {
-                        PlotSideDatabaseGroup(groupJobs, groupJobs[0].SourceFile, deviceName, styleSheet, settings, beforeJob, results);
+                        PlotSideDatabaseGroup(groupJobs, groupJobs[0].SourceFile, deviceName, styleSheet, settings, beforeJob, results, cancellationToken);
                         continue;
                     }
 
-                    PlotOpenedDocumentGroup(groupJobs, groupJobs[0].SourceFile, deviceName, styleSheet, settings, beforeJob, results);
+                    PlotOpenedDocumentGroup(groupJobs, groupJobs[0].SourceFile, deviceName, styleSheet, settings, beforeJob, results, cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
                 }
                 catch (Exception ex)
                 {
@@ -157,11 +164,13 @@ public static class PlotterService
         string styleSheet,
         AppSettings settings,
         Action<PlotJob>? beforeJob,
-        List<PlotJobResult> results)
+        List<PlotJobResult> results,
+        CancellationToken cancellationToken)
     {
         CadApp.DocumentManager.MdiActiveDocument = currentDocument;
         foreach (var job in jobs)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             try
             {
                 beforeJob?.Invoke(job);
@@ -175,6 +184,7 @@ public static class PlotterService
 
                 results.Add(new PlotJobResult { Job = job });
             }
+            catch (OperationCanceledException) { throw; }
             catch (Exception ex)
             {
                 results.Add(new PlotJobResult { Job = job, Error = ex });
@@ -189,7 +199,8 @@ public static class PlotterService
         string styleSheet,
         AppSettings settings,
         Action<PlotJob>? beforeJob,
-        List<PlotJobResult> results)
+        List<PlotJobResult> results,
+        CancellationToken cancellationToken)
     {
         var doc = FindOpenDocument(sourceFile);
         var shouldClose = doc == null;
@@ -200,6 +211,7 @@ public static class PlotterService
             CadApp.DocumentManager.MdiActiveDocument = doc;
             foreach (var job in jobs)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 try
                 {
                     beforeJob?.Invoke(job);
@@ -213,6 +225,7 @@ public static class PlotterService
 
                     results.Add(new PlotJobResult { Job = job });
                 }
+                catch (OperationCanceledException) { throw; }
                 catch (Exception ex)
                 {
                     results.Add(new PlotJobResult { Job = job, Error = ex });
@@ -235,7 +248,8 @@ public static class PlotterService
         string styleSheet,
         AppSettings settings,
         Action<PlotJob>? beforeJob,
-        List<PlotJobResult> results)
+        List<PlotJobResult> results,
+        CancellationToken cancellationToken)
     {
         using var db = new Database(false, true);
         db.ReadDwgFile(sourceFile, FileOpenMode.OpenForReadAndAllShare, true, "");
@@ -244,12 +258,14 @@ public static class PlotterService
 
         foreach (var job in jobs)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             try
             {
                 beforeJob?.Invoke(job);
                 PlotDatabase(db, Path.GetFileName(sourceFile), job, deviceName, styleSheet, settings);
                 results.Add(new PlotJobResult { Job = job });
             }
+            catch (OperationCanceledException) { throw; }
             catch (Exception ex)
             {
                 results.Add(new PlotJobResult { Job = job, Error = ex });
