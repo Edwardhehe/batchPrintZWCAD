@@ -574,37 +574,62 @@ public sealed class RectangleBatchPlotForm : Form
             return rows.ToList();
         }
 
-        // 用相邻帧中心点间距的中位数的一半作为行列容差
-        // 比固定比例（0.35 × 图框尺寸）更能适应不同间距和微偏移
-        // 行先：取 Y 中心间距；列先：取 X 中心间距
-        var centers = horizontalFirst
-            ? rows.Select(row => CenterX(row.Job)).Distinct().OrderBy(x => x).ToList()
-            : rows.Select(row => CenterY(row.Job)).Distinct().OrderBy(y => y).ToList();
-        var gaps = centers.Zip(centers.Skip(1), (a, b) => Math.Abs(b - a))
-            .Where(g => g > 1e-6).OrderBy(g => g).ToList();
-        var medianGap = gaps.Count > 0 ? gaps[gaps.Count / 2] : 1.0;
-        var bandTolerance = Math.Max(medianGap * 0.5, 1e-6);
-        var remaining = horizontalFirst
-            ? rows.OrderBy(row => CenterX(row.Job)).ToList()
-            : rows.OrderByDescending(row => CenterY(row.Job)).ToList();
-        var result = new List<Row>();
+        // 用矩形边沿重叠判断行列分组，替代旧的中心点+中位数间隙法
+        // 同一行/列内图幅大小不同时也能正确分组（中心点法会把大图框和小图框分成两行）
+        // 重叠 ≥ 较小矩形边长的 30% → 视为同一行/列
 
-        while (remaining.Count > 0)
+        // ── 并查集分组 ──
+        var parent = Enumerable.Range(0, rows.Count).ToArray();
+        int Find(int x) => parent[x] == x ? x : parent[x] = Find(parent[x]);
+        void Union(int a, int b) { parent[Find(a)] = Find(b); }
+
+        for (var i = 0; i < rows.Count; i++)
         {
-            var anchor = horizontalFirst ? CenterX(remaining[0].Job) : CenterY(remaining[0].Job);
-            var band = remaining
-                .Where(row => Math.Abs((horizontalFirst ? CenterX(row.Job) : CenterY(row.Job)) - anchor) <= bandTolerance)
-                .ToList();
-            foreach (var row in band)
+            for (var j = i + 1; j < rows.Count; j++)
             {
-                remaining.Remove(row);
+                var ri = rows[i].Job;
+                var rj = rows[j].Job;
+                if (horizontalFirst)
+                {
+                    // 列分组：X 区间重叠
+                    var overlapX = Math.Min(ri.MaxX, rj.MaxX) - Math.Max(ri.MinX, rj.MinX);
+                    var minW = Math.Min(ri.MaxX - ri.MinX, rj.MaxX - rj.MinX);
+                    if (overlapX >= minW * 0.3) Union(i, j);
+                }
+                else
+                {
+                    // 行分组：Y 区间重叠
+                    var overlapY = Math.Min(ri.MaxY, rj.MaxY) - Math.Max(ri.MinY, rj.MinY);
+                    var minH = Math.Min(ri.MaxY - ri.MinY, rj.MaxY - rj.MinY);
+                    if (overlapY >= minH * 0.3) Union(i, j);
+                }
             }
-
-            result.AddRange(horizontalFirst
-                ? band.OrderByDescending(row => CenterY(row.Job))
-                : band.OrderBy(row => CenterX(row.Job)));
         }
 
+        // ── 按分组整理 ──
+        var groups = rows.Select((r, i) => (Row: r, Group: Find(i)))
+            .GroupBy(x => x.Group)
+            .Select(g => g.Select(x => x.Row).ToList())
+            .ToList();
+
+        // ── 组内排序 ──
+        foreach (var group in groups)
+        {
+            if (horizontalFirst)
+                group.Sort((a, b) => CenterY(b.Job).CompareTo(CenterY(a.Job))); // 列内 Y 降序
+            else
+                group.Sort((a, b) => CenterX(a.Job).CompareTo(CenterX(b.Job))); // 行内 X 升序
+        }
+
+        // ── 组间排序 ──
+        if (horizontalFirst)
+            groups = groups.OrderBy(g => g.Average(r => CenterX(r.Job))).ToList();  // 列 X 升序
+        else
+            groups = groups.OrderByDescending(g => g.Average(r => CenterY(r.Job))).ToList(); // 行 Y 降序
+
+        // ── 展平 ──
+        var result = new List<Row>();
+        foreach (var group in groups) result.AddRange(group);
         return result;
     }
 

@@ -9,7 +9,7 @@ public static class PaperSizeDetector
 {
     private const double StandardPaperTolerance = 0.04d;
     private const double DefaultLongPaperShortSideTolerance = 0.04d;
-    private const double RectangleLongPaperShortSideTolerance = 0.02d;
+    private const double RectangleLongPaperShortSideTolerance = 0.01d;
     private const double LongPaperSnapTolerance = 0.08d;
     private const int LongPaperIncrementDenominator = 8;
     private const int MinimumLongPaperUnits = LongPaperIncrementDenominator + 1;
