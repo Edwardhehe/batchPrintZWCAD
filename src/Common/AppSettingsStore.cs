@@ -33,6 +33,12 @@ public sealed class AppSettings
 
 public static class AppSettingsStore
 {
+    // 仅允许 Windows 文件名可安全使用的连接符；明确排除 \\ / : * ? " < > | 等非法字符。
+    private static readonly HashSet<string> AllowedFileNameSeparators = new(StringComparer.Ordinal)
+    {
+        "_", " ", "+", "-", ".", "~", "=", ""
+    };
+
     public static string Path =>
         System.IO.Path.Combine(TitleBlockLibraryStore.DefaultDirectory, "Settings.json");
 
@@ -126,7 +132,7 @@ public static class AppSettingsStore
         }
 
         settings.DirectoryTextStyleName ??= "";
-        settings.PdfFileNameSeparator ??= "_";
+        settings.PdfFileNameSeparator = NormalizeFileNameSeparator(settings.PdfFileNameSeparator);
         if (settings.PdfFileNameFields == null || settings.PdfFileNameFields.Count == 0)
         {
             settings.PdfFileNameFields = new List<string> { "DrawingNumber", "Title" };
@@ -140,6 +146,11 @@ public static class AppSettingsStore
         }
 
         return settings;
+    }
+
+    public static string NormalizeFileNameSeparator(string? separator)
+    {
+        return AllowedFileNameSeparators.Contains(separator ?? "_") ? separator ?? "_" : "_";
     }
 
     private static void WriteAtomically(string path, string contents)

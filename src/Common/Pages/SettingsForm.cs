@@ -36,7 +36,7 @@ public sealed class SettingsForm : Form
     private readonly ComboBox _directoryTextStyle = new();
 
     // 文件名设置
-    private readonly TextBox _fileNameSeparator = new();
+    private readonly ComboBox _fileNameSeparator = new();
     private readonly Label _fileNamePreview = new();
     private readonly ListBox _availableFields = new();
     private readonly ListBox _selectedFields = new();
@@ -172,11 +172,23 @@ public sealed class SettingsForm : Form
         table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(170)));
         table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
-        // 连接符
-        _fileNameSeparator.Text = "_";
+        // 连接符使用固定下拉选项，空格单独显示说明，避免用户误以为没有选中。
+        _fileNameSeparator.DropDownStyle = ComboBoxStyle.DropDownList;
+        _fileNameSeparator.Items.AddRange(new object[]
+        {
+            new FileNameSeparatorItem("_", "_（下划线）"),
+            new FileNameSeparatorItem(" ", "空格"),
+            new FileNameSeparatorItem("+", "+（加号）"),
+            new FileNameSeparatorItem("-", "-（短横线）"),
+            new FileNameSeparatorItem(".", ".（点号）"),
+            new FileNameSeparatorItem("~", "~（波浪线）"),
+            new FileNameSeparatorItem("=", "=（等号）"),
+            new FileNameSeparatorItem("", "无连接符")
+        });
+        _fileNameSeparator.SelectedIndex = 0;
         _fileNameSeparator.Dock = DockStyle.Left;
-        _fileNameSeparator.Width = UiLayout.Scale(120);
-        _fileNameSeparator.TextChanged += (_, _) => UpdateFileNamePreview();
+        _fileNameSeparator.Width = UiLayout.Scale(160);
+        _fileNameSeparator.SelectedIndexChanged += (_, _) => UpdateFileNamePreview();
         UiLayout.AddRow(table, 0, "字段连接符", _fileNameSeparator);
 
         // 双列表：可用字段 → 已选字段
@@ -321,7 +333,7 @@ public sealed class SettingsForm : Form
 
     private void UpdateFileNamePreview()
     {
-        var separator = _fileNameSeparator.Text;
+        var separator = SelectedFileNameSeparator();
         var parts = _selectedFields.Items.Cast<FileNameFieldItem>().Select(x => x.Display).ToList();
         _fileNamePreview.Text = parts.Count > 0
             ? "示例: " + string.Join(separator, parts)
@@ -354,6 +366,41 @@ public sealed class SettingsForm : Form
         }
 
         UpdateFileNamePreview();
+    }
+
+    private sealed class FileNameSeparatorItem
+    {
+        public string Value { get; }
+        private string Display { get; }
+
+        public FileNameSeparatorItem(string value, string display)
+        {
+            Value = value;
+            Display = display;
+        }
+
+        public override string ToString() => Display;
+    }
+
+    private string SelectedFileNameSeparator()
+    {
+        return _fileNameSeparator.SelectedItem is FileNameSeparatorItem item ? item.Value : "_";
+    }
+
+    private void SelectFileNameSeparator(string? separator)
+    {
+        var expected = AppSettingsStore.NormalizeFileNameSeparator(separator);
+        for (var index = 0; index < _fileNameSeparator.Items.Count; index++)
+        {
+            if (_fileNameSeparator.Items[index] is FileNameSeparatorItem item
+                && string.Equals(item.Value, expected, StringComparison.Ordinal))
+            {
+                _fileNameSeparator.SelectedIndex = index;
+                return;
+            }
+        }
+
+        _fileNameSeparator.SelectedIndex = 0;
     }
 
     private sealed class FileNameFieldItem
@@ -451,7 +498,7 @@ public sealed class SettingsForm : Form
         _allowPaperNameFallback.Checked = settings.AllowStandardPaperNameFallback;
         _showProgress.Checked = settings.ShowPlotProgress;
         _addSequenceWhenPdfExists.Checked = settings.AddSequenceWhenPdfExists;
-        _fileNameSeparator.Text = string.IsNullOrWhiteSpace(settings.PdfFileNameSeparator) ? "_" : settings.PdfFileNameSeparator;
+        SelectFileNameSeparator(settings.PdfFileNameSeparator);
         LoadFileNameFields(settings.PdfFileNameFields);
         _openExternalDwgForPlot.Checked = settings.OpenExternalDwgForPlot;
         _directoryIndexWidth.Value = UiLayout.Clamp(_directoryIndexWidth, settings.DirectoryIndexWidth);
@@ -482,7 +529,7 @@ public sealed class SettingsForm : Form
         current.AllowStandardPaperNameFallback = _allowPaperNameFallback.Checked;
         current.ShowPlotProgress = _showProgress.Checked;
         current.AddSequenceWhenPdfExists = _addSequenceWhenPdfExists.Checked;
-        current.PdfFileNameSeparator = string.IsNullOrWhiteSpace(_fileNameSeparator.Text) ? "_" : _fileNameSeparator.Text.Trim();
+        current.PdfFileNameSeparator = AppSettingsStore.NormalizeFileNameSeparator(SelectedFileNameSeparator());
         current.PdfFileNameFields = _selectedFields.Items
             .Cast<FileNameFieldItem>()
             .Select(x => x.Key)
