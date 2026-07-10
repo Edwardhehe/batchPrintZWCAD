@@ -1254,6 +1254,8 @@ public sealed class RectangleBatchPlotForm : Form
             }
         }
         SelectOption(_device, AcadPlotterInstaller.PreferredPdfPlotter, _settings.LastPlotDevice, "PDF");
+        // 批量打印统一使用随插件安装的 LA_pdf 打印机，不允许用户切换其它打印机。
+        _device.Enabled = false;
         SelectOption(_style, _settings.LastStyleSheet, "monochrome");
     }
 
@@ -1342,12 +1344,12 @@ public sealed class RectangleBatchPlotForm : Form
         return string.IsNullOrWhiteSpace(value) ? Path.GetFileNameWithoutExtension(_document.Name) : value;
     }
 
-    private string SelectedDevice() => _device.SelectedItem?.ToString() ?? "";
+    private string SelectedDevice() => AcadPlotterInstaller.PreferredPdfPlotter;
     private string SelectedStyle() => _style.SelectedItem?.ToString() ?? "";
 
     private void SaveCurrentPlotOptions()
     {
-        _settings.LastPlotDevice = SelectedDevice();
+        _settings.LastPlotDevice = AcadPlotterInstaller.PreferredPdfPlotter;
         _settings.LastStyleSheet = SelectedStyle();
         AppSettingsStore.Save(_settings);
     }

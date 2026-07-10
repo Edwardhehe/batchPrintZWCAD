@@ -436,6 +436,8 @@ public sealed class BatchPlotForm : Form
             }
 
             SelectPlotDevice(_deviceCombo, _settings.LastPlotDevice);
+            // 批量打印统一使用随插件安装的 LA_pdf 打印机，不允许用户切换其它打印机。
+            _deviceCombo.Enabled = false;
             SelectExactOrContaining(_styleCombo, _settings.LastStyleSheet, "monochrome");
             if (_styleCombo.SelectedIndex < 0 && _styleCombo.Items.Count > 0)
             {
@@ -1544,7 +1546,7 @@ public sealed class BatchPlotForm : Form
             return;
         }
 
-        var device = _deviceCombo.SelectedItem?.ToString() ?? "";
+        var device = AcadPlotterInstaller.PreferredPdfPlotter;
         var style = _styleCombo.SelectedItem?.ToString() ?? "";
         if (string.IsNullOrWhiteSpace(device))
         {
@@ -1598,7 +1600,7 @@ public sealed class BatchPlotForm : Form
         }
 
         var selected = _jobs.Where(x => x.Selected).ToList();
-        var device = _deviceCombo.SelectedItem?.ToString() ?? "";
+        var device = AcadPlotterInstaller.PreferredPdfPlotter;
         var style = _styleCombo.SelectedItem?.ToString() ?? "";
         var mergePdf = !string.IsNullOrWhiteSpace(_mergedOutputPath);
         var originalOutputPaths = selected.ToDictionary(job => job, job => job.OutputPath);
@@ -1814,7 +1816,7 @@ public sealed class BatchPlotForm : Form
 
     private void PreviewJob(PlotJob job)
     {
-        var device = _deviceCombo.SelectedItem?.ToString() ?? "";
+        var device = AcadPlotterInstaller.PreferredPdfPlotter;
         var style = _styleCombo.SelectedItem?.ToString() ?? "";
         if (string.IsNullOrWhiteSpace(device))
         {
@@ -2007,7 +2009,7 @@ public sealed class BatchPlotForm : Form
     private void SaveCurrentSettings()
     {
         _settings.LastOutputDirectory = _outputDirectory.Text;
-        _settings.LastPlotDevice = _deviceCombo.SelectedItem?.ToString() ?? "";
+        _settings.LastPlotDevice = AcadPlotterInstaller.PreferredPdfPlotter;
         _settings.LastStyleSheet = _styleCombo.SelectedItem?.ToString() ?? "";
         _settings.AutoScanCurrentDrawing = false;
         AppSettingsStore.Save(_settings);

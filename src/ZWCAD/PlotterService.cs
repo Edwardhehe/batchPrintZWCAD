@@ -127,7 +127,7 @@ public static class PlotterService
             using (doc.LockDocument())
             {
                 ActivateLayout(job);
-                RefreshJobWindowFromOpenedDocument(doc.Database, job);
+                // 首次扫描得到的图框信息已可用于预览，避免每次点击预览都重新扫描整张图纸。
                 PrepareEditorViewForPlot(doc, job);
                 PreviewDatabase(doc.Database, doc.Name, job, deviceName, styleSheet, doc);
             }
