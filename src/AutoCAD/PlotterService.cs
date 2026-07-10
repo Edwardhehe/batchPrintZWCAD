@@ -38,8 +38,29 @@ public static class PlotterService
         public bool IsFullBleed { get; set; }
         public bool UseClosestBySize { get; set; }
         public bool RequiresExactSize { get; set; }
+        public bool FromCachedCatalog { get; set; }
         public PlotRotation PreferredRotation { get; set; }
     }
+
+    private sealed class MediaCatalogItem
+    {
+        public string Name { get; set; } = "";
+        public double WidthMm { get; set; }
+        public double HeightMm { get; set; }
+        public bool IsFullBleed { get; set; }
+    }
+
+    private sealed class CachedMediaCatalogException : Exception
+    {
+        public CachedMediaCatalogException(Exception innerException)
+            : base("缓存的打印纸张配置已失效。", innerException)
+        {
+        }
+    }
+
+    private static readonly object MediaCatalogCacheLock = new();
+    private static readonly Dictionary<string, IReadOnlyList<MediaCatalogItem>> MediaCatalogCache =
+        new(StringComparer.OrdinalIgnoreCase);
 
     private sealed class ValidatedPlot : IDisposable
     {
@@ -300,8 +321,28 @@ public static class PlotterService
         string deviceName,
         string styleSheet)
     {
+        try
+        {
+            return CreateValidatedPlotCore(layout, job, window, deviceName, styleSheet);
+        }
+        catch (CachedMediaCatalogException)
+        {
+            // PC3/PMP 可能在 CAD 会话中被更新；仅当缓存目录失效时清缓存并完整读取一次。
+            InvalidateMediaCatalog(deviceName);
+            return CreateValidatedPlotCore(layout, job, window, deviceName, styleSheet);
+        }
+    }
+
+    private static ValidatedPlot CreateValidatedPlotCore(
+        Layout layout,
+        PlotJob job,
+        Extents2d window,
+        string deviceName,
+        string styleSheet)
+    {
         var validator = PlotSettingsValidator.Current;
-        var media = ChooseMedia(validator, layout, deviceName, job);
+        var media = ChooseMedia(validator, layout, deviceName, job, out var usedCachedCatalog);
+        media.FromCachedCatalog = usedCachedCatalog;
         var errors = new List<string>();
 
         var preferredRotation = ResolveWindowRotation(media.PreferredRotation, job, window);
@@ -339,12 +380,18 @@ public static class PlotterService
             }
         }
 
-        throw new InvalidOperationException(
+        var failure = new InvalidOperationException(
             "AutoCAD 不接受当前打印设置。"
             + $" 图纸={job.DrawingNumber}_{job.Title};"
             + $" 目标纸张={job.PaperWidthMm:0.##}x{job.PaperHeightMm:0.##}mm;"
             + $" 窗口=({window.MinPoint.X:0.###},{window.MinPoint.Y:0.###})-({window.MaxPoint.X:0.###},{window.MaxPoint.Y:0.###});"
             + " 尝试结果=" + string.Join(" | ", errors));
+        if (media.FromCachedCatalog)
+        {
+            throw new CachedMediaCatalogException(failure);
+        }
+
+        throw failure;
     }
 
     private static void ConfigurePlotSettings(
@@ -390,15 +437,15 @@ public static class PlotterService
         }
     }
 
-    private static MediaChoice ChooseMedia(PlotSettingsValidator validator, Layout layout, string deviceName, PlotJob job)
+    private static MediaChoice ChooseMedia(
+        PlotSettingsValidator validator,
+        Layout layout,
+        string deviceName,
+        PlotJob job,
+        out bool usedCachedCatalog)
     {
-        using var settings = new PlotSettings(layout.ModelType);
-        settings.CopyFrom(layout);
-        validator.SetPlotConfigurationName(settings, deviceName, null);
-        validator.RefreshLists(settings);
-        validator.SetPlotPaperUnits(settings, PlotPaperUnit.Millimeters);
-
-        var names = validator.GetCanonicalMediaNameList(settings).Cast<string>().ToList();
+        var catalog = GetMediaCatalog(validator, layout, deviceName, out usedCachedCatalog);
+        var names = catalog.Select(x => x.Name).ToList();
         if (names.Count == 0)
         {
             throw new InvalidOperationException($"打印机没有可用纸张: {deviceName}");
@@ -406,28 +453,20 @@ public static class PlotterService
 
         var targetWidth = job.PaperWidthMm > 0 ? job.PaperWidthMm : Math.Abs(job.MaxX - job.MinX);
         var targetHeight = job.PaperHeightMm > 0 ? job.PaperHeightMm : Math.Abs(job.MaxY - job.MinY);
-        var choices = new List<MediaChoice>();
-
-        foreach (var name in names)
+        var choices = catalog.Select(item =>
         {
-            var size = GetMediaSize(validator, settings, name);
-            if (size == null)
+            var directError = DirectSizeError(item.WidthMm, item.HeightMm, targetWidth, targetHeight);
+            var rotatedError = DirectSizeError(item.WidthMm, item.HeightMm, targetHeight, targetWidth);
+            return new MediaChoice
             {
-                continue;
-            }
-
-            var directError = DirectSizeError(size.Value.Width, size.Value.Height, targetWidth, targetHeight);
-            var rotatedError = DirectSizeError(size.Value.Width, size.Value.Height, targetHeight, targetWidth);
-            choices.Add(new MediaChoice
-            {
-                Name = name,
-                WidthMm = size.Value.Width,
-                HeightMm = size.Value.Height,
+                Name = item.Name,
+                WidthMm = item.WidthMm,
+                HeightMm = item.HeightMm,
                 Error = Math.Min(directError, rotatedError),
-                IsFullBleed = IsFullBleedMedia(name),
+                IsFullBleed = item.IsFullBleed,
                 PreferredRotation = rotatedError < directError ? PlotRotation.Degrees090 : PlotRotation.Degrees000
-            });
-        }
+            };
+        }).ToList();
 
         var exact = choices
             .Where(x => x.Error <= MediaMatchToleranceMm)
@@ -483,6 +522,93 @@ public static class PlotterService
             Name = fallbackName,
             PreferredRotation = job.PaperWidthMm >= job.PaperHeightMm ? PlotRotation.Degrees090 : PlotRotation.Degrees000
         };
+    }
+
+    private static IReadOnlyList<MediaCatalogItem> GetMediaCatalog(
+        PlotSettingsValidator validator,
+        Layout layout,
+        string deviceName,
+        out bool usedCache)
+    {
+        var cacheKey = BuildMediaCatalogCacheKey(deviceName, layout.ModelType);
+        lock (MediaCatalogCacheLock)
+        {
+            if (MediaCatalogCache.TryGetValue(cacheKey, out var cached))
+            {
+                usedCache = true;
+                return cached;
+            }
+        }
+
+        usedCache = false;
+        using var settings = new PlotSettings(layout.ModelType);
+        settings.CopyFrom(layout);
+        validator.SetPlotConfigurationName(settings, deviceName, null);
+        validator.RefreshLists(settings);
+        validator.SetPlotPaperUnits(settings, PlotPaperUnit.Millimeters);
+
+        var catalog = new List<MediaCatalogItem>();
+        foreach (var name in validator.GetCanonicalMediaNameList(settings).Cast<string>())
+        {
+            var size = GetMediaSize(validator, settings, name);
+            if (size == null)
+            {
+                continue;
+            }
+
+            catalog.Add(new MediaCatalogItem
+            {
+                Name = name,
+                WidthMm = size.Value.Width,
+                HeightMm = size.Value.Height,
+                IsFullBleed = IsFullBleedMedia(name)
+            });
+        }
+
+        lock (MediaCatalogCacheLock)
+        {
+            // 只缓存纸张纯数据，CAD 的 PlotSettings 等对象仍按每次打印创建和释放。
+            MediaCatalogCache[cacheKey] = catalog;
+        }
+
+        return catalog;
+    }
+
+    private static string BuildMediaCatalogCacheKey(string deviceName, bool modelType)
+    {
+        var plottersDirectory = AcadPlotterInstaller.GetPlottersDirectory();
+        var devicePath = string.IsNullOrWhiteSpace(plottersDirectory)
+            ? ""
+            : Path.Combine(plottersDirectory, deviceName);
+        var pmpPath = string.IsNullOrWhiteSpace(plottersDirectory)
+            ? ""
+            : Path.Combine(plottersDirectory, "PMP Files", "LA_pdf.pmp");
+        return string.Join("|", deviceName, modelType ? "M" : "P", GetFileFingerprint(devicePath), GetFileFingerprint(pmpPath));
+    }
+
+    private static string GetFileFingerprint(string path)
+    {
+        try
+        {
+            var file = new FileInfo(path);
+            return file.Exists ? $"{file.Length}:{file.LastWriteTimeUtc.Ticks}" : "missing";
+        }
+        catch
+        {
+            return "unavailable";
+        }
+    }
+
+    private static void InvalidateMediaCatalog(string deviceName)
+    {
+        lock (MediaCatalogCacheLock)
+        {
+            var prefix = deviceName + "|";
+            foreach (var key in MediaCatalogCache.Keys.Where(key => key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToList())
+            {
+                MediaCatalogCache.Remove(key);
+            }
+        }
     }
 
     private static MediaChoice? BestNamedMedia(IEnumerable<MediaChoice> choices, PlotJob job)

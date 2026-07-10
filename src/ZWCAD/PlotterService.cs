@@ -29,6 +29,10 @@ public static class PlotterService
         public bool NeedsRotation { get; set; }
     }
 
+    private static readonly object MediaNameCacheLock = new();
+    private static readonly Dictionary<string, IReadOnlyList<string>> MediaNameCache =
+        new(StringComparer.OrdinalIgnoreCase);
+
     public static List<PlotJobResult> PlotMany(
         IReadOnlyList<PlotJob> jobs,
         string deviceName,
@@ -413,13 +417,21 @@ public static class PlotterService
             plotSettings.CopyFrom(layout);
 
             var validator = PlotSettingsValidator.Current;
-            // 先卸再装，强制 ZWCAD 重新读 PMP 获取自定义纸张
-            validator.SetPlotConfigurationName(plotSettings, "None", null);
-            validator.SetPlotConfigurationName(plotSettings, deviceName, null);
-            validator.RefreshLists(plotSettings);
+            if (HasCachedMediaNames(deviceName, layout.ModelType))
+            {
+                // 已有同一 PC5/PMP 的纸张目录时，只绑定设备，不再卸载设备和刷新全部列表。
+                validator.SetPlotConfigurationName(plotSettings, deviceName, null);
+            }
+            else
+            {
+                // 首次使用或配置文件变化后强制重新读取 PMP，随后缓存纸张目录。
+                validator.SetPlotConfigurationName(plotSettings, "None", null);
+                validator.SetPlotConfigurationName(plotSettings, deviceName, null);
+                validator.RefreshLists(plotSettings);
+            }
             TrySetPlotPaperUnits(validator, plotSettings, PlotPaperUnit.Millimeters);
 
-            var media = SelectMedia(validator, plotSettings, job, settings);
+            var media = SelectMedia(validator, plotSettings, job, settings, deviceName, layout.ModelType);
             if (media == null)
             {
                 var allMedia = validator.GetCanonicalMediaNameList(plotSettings).Cast<string>().ToList();
@@ -681,12 +693,21 @@ public static class PlotterService
             plotSettings.CopyFrom(layout);
 
             var validator = PlotSettingsValidator.Current;
-            validator.SetPlotConfigurationName(plotSettings, "None", null);
-            validator.SetPlotConfigurationName(plotSettings, deviceName, null);
-            validator.RefreshLists(plotSettings);
+            if (HasCachedMediaNames(deviceName, layout.ModelType))
+            {
+                // 已有同一 PC5/PMP 的纸张目录时，只绑定设备，不再卸载设备和刷新全部列表。
+                validator.SetPlotConfigurationName(plotSettings, deviceName, null);
+            }
+            else
+            {
+                // 首次使用或配置文件变化后强制重新读取 PMP，随后缓存纸张目录。
+                validator.SetPlotConfigurationName(plotSettings, "None", null);
+                validator.SetPlotConfigurationName(plotSettings, deviceName, null);
+                validator.RefreshLists(plotSettings);
+            }
             TrySetPlotPaperUnits(validator, plotSettings, PlotPaperUnit.Millimeters);
 
-            var media = SelectMedia(validator, plotSettings, job, AppSettingsStore.Load());
+            var media = SelectMedia(validator, plotSettings, job, AppSettingsStore.Load(), deviceName, layout.ModelType);
             if (media == null)
             {
                 throw new InvalidOperationException($"未找到匹配 {job.PaperSizeText} 的打印纸张。");
@@ -832,9 +853,15 @@ public static class PlotterService
         }
     }
 
-    private static MediaSelection? SelectMedia(PlotSettingsValidator validator, PlotSettings plotSettings, PlotJob job, AppSettings settings)
+    private static MediaSelection? SelectMedia(
+        PlotSettingsValidator validator,
+        PlotSettings plotSettings,
+        PlotJob job,
+        AppSettings settings,
+        string deviceName,
+        bool modelType)
     {
-        var media = validator.GetCanonicalMediaNameList(plotSettings).Cast<string>().ToList();
+        var media = GetMediaNames(validator, plotSettings, deviceName, modelType);
         if (media.Count == 0)
         {
             return null;
@@ -864,6 +891,65 @@ public static class PlotterService
         var named = media.FirstOrDefault(x => x.IndexOf(basePaper, StringComparison.OrdinalIgnoreCase) >= 0)
             ?? media.FirstOrDefault(x => x.IndexOf(basePaper.Replace("A", "ISO_A"), StringComparison.OrdinalIgnoreCase) >= 0);
         return named == null ? null : new MediaSelection { Name = named, NeedsRotation = false };
+    }
+
+    private static bool HasCachedMediaNames(string deviceName, bool modelType)
+    {
+        var cacheKey = BuildMediaNameCacheKey(deviceName, modelType);
+        lock (MediaNameCacheLock)
+        {
+            return MediaNameCache.ContainsKey(cacheKey);
+        }
+    }
+
+    private static IReadOnlyList<string> GetMediaNames(
+        PlotSettingsValidator validator,
+        PlotSettings plotSettings,
+        string deviceName,
+        bool modelType)
+    {
+        var cacheKey = BuildMediaNameCacheKey(deviceName, modelType);
+        lock (MediaNameCacheLock)
+        {
+            if (MediaNameCache.TryGetValue(cacheKey, out var cached))
+            {
+                return cached;
+            }
+        }
+
+        var media = validator.GetCanonicalMediaNameList(plotSettings).Cast<string>().ToList();
+        lock (MediaNameCacheLock)
+        {
+            // 仅缓存纸张名称，不缓存任何与当前事务绑定的 ZWCAD 对象。
+            MediaNameCache[cacheKey] = media;
+        }
+
+        return media;
+    }
+
+    private static string BuildMediaNameCacheKey(string deviceName, bool modelType)
+    {
+        var plottersDirectory = AcadPlotterInstaller.GetPlottersDirectory();
+        var devicePath = string.IsNullOrWhiteSpace(plottersDirectory)
+            ? ""
+            : Path.Combine(plottersDirectory, deviceName);
+        var pmpPath = string.IsNullOrWhiteSpace(plottersDirectory)
+            ? ""
+            : Path.Combine(plottersDirectory, "PMP Files", "LA_pdf.pmp");
+        return string.Join("|", deviceName, modelType ? "M" : "P", GetFileFingerprint(devicePath), GetFileFingerprint(pmpPath));
+    }
+
+    private static string GetFileFingerprint(string path)
+    {
+        try
+        {
+            var file = new FileInfo(path);
+            return file.Exists ? $"{file.Length}:{file.LastWriteTimeUtc.Ticks}" : "missing";
+        }
+        catch
+        {
+            return "unavailable";
+        }
     }
 
     private static bool TrySetPlotPaperUnits(PlotSettingsValidator validator, PlotSettings plotSettings, PlotPaperUnit units)
