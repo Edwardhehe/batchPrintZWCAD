@@ -184,7 +184,8 @@ public sealed partial class BatchPlotCommands
                 MaxX = maxX,
                 MaxY = maxY,
                 OutputPath = outputPath,
-                LeavePaperMargin = form.LeavePaperMargin
+                LeavePaperMargin = form.LeavePaperMargin,
+                PaperMarginMm = form.PaperMarginMm
             };
 
             if (form.IsPreview)

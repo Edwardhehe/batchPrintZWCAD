@@ -298,7 +298,7 @@ public static class PlotterService
         {
             using var tr = db.TransactionManager.StartTransaction();
             var layout = FindLayoutForJob(tr, db, job);
-            var window = ApplyLeaveMargin(GetPlotWindow(job, plotDocument), job);
+            var window = GetPlotWindow(job, plotDocument);
             using var plot = CreateValidatedPlot(layout, job, window, deviceName, styleSheet);
 
             PrepareOutputFile(job.OutputPath);
@@ -352,7 +352,7 @@ public static class PlotterService
             try
             {
                 settings.CopyFrom(layout);
-                ConfigurePlotSettings(validator, settings, deviceName, styleSheet, media, rotation, window);
+                ConfigurePlotSettings(validator, settings, deviceName, styleSheet, media, rotation, window, job);
 
                 var info = new PlotInfo
                 {
@@ -401,7 +401,8 @@ public static class PlotterService
         string styleSheet,
         MediaChoice media,
         PlotRotation rotation,
-        Extents2d window)
+        Extents2d window,
+        PlotJob job)
     {
         try
         {
@@ -426,8 +427,7 @@ public static class PlotterService
         EnsureRequiredMediaSize(settings, media);
         validator.SetPlotWindowArea(settings, window);
         validator.SetPlotType(settings, Autodesk.AutoCAD.DatabaseServices.PlotType.Window);
-        validator.SetUseStandardScale(settings, true);
-        validator.SetStdScaleType(settings, StdScaleType.ScaleToFit);
+        ConfigurePlotScale(validator, settings, window, job);
         validator.SetPlotCentered(settings, true);
         validator.SetPlotRotation(settings, rotation);
 
@@ -435,6 +435,38 @@ public static class PlotterService
         {
             validator.SetCurrentStyleSheet(settings, styleSheet);
         }
+    }
+
+    private static void ConfigurePlotScale(
+        PlotSettingsValidator validator,
+        PlotSettings settings,
+        Extents2d window,
+        PlotJob job)
+    {
+        if (!job.LeavePaperMargin)
+        {
+            validator.SetUseStandardScale(settings, true);
+            validator.SetStdScaleType(settings, StdScaleType.ScaleToFit);
+            return;
+        }
+
+        var marginMm = job.PaperMarginMm > 0d ? job.PaperMarginMm : 1d;
+        var windowWidth = Math.Abs(window.MaxPoint.X - window.MinPoint.X);
+        var windowHeight = Math.Abs(window.MaxPoint.Y - window.MinPoint.Y);
+        var paperSize = settings.PlotPaperSize;
+        var paperShortSide = Math.Min(paperSize.X, paperSize.Y);
+        var windowShortSide = Math.Min(windowWidth, windowHeight);
+        var usableShortSide = paperShortSide - marginMm * 2d;
+
+        if (windowWidth <= 0d || windowHeight <= 0d || usableShortSide <= 0d)
+        {
+            throw new InvalidOperationException("打印窗口或纸张尺寸无效，无法计算留白打印比例。");
+        }
+
+        // 保持原图框窗口不变，只缩小打印比例。扩大窗口会把图框外的相邻对象带入 PDF。
+        var scale = usableShortSide / windowShortSide;
+        validator.SetUseStandardScale(settings, false);
+        validator.SetCustomPrintScale(settings, new CustomScale(scale, 1d));
     }
 
     private static MediaChoice ChooseMedia(
@@ -987,7 +1019,7 @@ public static class PlotterService
         {
             using var tr = db.TransactionManager.StartTransaction();
             var layout = FindLayoutForJob(tr, db, job);
-            var window = ApplyLeaveMargin(GetPlotWindow(job, plotDocument), job);
+            var window = GetPlotWindow(job, plotDocument);
             using var plot = CreateValidatedPlot(layout, job, window, deviceName, styleSheet);
             RunPreview(plot.Info, documentName);
             tr.Commit();
@@ -1032,28 +1064,6 @@ public static class PlotterService
         {
             throw new InvalidOperationException("无法规范打印视图，已停止打印以避免输出空白或偏移页面。", ex);
         }
-    }
-
-    private static Extents2d ApplyLeaveMargin(Extents2d window, PlotJob job)
-    {
-        if (!job.LeavePaperMargin)
-        {
-            return window;
-        }
-
-        var shortSide = Math.Min(job.PaperWidthMm, job.PaperHeightMm);
-        if (shortSide <= 6d)
-        {
-            return window;
-        }
-
-        var scale = (shortSide - 6d) / shortSide;
-        var centerX = (window.MinPoint.X + window.MaxPoint.X) / 2d;
-        var centerY = (window.MinPoint.Y + window.MaxPoint.Y) / 2d;
-        var halfWidth = Math.Abs(window.MaxPoint.X - window.MinPoint.X) / scale / 2d;
-        var halfHeight = Math.Abs(window.MaxPoint.Y - window.MinPoint.Y) / scale / 2d;
-        // AutoCAD 保持 ScaleToFit + 居中；放大打印窗口，让原图框按短边 3mm 留白输出。
-        return new Extents2d(centerX - halfWidth, centerY - halfHeight, centerX + halfWidth, centerY + halfHeight);
     }
 
     private static Extents2d GetPlotWindow(PlotJob job, Document? plotDocument)

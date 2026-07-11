@@ -38,6 +38,7 @@ public sealed class BatchPlotForm : Form
     private readonly CheckBox _mergePdfCheckBox = new();
     private readonly CheckBox _addSeqCheckBox = new();
     private readonly CheckBox _leaveMarginCheckBox = new();
+    private readonly NumericUpDown _marginInput = new();
     private readonly Button _printButton = new();
     private CancellationTokenSource? _printCts;
     private readonly Label _statusLabel = new();
@@ -271,7 +272,16 @@ public sealed class BatchPlotForm : Form
         _leaveMarginCheckBox.Checked = false;
         _leaveMarginCheckBox.TextAlign = ContentAlignment.MiddleLeft;
         _leaveMarginCheckBox.Margin = new Padding(UiLayout.Scale(12), UiLayout.Scale(7), UiLayout.Scale(12), 0);
-        SetTip(_leaveMarginCheckBox, "勾选后按纸张短边预留 3mm 边距，居中等比例缩小打印。");
+        SetTip(_leaveMarginCheckBox, "勾选后按设定距离在纸张短边两侧留白，居中等比例缩小打印。");
+        _marginInput.DecimalPlaces = 1;
+        _marginInput.Minimum = 0.1m;
+        _marginInput.Maximum = 20m;
+        _marginInput.Increment = 0.5m;
+        _marginInput.Value = 1m;
+        _marginInput.Width = UiLayout.Scale(68);
+        _marginInput.Enabled = false;
+        _marginInput.Margin = new Padding(0, UiLayout.Scale(4), 0, 0);
+        _leaveMarginCheckBox.CheckedChanged += (_, _) => _marginInput.Enabled = _leaveMarginCheckBox.Checked;
 
         actionRow.Controls.Add(scanButton);
         actionRow.Controls.Add(scanWindowButton);
@@ -312,6 +322,8 @@ public sealed class BatchPlotForm : Form
         pathRow.Controls.Add(_mergePdfCheckBox);
         pathRow.Controls.Add(_addSeqCheckBox);
         pathRow.Controls.Add(_leaveMarginCheckBox);
+        pathRow.Controls.Add(_marginInput);
+        pathRow.Controls.Add(new Label { Text = "mm", AutoSize = true, Margin = new Padding(3, UiLayout.Scale(8), UiLayout.Scale(8), 0) });
         pathRow.Controls.Add(currentFolderButton);
         pathRow.Controls.Add(currentPdfButton);
         pathRow.Controls.Add(specifiedFolderButton);
@@ -1792,10 +1804,12 @@ public sealed class BatchPlotForm : Form
     private void ApplyLeaveMarginSelection(IEnumerable<PlotJob> jobs)
     {
         var leaveMargin = _leaveMarginCheckBox.Checked;
+        var marginMm = (double)_marginInput.Value;
         foreach (var job in jobs)
         {
             // 留白选项是本次打印设置，不改变图框识别数据，只在输出/预览时生效。
             job.LeavePaperMargin = leaveMargin;
+            job.PaperMarginMm = marginMm;
         }
     }
 
@@ -1825,6 +1839,7 @@ public sealed class BatchPlotForm : Form
         }
 
         job.LeavePaperMargin = _leaveMarginCheckBox.Checked;
+        job.PaperMarginMm = (double)_marginInput.Value;
         var wasVisible = Visible;
         var selectedRows = _grid.SelectedRows.Cast<DataGridViewRow>().ToList();
         var currentCell = _grid.CurrentCell;

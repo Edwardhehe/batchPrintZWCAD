@@ -446,11 +446,10 @@ public static class PlotterService
                 validator.SetCurrentStyleSheet(plotSettings, styleSheet);
             }
 
-            var plotWindow = ApplyLeaveMargin(GetPlotWindow(job, plotDocument), job);
+            var plotWindow = GetPlotWindow(job, plotDocument);
             validator.SetPlotWindowArea(plotSettings, plotWindow);
             validator.SetPlotType(plotSettings, ZwSoft.ZwCAD.DatabaseServices.PlotType.Window);
-            validator.SetUseStandardScale(plotSettings, true);
-            validator.SetStdScaleType(plotSettings, StdScaleType.ScaleToFit);
+            ConfigurePlotScale(validator, plotSettings, plotWindow, job);
             validator.SetPlotCentered(plotSettings, true);
             validator.SetPlotRotation(plotSettings, DetectRotation(media, job, plotWindow));
 
@@ -503,26 +502,36 @@ public static class PlotterService
             $"未找到目标布局“{job.SpaceName}”。可用布局: {string.Join(", ", availableLayouts)}。请重新扫描图纸。");
     }
 
-    private static Extents2d ApplyLeaveMargin(Extents2d window, PlotJob job)
+    private static void ConfigurePlotScale(
+        PlotSettingsValidator validator,
+        PlotSettings plotSettings,
+        Extents2d window,
+        PlotJob job)
     {
         if (!job.LeavePaperMargin)
         {
-            return window;
+            validator.SetUseStandardScale(plotSettings, true);
+            validator.SetStdScaleType(plotSettings, StdScaleType.ScaleToFit);
+            return;
         }
 
-        var shortSide = Math.Min(job.PaperWidthMm, job.PaperHeightMm);
-        if (shortSide <= 6d)
+        var marginMm = job.PaperMarginMm > 0d ? job.PaperMarginMm : 1d;
+        var windowWidth = Math.Abs(window.MaxPoint.X - window.MinPoint.X);
+        var windowHeight = Math.Abs(window.MaxPoint.Y - window.MinPoint.Y);
+        var paperSize = plotSettings.PlotPaperSize;
+        var paperShortSide = Math.Min(paperSize.X, paperSize.Y);
+        var windowShortSide = Math.Min(windowWidth, windowHeight);
+        var usableShortSide = paperShortSide - marginMm * 2d;
+
+        if (windowWidth <= 0d || windowHeight <= 0d || usableShortSide <= 0d)
         {
-            return window;
+            throw new InvalidOperationException("打印窗口或纸张尺寸无效，无法计算留白打印比例。");
         }
 
-        var scale = (shortSide - 6d) / shortSide;
-        var centerX = (window.MinPoint.X + window.MaxPoint.X) / 2d;
-        var centerY = (window.MinPoint.Y + window.MaxPoint.Y) / 2d;
-        var halfWidth = Math.Abs(window.MaxPoint.X - window.MinPoint.X) / scale / 2d;
-        var halfHeight = Math.Abs(window.MaxPoint.Y - window.MinPoint.Y) / scale / 2d;
-        // 继续使用 ScaleToFit + 居中；放大打印窗口，让原图框在纸上等比例缩小并形成留白。
-        return new Extents2d(centerX - halfWidth, centerY - halfHeight, centerX + halfWidth, centerY + halfHeight);
+        // 保持原图框窗口不变，只缩小打印比例。扩大窗口会把图框外的相邻对象带入 PDF。
+        var scale = usableShortSide / windowShortSide;
+        validator.SetUseStandardScale(plotSettings, false);
+        validator.SetCustomPrintScale(plotSettings, new CustomScale(scale, 1d));
     }
 
     private static Extents2d GetPlotWindow(PlotJob job, Document? plotDocument)
@@ -719,11 +728,10 @@ public static class PlotterService
                 validator.SetCurrentStyleSheet(plotSettings, styleSheet);
             }
 
-            var plotWindow = ApplyLeaveMargin(GetPlotWindow(job, plotDocument), job);
+            var plotWindow = GetPlotWindow(job, plotDocument);
             validator.SetPlotWindowArea(plotSettings, plotWindow);
             validator.SetPlotType(plotSettings, ZwSoft.ZwCAD.DatabaseServices.PlotType.Window);
-            validator.SetUseStandardScale(plotSettings, true);
-            validator.SetStdScaleType(plotSettings, StdScaleType.ScaleToFit);
+            ConfigurePlotScale(validator, plotSettings, plotWindow, job);
             validator.SetPlotCentered(plotSettings, true);
             validator.SetPlotRotation(plotSettings, DetectRotation(media, job, plotWindow));
 

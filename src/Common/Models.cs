@@ -109,8 +109,10 @@ public sealed class PlotJob
     public double MaxX { get; set; }
     public double MaxY { get; set; }
     public string OutputPath { get; set; } = "";
-    /// <summary>是否按纸张短边预留 3mm 边距，打印时居中等比例缩小。</summary>
+    /// <summary>是否按纸张短边预留边距，打印时居中等比例缩小。</summary>
     public bool LeavePaperMargin { get; set; }
+    /// <summary>纸张短边两侧的留白距离（毫米）。</summary>
+    public double PaperMarginMm { get; set; } = 1d;
 
     /// <summary>MinX/Y/MaxX/MaxY 已经是 DCS 坐标，GetPlotWindow 跳过 WCS→DCS 变换。</summary>
     public bool IsDcsWindow { get; set; }

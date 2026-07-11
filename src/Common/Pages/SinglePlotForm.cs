@@ -15,6 +15,7 @@ public sealed class SinglePlotForm : Form
     private readonly Label _areaLabel = new();
     private readonly Label _scaleLabel = new();
     private readonly CheckBox _leaveMargin = new();
+    private readonly NumericUpDown _marginInput = new();
 
     public PaperDetection SelectedPaper
     {
@@ -28,6 +29,7 @@ public sealed class SinglePlotForm : Form
 
     public string OutputPath => _outputPath.Text;
     public bool LeavePaperMargin => _leaveMargin.Checked;
+    public double PaperMarginMm => (double)_marginInput.Value;
 
     /// <summary>DialogResult.OK 时，此属性区分是"打印"还是"预览"。</summary>
     public bool IsPreview { get; private set; }
@@ -160,13 +162,24 @@ public sealed class SinglePlotForm : Form
         outputRow.Controls.Add(browseButton, 2, 0);
         root.Controls.Add(outputRow, 0, 3);
 
-        _leaveMargin.Text = "周边留白（短边两侧各约 3mm）";
+        _leaveMargin.Text = "周边留白，短边两侧各";
         _leaveMargin.AutoSize = true;
         _leaveMargin.Checked = false;
-        _leaveMargin.Dock = DockStyle.Fill;
         _leaveMargin.TextAlign = ContentAlignment.MiddleLeft;
+        _marginInput.DecimalPlaces = 1;
+        _marginInput.Minimum = 0.1m;
+        _marginInput.Maximum = 20m;
+        _marginInput.Increment = 0.5m;
+        _marginInput.Value = 1m;
+        _marginInput.Width = UiLayout.Scale(72);
+        _marginInput.Enabled = false;
+        _leaveMargin.CheckedChanged += (_, _) => _marginInput.Enabled = _leaveMargin.Checked;
+        var marginRow = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };
+        marginRow.Controls.Add(_leaveMargin);
+        marginRow.Controls.Add(_marginInput);
+        marginRow.Controls.Add(new Label { Text = "mm", AutoSize = true, Margin = new Padding(3, UiLayout.Scale(7), 0, 0) });
         // 单张打印的预览和正式输出都读取这个值，保证留白效果一致。
-        root.Controls.Add(_leaveMargin, 0, 4);
+        root.Controls.Add(marginRow, 0, 4);
 
         // 第六行弹性空白（上面已有 RowStyles 定义）
 
