@@ -157,6 +157,10 @@ public static class CadTextExtractor
             new HashSet<ObjectId>(),
             0);
 
+        // 图框块和图签块可能是分开的两个块引用，此时需要检查所有者空间中
+        // 其他与字段区域重叠的块引用，确保其中的文字（如日期）不被遗漏。
+        CollectOverlappingBlockText(tr, blockRef, owner, region, values);
+
         if (values.Count == 0)
         {
             return "";
@@ -367,6 +371,79 @@ public static class CadTextExtractor
         }
 
         visitedDefinitions.Remove(definition.ObjectId);
+    }
+
+    /// <summary>
+    /// 检查所有者空间中与字段区域重叠的其他块引用（如图框块与图签块分离的情况），
+    /// 将区域变换到对方块内坐标后递归提取文字。
+    /// </summary>
+    private static void CollectOverlappingBlockText(
+        Transaction tr,
+        BlockReference self,
+        BlockTableRecord owner,
+        LocalRectangle region,
+        ICollection<TextCandidate> values)
+    {
+        // 将字段区域从当前块的局部坐标变换到世界坐标
+        var blockTransform = self.BlockTransform;
+        var corners = new[]
+        {
+            new Point3d(region.MinX, region.MinY, 0).TransformBy(blockTransform),
+            new Point3d(region.MaxX, region.MinY, 0).TransformBy(blockTransform),
+            new Point3d(region.MinX, region.MaxY, 0).TransformBy(blockTransform),
+            new Point3d(region.MaxX, region.MaxY, 0).TransformBy(blockTransform)
+        };
+        var worldMinX = corners.Min(p => p.X);
+        var worldMaxX = corners.Max(p => p.X);
+        var worldMinY = corners.Min(p => p.Y);
+        var worldMaxY = corners.Max(p => p.Y);
+
+        foreach (ObjectId id in owner)
+        {
+            if (id == self.ObjectId)
+                continue;
+
+            if (tr.GetObject(id, OpenMode.ForRead, false) is not BlockReference otherBlock)
+                continue;
+
+            // 快速剔除：检查两个包围盒是否相交
+            Extents3d otherExtents;
+            try { otherExtents = otherBlock.GeometricExtents; }
+            catch { continue; }
+
+            if (otherExtents.MaxPoint.X < worldMinX || otherExtents.MinPoint.X > worldMaxX
+                || otherExtents.MaxPoint.Y < worldMinY || otherExtents.MinPoint.Y > worldMaxY)
+                continue;
+
+            // 将世界坐标区域变换到对方块内局部坐标
+            var otherInverse = otherBlock.BlockTransform.Inverse();
+            var localPoints = corners.Select(p => p.TransformBy(otherInverse)).ToArray();
+            var otherLocalRegion = LocalRectangle.FromPoints(
+                localPoints.Min(p => p.X), localPoints.Min(p => p.Y),
+                localPoints.Max(p => p.X), localPoints.Max(p => p.Y));
+
+            // 检查对方块引用自身的属性（如日期是图签块的属性定义）
+            foreach (ObjectId attrId in otherBlock.AttributeCollection)
+            {
+                if (!attrId.IsValid || attrId.IsErased)
+                    continue;
+                if (tr.GetObject(attrId, OpenMode.ForRead, false) is AttributeReference attr
+                    && TryGetText(attr, out var attrText, out var attrWorldPoint))
+                {
+                    var attrLocal = attrWorldPoint.TransformBy(otherInverse);
+                    if (otherLocalRegion.Contains(attrLocal.X, attrLocal.Y))
+                        AddText(values, attrText, attrLocal, TextSourcePriority.Attribute);
+                }
+            }
+
+            try
+            {
+                var otherDef = (BlockTableRecord)tr.GetObject(otherBlock.BlockTableRecord, OpenMode.ForRead);
+                CollectDefinitionText(tr, otherDef, Matrix3d.Identity, otherLocalRegion, values,
+                    TextSourcePriority.BlockDefinition, new HashSet<ObjectId>(), 0);
+            }
+            catch { }
+        }
     }
 
     private static bool IsInRegion(Entity entity, Matrix3d entityToLocal, LocalRectangle region, Point3d fallbackPoint)
