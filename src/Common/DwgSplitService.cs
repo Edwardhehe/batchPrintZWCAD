@@ -411,26 +411,21 @@ public static class DwgSplitService
     private static string BuildOutputPath(PlotJob job, string sourceFile, AppSettings settings, ISet<string> reservedPaths)
     {
         var directory = Path.Combine(Path.GetDirectoryName(sourceFile) ?? "", "DWG");
-        var separator = settings.PdfFileNameSeparator ?? "_";
-        var baseName = FileNameSanitizer.Clean($"{job.DrawingNumber}{separator}{job.Title}");
-        Directory.CreateDirectory(directory);
-
-        var path = Path.Combine(directory, baseName + ".dwg");
-        if (!settings.AddSequenceWhenPdfExists)
+        var fields = settings.PdfFileNameFields;
+        if (fields == null || fields.Count == 0)
         {
-            reservedPaths.Add(path);
-            return path;
+            fields = new List<string> { "DrawingNumber", "Title" };
         }
 
-        var index = 1;
-        while (File.Exists(path) || reservedPaths.Contains(path))
+        var parts = FileNameSanitizer.GetFileNameParts(job, fields);
+        if (parts.Count == 0)
         {
-            path = Path.Combine(directory, $"{baseName}_{index}.dwg");
-            index++;
+            parts.Add(job.DrawingNumber);
         }
 
-        reservedPaths.Add(path);
-        return path;
+        var separator = settings.PdfFileNameSeparator;
+        var baseName = string.Join(separator, parts);
+        return FileNameSanitizer.MakeUnique(directory, baseName, reservedPaths, settings.AddSequenceWhenPdfExists, ".dwg");
     }
 
     private static string GetSourceKey(PlotJob job, Document currentDocument)

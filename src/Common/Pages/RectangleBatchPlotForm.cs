@@ -82,13 +82,14 @@ public sealed class RectangleBatchPlotForm : Form
         var top = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
-            Height = UiLayout.Scale(126),
+            Height = UiLayout.Scale(160),
             ColumnCount = 1,
-            RowCount = 3,
+            RowCount = 4,
             Padding = new Padding(UiLayout.Scale(10), UiLayout.Scale(8), UiLayout.Scale(10), UiLayout.Scale(6)),
             BackColor = Color.FromArgb(245, 247, 250)
         };
         top.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(38)));
+        top.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(34)));
         top.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(34)));
         top.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(34)));
 
@@ -124,23 +125,22 @@ public sealed class RectangleBatchPlotForm : Form
         var outputRow = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 5,
+            ColumnCount = 2,
             RowCount = 1,
             Margin = Padding.Empty,
             Padding = Padding.Empty
         };
         outputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(52)));
         outputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        outputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.ButtonWidth("源文件路径", 98) + UiLayout.Scale(8)));
-        outputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.ButtonWidth("源文件路径/PDF", 126) + UiLayout.Scale(8)));
-        outputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.ButtonWidth("指定路径...", 88)));
         outputRow.Controls.Add(LabelFor("输出"), 0, 0);
         _outputDirectory.Dock = DockStyle.Fill;
         _outputDirectory.Text = Path.Combine(SourceDirectory(), "PDF");
         _outputDirectory.Margin = new Padding(0, UiLayout.Scale(3), UiLayout.Scale(8), UiLayout.Scale(4));
         _outputDirectory.TextChanged += (_, _) => RefreshOutputPaths();
         outputRow.Controls.Add(_outputDirectory, 1, 0);
-        // 输出路径快捷按钮放在同一行，避免 GroupBox 标题和内部行高造成按钮被裁切。
+
+        // 保存路径快捷按钮独立成行，与图框块打印面板保持一致的布局。
+        var pathRow = NewFlow();
         var sourceButton = UiLayout.CreateButton("源文件路径", 98);
         sourceButton.Margin = new Padding(0, UiLayout.Scale(2), UiLayout.Scale(6), UiLayout.Scale(2));
         sourceButton.Click += (_, _) => SetOutputDirectory(SourceDirectory());
@@ -150,9 +150,16 @@ public sealed class RectangleBatchPlotForm : Form
         var customButton = UiLayout.CreateButton("指定路径...", 88);
         customButton.Margin = new Padding(0, UiLayout.Scale(2), 0, UiLayout.Scale(2));
         customButton.Click += (_, _) => ChooseOutputDirectory();
-        outputRow.Controls.Add(sourceButton, 2, 0);
-        outputRow.Controls.Add(pdfButton, 3, 0);
-        outputRow.Controls.Add(customButton, 4, 0);
+        pathRow.Controls.Add(new Label
+        {
+            Text = "保存路径快捷:",
+            AutoSize = true,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Margin = new Padding(0, UiLayout.Scale(8), UiLayout.Scale(8), 0)
+        });
+        pathRow.Controls.Add(sourceButton);
+        pathRow.Controls.Add(pdfButton);
+        pathRow.Controls.Add(customButton);
         tips.SetToolTip(sourceButton, "输出到当前 DWG 所在文件夹。");
         tips.SetToolTip(pdfButton, "输出到当前 DWG 所在文件夹下的 PDF 子文件夹。 ");
         tips.SetToolTip(customButton, "选择其他 PDF 输出文件夹。");
@@ -188,14 +195,14 @@ public sealed class RectangleBatchPlotForm : Form
         options.Controls.Add(_sortOrder, 1, 0);
 
         _mergePdf.Text = "合并为一个 PDF";
-        _mergePdf.Checked = true;
+        _mergePdf.Checked = _settings.MergePdf;
         _mergePdf.AutoSize = true;
         _mergePdf.Anchor = AnchorStyles.Left | AnchorStyles.Top;
         _mergePdf.Margin = new Padding(UiLayout.Scale(4), UiLayout.Scale(7), UiLayout.Scale(8), 0);
         options.Controls.Add(_mergePdf, 2, 0);
 
         _leaveMargin.Text = "周边留白";
-        _leaveMargin.Checked = false;
+        _leaveMargin.Checked = _settings.LeavePaperMargin;
         _leaveMargin.AutoSize = true;
         _leaveMargin.Anchor = AnchorStyles.Left | AnchorStyles.Top;
         _leaveMargin.Margin = new Padding(UiLayout.Scale(4), UiLayout.Scale(7), 0, 0);
@@ -204,9 +211,9 @@ public sealed class RectangleBatchPlotForm : Form
         _marginInput.Minimum = 0.1m;
         _marginInput.Maximum = 20m;
         _marginInput.Increment = 0.5m;
-        _marginInput.Value = 1m;
+        _marginInput.Value = Math.Max(0.1m, (decimal)_settings.PaperMarginMm);
         _marginInput.Width = UiLayout.Scale(58);
-        _marginInput.Enabled = false;
+        _marginInput.Enabled = _leaveMargin.Checked;
         _leaveMargin.CheckedChanged += (_, _) => _marginInput.Enabled = _leaveMargin.Checked;
         _leaveMargin.Text = "留白";
         var marginPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = Padding.Empty };
@@ -247,7 +254,8 @@ public sealed class RectangleBatchPlotForm : Form
 
         top.Controls.Add(actions, 0, 0);
         top.Controls.Add(outputRow, 0, 1);
-        top.Controls.Add(options, 0, 2);
+        top.Controls.Add(pathRow, 0, 2);
+        top.Controls.Add(options, 0, 3);
 
         UiLayout.StyleGrid(_grid, Font);
         _grid.BorderStyle = BorderStyle.None;
@@ -1370,6 +1378,9 @@ public sealed class RectangleBatchPlotForm : Form
     {
         _settings.LastPlotDevice = AcadPlotterInstaller.PreferredPdfPlotter;
         _settings.LastStyleSheet = SelectedStyle();
+        _settings.MergePdf = _mergePdf.Checked;
+        _settings.LeavePaperMargin = _leaveMargin.Checked;
+        _settings.PaperMarginMm = (double)_marginInput.Value;
         AppSettingsStore.Save(_settings);
     }
 

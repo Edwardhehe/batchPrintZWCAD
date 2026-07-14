@@ -27,18 +27,18 @@ public static class FileNameSanitizer
         return MakeUnique(directory, fileNameWithoutExtension, reservedPaths, true);
     }
 
-    public static string MakeUnique(string directory, string fileNameWithoutExtension, ISet<string>? reservedPaths, bool avoidExistingFile)
+    public static string MakeUnique(string directory, string fileNameWithoutExtension, ISet<string>? reservedPaths, bool avoidExistingFile, string extension = ".pdf")
     {
         Directory.CreateDirectory(directory);
-        var clean = TrimFileNameForPath(Clean(fileNameWithoutExtension), directory);
-        var path = Path.Combine(directory, clean + ".pdf");
+        var clean = TrimFileNameForPath(Clean(fileNameWithoutExtension), directory, extension);
+        var path = Path.Combine(directory, clean + extension);
         var index = 1;
         while ((avoidExistingFile && File.Exists(path)) || reservedPaths?.Contains(path) == true)
         {
             var suffix = "_" + index;
-            var maxNameLength = GetMaxFileNameLength(directory);
+            var maxNameLength = GetMaxFileNameLength(directory, extension);
             var uniqueName = TrimToLength(clean, Math.Max(1, maxNameLength - suffix.Length)) + suffix;
-            path = Path.Combine(directory, uniqueName + ".pdf");
+            path = Path.Combine(directory, uniqueName + extension);
             index++;
         }
 
@@ -46,12 +46,12 @@ public static class FileNameSanitizer
         return path;
     }
 
-    private static string TrimFileNameForPath(string value, string directory)
+    private static string TrimFileNameForPath(string value, string directory, string extension = ".pdf")
     {
-        return TrimToLength(value, GetMaxFileNameLength(directory));
+        return TrimToLength(value, GetMaxFileNameLength(directory, extension));
     }
 
-    private static int GetMaxFileNameLength(string directory)
+    private static int GetMaxFileNameLength(string directory, string extension = ".pdf")
     {
         if (string.IsNullOrWhiteSpace(directory))
         {
@@ -60,12 +60,42 @@ public static class FileNameSanitizer
 
         return Math.Min(
             DefaultMaxFileNameLength,
-            Math.Max(1, LegacyMaxPathLength - Path.GetFullPath(directory).Length - ".pdf".Length - 1));
+            Math.Max(1, LegacyMaxPathLength - Path.GetFullPath(directory).Length - extension.Length - 1));
     }
 
     private static string TrimToLength(string value, int maxLength)
     {
         value = string.IsNullOrWhiteSpace(value) ? "未命名" : value.Trim();
         return value.Length <= maxLength ? value : value.Substring(0, maxLength).Trim();
+    }
+
+    /// <summary>
+    /// 根据用户配置的字段键列表，从 PlotJob 中提取对应的值组成文件名片段。
+    /// 空值自动跳过，确保最终文件名不含多余分隔符。
+    /// </summary>
+    public static List<string> GetFileNameParts(PlotJob job, List<string> fieldKeys)
+    {
+        var parts = new List<string>();
+        foreach (var key in fieldKeys)
+        {
+            var value = key switch
+            {
+                "DrawingNumber" => job.DrawingNumber,
+                "Title" => job.Title,
+                "Date" => job.Date,
+                "Revision" => job.Revision,
+                "Phase" => job.Phase,
+                "Info1" => job.Info1,
+                "Info2" => job.Info2,
+                "PaperName" => job.PaperName,
+                _ => ""
+            };
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                parts.Add(value.Trim());
+            }
+        }
+
+        return parts;
     }
 }

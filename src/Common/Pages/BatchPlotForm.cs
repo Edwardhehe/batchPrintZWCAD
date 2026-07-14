@@ -254,14 +254,14 @@ public sealed class BatchPlotForm : Form
 
         _mergePdfCheckBox.Text = "合并为单个 PDF";
         _mergePdfCheckBox.AutoSize = true;
-        _mergePdfCheckBox.Checked = false;
+        _mergePdfCheckBox.Checked = _settings.MergePdf;
         _mergePdfCheckBox.TextAlign = ContentAlignment.MiddleLeft;
         _mergePdfCheckBox.Margin = new Padding(UiLayout.Scale(12), UiLayout.Scale(7), UiLayout.Scale(12), 0);
         SetTip(_mergePdfCheckBox, "勾选后选择最终文件名；打印过程只使用临时单页，完成后仅保留一个合并 PDF。");
 
         _addSeqCheckBox.Text = "文件名加序号";
         _addSeqCheckBox.AutoSize = true;
-        _addSeqCheckBox.Checked = false;
+        _addSeqCheckBox.Checked = _settings.AddFileNameSequence;
         _addSeqCheckBox.TextAlign = ContentAlignment.MiddleLeft;
         _addSeqCheckBox.Margin = new Padding(UiLayout.Scale(12), UiLayout.Scale(7), UiLayout.Scale(12), 0);
         _addSeqCheckBox.CheckedChanged += (_, _) => SortAndRefreshOutputPaths();
@@ -269,7 +269,7 @@ public sealed class BatchPlotForm : Form
 
         _leaveMarginCheckBox.Text = "周边留白";
         _leaveMarginCheckBox.AutoSize = true;
-        _leaveMarginCheckBox.Checked = false;
+        _leaveMarginCheckBox.Checked = _settings.LeavePaperMargin;
         _leaveMarginCheckBox.TextAlign = ContentAlignment.MiddleLeft;
         _leaveMarginCheckBox.Margin = new Padding(UiLayout.Scale(12), UiLayout.Scale(7), UiLayout.Scale(12), 0);
         SetTip(_leaveMarginCheckBox, "勾选后按设定距离在纸张短边两侧留白，居中等比例缩小打印。");
@@ -277,9 +277,9 @@ public sealed class BatchPlotForm : Form
         _marginInput.Minimum = 0.1m;
         _marginInput.Maximum = 20m;
         _marginInput.Increment = 0.5m;
-        _marginInput.Value = 1m;
+        _marginInput.Value = Math.Max(0.1m, (decimal)_settings.PaperMarginMm);
         _marginInput.Width = UiLayout.Scale(68);
-        _marginInput.Enabled = false;
+        _marginInput.Enabled = _leaveMarginCheckBox.Checked;
         _marginInput.Margin = new Padding(0, UiLayout.Scale(4), 0, 0);
         _leaveMarginCheckBox.CheckedChanged += (_, _) => _marginInput.Enabled = _leaveMarginCheckBox.Checked;
 
@@ -319,14 +319,14 @@ public sealed class BatchPlotForm : Form
             TextAlign = ContentAlignment.MiddleLeft,
             Margin = new Padding(0, UiLayout.Scale(8), UiLayout.Scale(8), 0)
         });
+        pathRow.Controls.Add(currentFolderButton);
+        pathRow.Controls.Add(currentPdfButton);
+        pathRow.Controls.Add(specifiedFolderButton);
         pathRow.Controls.Add(_mergePdfCheckBox);
         pathRow.Controls.Add(_addSeqCheckBox);
         pathRow.Controls.Add(_leaveMarginCheckBox);
         pathRow.Controls.Add(_marginInput);
         pathRow.Controls.Add(new Label { Text = "mm", AutoSize = true, Margin = new Padding(3, UiLayout.Scale(8), UiLayout.Scale(8), 0) });
-        pathRow.Controls.Add(currentFolderButton);
-        pathRow.Controls.Add(currentPdfButton);
-        pathRow.Controls.Add(specifiedFolderButton);
         top.Controls.Add(pathRow, 0, 2);
 
         UiLayout.StyleGrid(_grid, Font);
@@ -1227,7 +1227,7 @@ public sealed class BatchPlotForm : Form
             fields = new System.Collections.Generic.List<string> { "DrawingNumber", "Title" };
         }
 
-        var parts = GetFileNameParts(job, fields);
+        var parts = FileNameSanitizer.GetFileNameParts(job, fields);
         if (parts.Count == 0)
         {
             parts.Add(job.DrawingNumber); // fallback
@@ -1238,31 +1238,6 @@ public sealed class BatchPlotForm : Form
         return FileNameSanitizer.MakeUnique(_outputDirectory.Text, baseName, reservedPaths, _settings.AddSequenceWhenPdfExists);
     }
 
-    private static List<string> GetFileNameParts(PlotJob job, List<string> fieldKeys)
-    {
-        var parts = new List<string>();
-        foreach (var key in fieldKeys)
-        {
-            var value = key switch
-            {
-                "DrawingNumber" => job.DrawingNumber,
-                "Title" => job.Title,
-                "Date" => job.Date,
-                "Revision" => job.Revision,
-                "Phase" => job.Phase,
-                "Info1" => job.Info1,
-                "Info2" => job.Info2,
-                "PaperName" => job.PaperName,
-                _ => ""
-            };
-            if (!string.IsNullOrWhiteSpace(value))
-            {
-                parts.Add(value.Trim());
-            }
-        }
-
-        return parts;
-    }
 
     private string GetDefaultOutputDirectory()
     {
@@ -2027,6 +2002,10 @@ public sealed class BatchPlotForm : Form
         _settings.LastPlotDevice = AcadPlotterInstaller.PreferredPdfPlotter;
         _settings.LastStyleSheet = _styleCombo.SelectedItem?.ToString() ?? "";
         _settings.AutoScanCurrentDrawing = false;
+        _settings.MergePdf = _mergePdfCheckBox.Checked;
+        _settings.AddFileNameSequence = _addSeqCheckBox.Checked;
+        _settings.LeavePaperMargin = _leaveMarginCheckBox.Checked;
+        _settings.PaperMarginMm = (double)_marginInput.Value;
         AppSettingsStore.Save(_settings);
     }
 }

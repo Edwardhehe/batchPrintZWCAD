@@ -18,6 +18,10 @@ public sealed class AppSettings
     public bool AllowStandardPaperNameFallback { get; set; } = true;
     public bool ShowPlotProgress { get; set; } = true;
     public bool AddSequenceWhenPdfExists { get; set; } = false;
+    public bool MergePdf { get; set; }
+    public bool AddFileNameSequence { get; set; }
+    public bool LeavePaperMargin { get; set; }
+    public double PaperMarginMm { get; set; } = 1;
     public string PdfFileNameSeparator { get; set; } = "_";
     public List<string> PdfFileNameFields { get; set; } = new() { "DrawingNumber", "Title" };
     public bool OpenExternalDwgForPlot { get; set; } = true;
@@ -132,6 +136,11 @@ public static class AppSettingsStore
         }
 
         settings.DirectoryTextStyleName ??= "";
+        if (settings.PaperMarginMm <= 0)
+        {
+            settings.PaperMarginMm = 1;
+        }
+
         settings.PdfFileNameSeparator = NormalizeFileNameSeparator(settings.PdfFileNameSeparator);
         if (settings.PdfFileNameFields == null || settings.PdfFileNameFields.Count == 0)
         {
