@@ -30,10 +30,21 @@ public static class DwgSplitService
         IReadOnlyList<PlotJob> jobs,
         Document currentDocument,
         AppSettings settings,
-        Action<PlotJob>? beforeJob = null)
+        Action<PlotJob>? beforeJob = null,
+        string? customOutputDirectory = null,
+        string? sourceSubfolder = null,
+        IReadOnlyDictionary<PlotJob, string>? explicitOutputPaths = null)
     {
         var results = new List<SplitResult>();
-        var reservedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var outputPaths = explicitOutputPaths == null
+            ? BuildOutputPaths(
+                jobs,
+                currentDocument,
+                settings,
+                createDirectories: true,
+                customOutputDirectory: customOutputDirectory,
+                sourceSubfolder: sourceSubfolder)
+            : jobs.ToDictionary(job => job, job => explicitOutputPaths[job]);
 
         foreach (var group in jobs.GroupBy(x => GetSourceKey(x, currentDocument), StringComparer.OrdinalIgnoreCase))
         {
@@ -49,7 +60,7 @@ public static class DwgSplitService
                         throw new FileNotFoundException("源 DWG 文件不存在，请先保存当前图纸。", sourceFile);
                     }
 
-                    var outputPath = BuildOutputPath(job, sourceFile, settings, reservedPaths);
+                    var outputPath = outputPaths[job];
                     if (job.IsPaperSpace)
                     {
                         SplitPaperByCleaningCopy(sourceFile, outputPath, job, result);
@@ -73,6 +84,35 @@ public static class DwgSplitService
         return results;
     }
 
+    public static Dictionary<PlotJob, string> BuildOutputPaths(
+        IReadOnlyList<PlotJob> jobs,
+        Document currentDocument,
+        AppSettings settings,
+        bool createDirectories = false,
+        string? customOutputDirectory = null,
+        string? sourceSubfolder = null)
+    {
+        var outputPaths = new Dictionary<PlotJob, string>();
+        var reservedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var group in jobs.GroupBy(x => GetSourceKey(x, currentDocument), StringComparer.OrdinalIgnoreCase))
+        {
+            foreach (var job in group)
+            {
+                var sourceFile = ResolveSourceFile(job, currentDocument);
+                outputPaths[job] = BuildOutputPath(
+                    job,
+                    sourceFile,
+                    settings,
+                    reservedPaths,
+                    createDirectories,
+                    customOutputDirectory,
+                    sourceSubfolder);
+            }
+        }
+
+        return outputPaths;
+    }
+
     private static void SplitModelByCloningWindow(string sourceFile, string outputPath, PlotJob job, SplitResult result)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
@@ -86,6 +126,12 @@ public static class DwgSplitService
         sourceDb.CloseInput(true);
 
         var idsToClone = CollectModelWindowEntities(sourceDb, job, result);
+        if (idsToClone.Count == 0)
+        {
+            throw new InvalidOperationException(
+                "拆图范围内未找到可复制对象，已停止生成空 DWG。请检查图框的 UCS/WCS 坐标。");
+        }
+
         using var targetDb = new Database(true, true);
         if (idsToClone.Count > 0)
         {
@@ -208,6 +254,15 @@ public static class DwgSplitService
 
     private static Extents3d BuildWindow(PlotJob job)
     {
+        if (job.CornerPoints != null && job.CornerPoints.Length >= 8)
+        {
+            var xs = new[] { job.CornerPoints[0], job.CornerPoints[2], job.CornerPoints[4], job.CornerPoints[6] };
+            var ys = new[] { job.CornerPoints[1], job.CornerPoints[3], job.CornerPoints[5], job.CornerPoints[7] };
+            return new Extents3d(
+                new Point3d(xs.Min(), ys.Min(), 0),
+                new Point3d(xs.Max(), ys.Max(), 0));
+        }
+
         return new Extents3d(
             new Point3d(Math.Min(job.MinX, job.MaxX), Math.Min(job.MinY, job.MaxY), 0),
             new Point3d(Math.Max(job.MinX, job.MaxX), Math.Max(job.MinY, job.MaxY), 0));
@@ -217,10 +272,11 @@ public static class DwgSplitService
     {
         try
         {
-            var minX = Math.Min(job.MinX, job.MaxX);
-            var minY = Math.Min(job.MinY, job.MaxY);
-            var maxX = Math.Max(job.MinX, job.MaxX);
-            var maxY = Math.Max(job.MinY, job.MaxY);
+            var window = BuildWindow(job);
+            var minX = window.MinPoint.X;
+            var minY = window.MinPoint.Y;
+            var maxX = window.MaxPoint.X;
+            var maxY = window.MaxPoint.Y;
             var width = Math.Max(maxX - minX, 1);
             var height = Math.Max(maxY - minY, 1);
             var screenAspect = 16.0 / 9.0;
@@ -408,9 +464,29 @@ public static class DwgSplitService
         }
     }
 
-    private static string BuildOutputPath(PlotJob job, string sourceFile, AppSettings settings, ISet<string> reservedPaths)
+    private static string BuildOutputPath(
+        PlotJob job,
+        string sourceFile,
+        AppSettings settings,
+        ISet<string> reservedPaths,
+        bool createDirectory,
+        string? customOutputDirectory,
+        string? sourceSubfolder)
     {
-        var directory = Path.Combine(Path.GetDirectoryName(sourceFile) ?? "", "DWG");
+        var sourceDirectory = Path.GetDirectoryName(sourceFile) ?? "";
+        string directory;
+        if (!string.IsNullOrWhiteSpace(customOutputDirectory))
+        {
+            directory = customOutputDirectory!;
+        }
+        else if (string.IsNullOrWhiteSpace(sourceSubfolder))
+        {
+            directory = sourceDirectory;
+        }
+        else
+        {
+            directory = Path.Combine(sourceDirectory, FileNameSanitizer.Clean(sourceSubfolder!));
+        }
         var fields = settings.PdfFileNameFields;
         if (fields == null || fields.Count == 0)
         {
@@ -425,7 +501,13 @@ public static class DwgSplitService
 
         var separator = settings.PdfFileNameSeparator;
         var baseName = string.Join(separator, parts);
-        return FileNameSanitizer.MakeUnique(directory, baseName, reservedPaths, settings.AddSequenceWhenPdfExists, ".dwg");
+        return FileNameSanitizer.MakeUnique(
+            directory,
+            baseName,
+            reservedPaths,
+            settings.AddSequenceWhenPdfExists,
+            ".dwg",
+            createDirectory);
     }
 
     private static string GetSourceKey(PlotJob job, Document currentDocument)

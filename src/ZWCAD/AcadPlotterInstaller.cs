@@ -1,6 +1,8 @@
 using System;
 using System.IO;
 using System.Reflection;
+using System.Linq;
+using System.Text.RegularExpressions;
 using CadApp = ZwSoft.ZwCAD.ApplicationServices.Application;
 
 namespace ZwcadBatchPlot;
@@ -8,7 +10,13 @@ namespace ZwcadBatchPlot;
 public static class AcadPlotterInstaller
 {
     public const string PreferredPdfPlotter = "LA_pdf.pc5";
+    public const string PreferredPngPlotter = "LA_png.pc5";
+    public const string PreferredJpgPlotter = "LA_jpg.pc5";
+    public const string PreferredDwfPlotter = "LA_dwf.pc5";
     private const string PreferredPmp = "LA_pdf.pmp";
+    private const string PreferredPngPmp = "LA_png.pmp";
+    private const string PreferredJpgPmp = "LA_jpg.pmp";
+    private const string PreferredDwfPmp = "LA_dwf.pmp";
 
     public sealed class InstallResult
     {
@@ -66,6 +74,140 @@ public static class AcadPlotterInstaller
         {
             result.Message = ex.Message;
             return result;
+        }
+    }
+
+    public static string InstallPngPlotter()
+    {
+        try
+        {
+            var targetRoot = GetAutoCadPlotterDirectory();
+            if (string.IsNullOrWhiteSpace(targetRoot))
+            {
+                return "";
+            }
+
+            var targetPmpDir = Path.Combine(targetRoot, "PMP Files");
+            var sourcePmp = Path.Combine(targetPmpDir, PreferredPmp);
+            var targetPmp = Path.Combine(targetPmpDir, PreferredPngPmp);
+            if (!File.Exists(sourcePmp))
+            {
+                return "";
+            }
+
+            Directory.CreateDirectory(targetRoot);
+            Directory.CreateDirectory(targetPmpDir);
+            File.Copy(sourcePmp, targetPmp, overwrite: true);
+
+            var sourcePc5 = Directory.GetFiles(targetRoot, "*.pc5")
+                .Where(path => !string.Equals(Path.GetFileName(path), PreferredPngPlotter, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(path => string.Equals(Path.GetFileName(path), "ZWCAD Virtual PNG Plotter.pc5", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+                .FirstOrDefault(path => Path.GetFileName(path).IndexOf("PNG", StringComparison.OrdinalIgnoreCase) >= 0);
+            var targetPc5 = Path.Combine(targetRoot, PreferredPngPlotter);
+            if (string.IsNullOrWhiteSpace(sourcePc5))
+            {
+                return File.Exists(targetPc5) ? PreferredPngPlotter : "";
+            }
+
+            var encoding = System.Text.Encoding.GetEncoding(936);
+            var text = File.ReadAllText(sourcePc5, encoding);
+            text = Regex.Replace(text, @"(?im)^pmp_filepath=.*$", "pmp_filepath=" + targetPmp);
+            File.WriteAllText(targetPc5, text, encoding);
+            return File.Exists(targetPc5) && File.Exists(targetPmp) ? PreferredPngPlotter : "";
+        }
+        catch
+        {
+            return "";
+        }
+    }
+
+    public static string InstallJpgPlotter()
+    {
+        try
+        {
+            var targetRoot = GetAutoCadPlotterDirectory();
+            if (string.IsNullOrWhiteSpace(targetRoot))
+            {
+                return "";
+            }
+
+            var targetPmpDir = Path.Combine(targetRoot, "PMP Files");
+            var sourcePmp = Path.Combine(targetPmpDir, PreferredPmp);
+            var targetPmp = Path.Combine(targetPmpDir, PreferredJpgPmp);
+            if (!File.Exists(sourcePmp))
+            {
+                return "";
+            }
+
+            Directory.CreateDirectory(targetRoot);
+            Directory.CreateDirectory(targetPmpDir);
+            File.Copy(sourcePmp, targetPmp, overwrite: true);
+
+            var sourcePc5 = Directory.GetFiles(targetRoot, "*.pc5")
+                .Where(path => !string.Equals(Path.GetFileName(path), PreferredJpgPlotter, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(path => string.Equals(Path.GetFileName(path), "ZWCAD Virtual JPEG Plotter.pc5", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+                .FirstOrDefault(path => Path.GetFileName(path).IndexOf("JPG", StringComparison.OrdinalIgnoreCase) >= 0
+                                        || Path.GetFileName(path).IndexOf("JPEG", StringComparison.OrdinalIgnoreCase) >= 0);
+            var targetPc5 = Path.Combine(targetRoot, PreferredJpgPlotter);
+            if (string.IsNullOrWhiteSpace(sourcePc5))
+            {
+                return File.Exists(targetPc5) ? PreferredJpgPlotter : "";
+            }
+
+            var encoding = System.Text.Encoding.GetEncoding(936);
+            var text = File.ReadAllText(sourcePc5, encoding);
+            text = Regex.Replace(text, @"(?im)^pmp_filepath=.*$", "pmp_filepath=" + targetPmp);
+            File.WriteAllText(targetPc5, text, encoding);
+            return File.Exists(targetPc5) && File.Exists(targetPmp) ? PreferredJpgPlotter : "";
+        }
+        catch
+        {
+            return "";
+        }
+    }
+
+    public static string InstallDwfPlotter()
+    {
+        try
+        {
+            var targetRoot = GetAutoCadPlotterDirectory();
+            if (string.IsNullOrWhiteSpace(targetRoot))
+            {
+                return "";
+            }
+
+            var targetPmpDir = Path.Combine(targetRoot, "PMP Files");
+            var sourcePmp = Path.Combine(targetPmpDir, PreferredPmp);
+            var targetPmp = Path.Combine(targetPmpDir, PreferredDwfPmp);
+            if (!File.Exists(sourcePmp))
+            {
+                return "";
+            }
+
+            Directory.CreateDirectory(targetRoot);
+            Directory.CreateDirectory(targetPmpDir);
+            File.Copy(sourcePmp, targetPmp, overwrite: true);
+
+            var sourcePc5 = Directory.GetFiles(targetRoot, "*.pc5")
+                .Where(path => !string.Equals(Path.GetFileName(path), PreferredDwfPlotter, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(path => string.Equals(Path.GetFileName(path), "DWF6 ePlot.pc5", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+                .FirstOrDefault(path => Path.GetFileName(path).IndexOf("DWF", StringComparison.OrdinalIgnoreCase) >= 0
+                                        && Path.GetFileName(path).IndexOf("DWFx", StringComparison.OrdinalIgnoreCase) < 0);
+            var targetPc5 = Path.Combine(targetRoot, PreferredDwfPlotter);
+            if (string.IsNullOrWhiteSpace(sourcePc5))
+            {
+                return File.Exists(targetPc5) ? PreferredDwfPlotter : "";
+            }
+
+            var encoding = System.Text.Encoding.GetEncoding(936);
+            var text = File.ReadAllText(sourcePc5, encoding);
+            text = Regex.Replace(text, @"(?im)^pmp_filepath=.*$", "pmp_filepath=" + targetPmp);
+            File.WriteAllText(targetPc5, text, encoding);
+            return File.Exists(targetPc5) && File.Exists(targetPmp) ? PreferredDwfPlotter : "";
+        }
+        catch
+        {
+            return "";
         }
     }
 

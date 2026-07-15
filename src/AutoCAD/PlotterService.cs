@@ -287,7 +287,7 @@ public static class PlotterService
     {
         if (string.IsNullOrWhiteSpace(deviceName))
         {
-            throw new InvalidOperationException("请选择 PDF 打印机。");
+            throw new InvalidOperationException("未找到可用的输出设备。");
         }
 
         WaitForPlotIdle();
@@ -306,7 +306,7 @@ public static class PlotterService
 
             tr.Commit();
             WaitForPlotIdle();
-            ValidatePdfOutput(job.OutputPath);
+            ValidatePlotOutput(job.OutputPath);
         }
         finally
         {
@@ -677,8 +677,8 @@ public static class PlotterService
         }
 
         throw new InvalidOperationException(
-            $"AutoCAD PDF 打印机缺少匹配纸张。需要 {media.WidthMm:0.##} x {media.HeightMm:0.##} mm，"
-            + $"实际匹配到 {size.X:0.##} x {size.Y:0.##} mm。请在所选 PC3 中添加对应加长纸，或选择支持自定义纸张的 PDF 打印机。");
+            $"AutoCAD 输出设备缺少匹配纸张。需要 {media.WidthMm:0.##} x {media.HeightMm:0.##} mm，"
+            + $"实际匹配到 {size.X:0.##} x {size.Y:0.##} mm。请在所选 PC3 中添加对应加长纸，或使用支持自定义纸张的输出设备。");
     }
 
     private static string? BestMediaNameByText(IEnumerable<string> names, PlotJob job)
@@ -1275,11 +1275,50 @@ public static class PlotterService
         }
     }
 
-    private static void ValidatePdfOutput(string outputPath)
+    private static void ValidatePlotOutput(string outputPath)
     {
         if (!File.Exists(outputPath) || new FileInfo(outputPath).Length == 0)
         {
-            throw new IOException("打印引擎未生成 PDF 文件: " + outputPath);
+            throw new IOException("打印引擎未生成输出文件: " + outputPath);
+        }
+
+        if (string.Equals(Path.GetExtension(outputPath), ".png", StringComparison.OrdinalIgnoreCase))
+        {
+            var signature = new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 };
+            using var stream = File.OpenRead(outputPath);
+            var actual = new byte[signature.Length];
+            if (stream.Read(actual, 0, actual.Length) != actual.Length || !actual.SequenceEqual(signature))
+            {
+                throw new InvalidDataException("PNG 已生成但文件格式无效，已按打印失败处理: " + outputPath);
+            }
+            return;
+        }
+
+        if (string.Equals(Path.GetExtension(outputPath), ".jpg", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(Path.GetExtension(outputPath), ".jpeg", StringComparison.OrdinalIgnoreCase))
+        {
+            using var stream = File.OpenRead(outputPath);
+            var signature = new byte[3];
+            if (stream.Read(signature, 0, signature.Length) != signature.Length
+                || signature[0] != 0xFF
+                || signature[1] != 0xD8
+                || signature[2] != 0xFF)
+            {
+                throw new InvalidDataException("JPG 已生成但文件格式无效，已按打印失败处理: " + outputPath);
+            }
+            return;
+        }
+
+        if (string.Equals(Path.GetExtension(outputPath), ".dwf", StringComparison.OrdinalIgnoreCase))
+        {
+            using var stream = File.OpenRead(outputPath);
+            var signature = new byte[6];
+            if (stream.Read(signature, 0, signature.Length) != signature.Length
+                || !string.Equals(System.Text.Encoding.ASCII.GetString(signature), "(DWF V", StringComparison.Ordinal))
+            {
+                throw new InvalidDataException("DWF 已生成但文件格式无效，已按打印失败处理: " + outputPath);
+            }
+            return;
         }
 
         using var pdf = PdfReader.Open(outputPath, PdfDocumentOpenMode.Import);

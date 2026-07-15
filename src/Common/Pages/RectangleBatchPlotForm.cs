@@ -43,7 +43,8 @@ public sealed class RectangleBatchPlotForm : Form
     private readonly DataGridView _grid = new();
     private readonly TextBox _outputDirectory = new();
     private readonly ComboBox _sortOrder = new();
-    private readonly ComboBox _device = new();
+    private readonly ComboBox _outputFormatCombo = new();
+    private readonly ComboBox _savePathModeCombo = new();
     private readonly ComboBox _style = new();
     private readonly CheckBox _mergePdf = new();
     private readonly CheckBox _leaveMargin = new();
@@ -56,8 +57,12 @@ public sealed class RectangleBatchPlotForm : Form
     private bool _updating;
     private bool _updatingPrintSelection;
     private bool _viewSortedByHeader;
+    private bool _outputDirectoryIsCustom;
     private int _viewSortColumnIndex = -1;
     private List<Row>? _pendingPrintToggleRows;
+    private string _pngPlotDevice = "";
+    private string _jpgPlotDevice = "";
+    private string _dwfPlotDevice = "";
 
     public RectangleBatchPlotForm(Document document)
     {
@@ -125,44 +130,40 @@ public sealed class RectangleBatchPlotForm : Form
         var outputRow = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 2,
+            ColumnCount = 3,
             RowCount = 1,
             Margin = Padding.Empty,
             Padding = Padding.Empty
         };
         outputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(52)));
         outputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        outputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.ButtonWidth("浏览...", 84) + UiLayout.Scale(8)));
         outputRow.Controls.Add(LabelFor("输出"), 0, 0);
         _outputDirectory.Dock = DockStyle.Fill;
-        _outputDirectory.Text = Path.Combine(SourceDirectory(), "PDF");
+        _outputDirectory.Text = SourceDirectory();
         _outputDirectory.Margin = new Padding(0, UiLayout.Scale(3), UiLayout.Scale(8), UiLayout.Scale(4));
         _outputDirectory.TextChanged += (_, _) => RefreshOutputPaths();
+        _outputDirectory.Leave += (_, _) => ApplyManuallyEnteredOutputDirectory();
         outputRow.Controls.Add(_outputDirectory, 1, 0);
+        var browseButton = UiLayout.CreateButton("浏览...", 84);
+        browseButton.Margin = new Padding(0, UiLayout.Scale(2), 0, UiLayout.Scale(2));
+        browseButton.Click += (_, _) => ChooseOutputDirectory();
+        outputRow.Controls.Add(browseButton, 2, 0);
 
-        // 保存路径快捷按钮独立成行，与图框块打印面板保持一致的布局。
         var pathRow = NewFlow();
-        var sourceButton = UiLayout.CreateButton("源文件路径", 98);
-        sourceButton.Margin = new Padding(0, UiLayout.Scale(2), UiLayout.Scale(6), UiLayout.Scale(2));
-        sourceButton.Click += (_, _) => SetOutputDirectory(SourceDirectory());
-        var pdfButton = UiLayout.CreateButton("源文件路径/PDF", 126);
-        pdfButton.Margin = new Padding(0, UiLayout.Scale(2), UiLayout.Scale(6), UiLayout.Scale(2));
-        pdfButton.Click += (_, _) => SetOutputDirectory(Path.Combine(SourceDirectory(), "PDF"));
-        var customButton = UiLayout.CreateButton("指定路径...", 88);
-        customButton.Margin = new Padding(0, UiLayout.Scale(2), 0, UiLayout.Scale(2));
-        customButton.Click += (_, _) => ChooseOutputDirectory();
         pathRow.Controls.Add(new Label
         {
-            Text = "保存路径快捷:",
+            Text = "保存路径:",
             AutoSize = true,
             TextAlign = ContentAlignment.MiddleLeft,
             Margin = new Padding(0, UiLayout.Scale(8), UiLayout.Scale(8), 0)
         });
-        pathRow.Controls.Add(sourceButton);
-        pathRow.Controls.Add(pdfButton);
-        pathRow.Controls.Add(customButton);
-        tips.SetToolTip(sourceButton, "输出到当前 DWG 所在文件夹。");
-        tips.SetToolTip(pdfButton, "输出到当前 DWG 所在文件夹下的 PDF 子文件夹。 ");
-        tips.SetToolTip(customButton, "选择其他 PDF 输出文件夹。");
+        _savePathModeCombo.DropDownStyle = ComboBoxStyle.DropDownList;
+        _savePathModeCombo.Width = UiLayout.Scale(210);
+        _savePathModeCombo.Margin = new Padding(0, UiLayout.Scale(3), UiLayout.Scale(8), UiLayout.Scale(3));
+        _savePathModeCombo.SelectionChangeCommitted += (_, _) => ApplySelectedSavePathMode();
+        pathRow.Controls.Add(_savePathModeCombo);
+        tips.SetToolTip(browseButton, "选择自定义输出文件夹。");
 
         var options = new TableLayoutPanel
         {
@@ -222,13 +223,13 @@ public sealed class RectangleBatchPlotForm : Form
         marginPanel.Controls.Add(new Label { Text = "mm", AutoSize = true, Margin = new Padding(2, UiLayout.Scale(7), 0, 0) });
         options.Controls.Remove(_leaveMargin);
         options.Controls.Add(marginPanel, 3, 0);
-        options.Controls.Add(LabelFor("打印机"), 4, 0);
-        _device.DropDownStyle = ComboBoxStyle.DropDownList;
-        _device.Height = UiLayout.ButtonHeight();
-        _device.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
-        _device.Margin = new Padding(0, UiLayout.Scale(3), UiLayout.Scale(8), 0);
-        _device.SelectionChangeCommitted += (_, _) => SaveCurrentPlotOptions();
-        options.Controls.Add(_device, 5, 0);
+        options.Controls.Add(LabelFor("输出格式"), 4, 0);
+        _outputFormatCombo.DropDownStyle = ComboBoxStyle.DropDownList;
+        _outputFormatCombo.Height = UiLayout.ButtonHeight();
+        _outputFormatCombo.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
+        _outputFormatCombo.Margin = new Padding(0, UiLayout.Scale(3), UiLayout.Scale(8), 0);
+        _outputFormatCombo.SelectionChangeCommitted += (_, _) => UpdateOutputFormatUi();
+        options.Controls.Add(_outputFormatCombo, 5, 0);
         options.Controls.Add(LabelFor("CTB"), 6, 0);
         _style.DropDownStyle = ComboBoxStyle.DropDownList;
         _style.Height = UiLayout.ButtonHeight();
@@ -248,8 +249,8 @@ public sealed class RectangleBatchPlotForm : Form
         _printButton.FlatAppearance.BorderColor = Color.FromArgb(0, 95, 170);
         _printButton.Click += (_, _) => PrintOrStop();
         options.Controls.Add(_printButton, 8, 0);
-        tips.SetToolTip(_sortOrder, "改变列表、红框编号和最终 PDF 页面的顺序。");
-        tips.SetToolTip(_mergePdf, "勾选后只保留一个合并 PDF；取消后输出每张单独 PDF。");
+        tips.SetToolTip(_sortOrder, "改变列表、红框编号和最终输出文件的顺序。");
+        tips.SetToolTip(_mergePdf, "仅 PDF 可用；勾选后只保留一个合并 PDF。");
         tips.SetToolTip(marginPanel, "勾选后按设定距离在纸张短边两侧留白，居中等比例缩小打印。");
 
         top.Controls.Add(actions, 0, 0);
@@ -529,6 +530,8 @@ public sealed class RectangleBatchPlotForm : Form
                 var job = result.Job;
                 if (result.CornerPoints != null)
                 {
+                    // PlotJob 是打印与 DWG 拆图的共同载体。Min/Max 转为 DCS 前，必须保留 WCS 四角点。
+                    job.CornerPoints = (double[])result.CornerPoints.Clone();
                     var corners = new[]
                     {
                         new Point3d(result.CornerPoints[0], result.CornerPoints[1], 0).TransformBy(wcsToDcs),
@@ -751,7 +754,7 @@ public sealed class RectangleBatchPlotForm : Form
 
             printIndex++;
             _rows[i].Job.DrawingNumber = printIndex.ToString("D2");
-            _rows[i].FileName = $"{stem}{printIndex:D2}.pdf";
+            _rows[i].FileName = $"{stem}{printIndex:D2}{SelectedOutputExtension}";
         }
 
         RefreshOutputPaths();
@@ -1071,6 +1074,19 @@ public sealed class RectangleBatchPlotForm : Form
         if (_grid.Columns[e.ColumnIndex].Name == "Preview"
             && _grid.Rows[e.RowIndex].DataBoundItem is Row row)
         {
+            if (IsDwgOutput)
+            {
+                MessageBox.Show("DWG 输出为拆图操作，不提供打印预览。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var device = SelectedDevice();
+            if (string.IsNullOrWhiteSpace(device))
+            {
+                MessageBox.Show($"未找到可用的 {SelectedOutputFormat} 输出设备。", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
             var selectedRows = _grid.SelectedRows.Cast<DataGridViewRow>().ToList();
             var currentCell = _grid.CurrentCell;
             Hide();
@@ -1080,7 +1096,7 @@ public sealed class RectangleBatchPlotForm : Form
                 SaveCurrentPlotOptions();
                 row.Job.LeavePaperMargin = _leaveMargin.Checked;
                 row.Job.PaperMarginMm = (double)_marginInput.Value;
-                PlotterService.Preview(row.Job, SelectedDevice(), SelectedStyle(), _document);
+                PlotterService.Preview(row.Job, device, SelectedStyle(), _document);
             }
             catch (Exception ex)
             {
@@ -1137,6 +1153,12 @@ public sealed class RectangleBatchPlotForm : Form
     {
         _grid.EndEdit();
         RefreshOutputPaths();
+        if (IsDwgOutput)
+        {
+            SplitDwgs();
+            return;
+        }
+
         var selected = _rows.Where(row => row.Selected).Select(row => row.Job).ToList();
         if (selected.Count == 0)
         {
@@ -1147,7 +1169,14 @@ public sealed class RectangleBatchPlotForm : Form
         var directory = _outputDirectory.Text.Trim();
         if (string.IsNullOrWhiteSpace(directory))
         {
-            MessageBox.Show("请选择 PDF 输出路径。", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show("请选择输出路径。", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        var device = SelectedDevice();
+        if (string.IsNullOrWhiteSpace(device))
+        {
+            MessageBox.Show($"未找到可用的 {SelectedOutputFormat} 输出设备。", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 
@@ -1157,6 +1186,7 @@ public sealed class RectangleBatchPlotForm : Form
         var originalPaths = selected.ToDictionary(job => job, job => job.OutputPath);
         string? temporaryDirectory = null;
         var mergedOutput = Path.Combine(directory, SourceStem() + ".pdf");
+        var mergePdf = IsPdfOutput && _mergePdf.Checked;
         var completed = 0;
         try
         {
@@ -1169,7 +1199,7 @@ public sealed class RectangleBatchPlotForm : Form
                 _printButton.FlatAppearance.BorderColor = Color.FromArgb(160, 30, 30);
             }
 
-            if (_mergePdf.Checked)
+            if (mergePdf)
             {
                 temporaryDirectory = Path.Combine(Path.GetTempPath(), "ZwcadBatchPlot", "RectangleMerge_" + Guid.NewGuid().ToString("N"));
                 Directory.CreateDirectory(temporaryDirectory);
@@ -1183,7 +1213,7 @@ public sealed class RectangleBatchPlotForm : Form
             System.Windows.Forms.Application.DoEvents();
 
             var results = PlotterService.PlotMany(
-                selected, SelectedDevice(), SelectedStyle(), _document, _settings,
+                selected, device, SelectedStyle(), _document, _settings,
                 beforeJob: _ =>
                 {
                     completed++;
@@ -1198,17 +1228,17 @@ public sealed class RectangleBatchPlotForm : Form
                 throw new InvalidOperationException(string.Join("\n", failures.Select(result => result.Error?.Message)));
             }
 
-            if (_mergePdf.Checked)
+            if (mergePdf)
             {
                 _status.Text = "正在合并 PDF...";
                 System.Windows.Forms.Application.DoEvents();
                 PdfDocumentService.Merge(selected.Select(job => job.OutputPath).ToList(), mergedOutput);
             }
 
-            RevealOutput(_mergePdf.Checked ? mergedOutput : null, directory);
+            RevealOutput(mergePdf ? mergedOutput : null, directory);
             _status.Text = $"完成，共 {selected.Count} 张";
             MessageBox.Show(
-                _mergePdf.Checked
+                mergePdf
                     ? $"打印并合并完成，共 {selected.Count} 张。\n{mergedOutput}"
                     : $"打印完成，共 {selected.Count} 张。\n{directory}",
                 Text,
@@ -1249,6 +1279,80 @@ public sealed class RectangleBatchPlotForm : Form
         }
     }
 
+    private void SplitDwgs()
+    {
+        var selected = _rows.Where(row => row.Selected).Select(row => row.Job).ToList();
+        if (selected.Count == 0)
+        {
+            MessageBox.Show("没有勾选任何矩形框。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        var directory = _outputDirectory.Text.Trim();
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            MessageBox.Show("请选择输出路径。", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        var confirm = MessageBox.Show(
+            $"将按当前矩形框拆出 {selected.Count} 个 DWG 文件。\n\n输出位置：{directory}\n\n是否继续？",
+            "矩形框批量拆图",
+            MessageBoxButtons.OKCancel,
+            MessageBoxIcon.Question);
+        if (confirm != DialogResult.OK)
+        {
+            return;
+        }
+
+        Directory.CreateDirectory(directory);
+        SaveCurrentPlotOptions();
+        Cursor = Cursors.WaitCursor;
+        Enabled = false;
+        try
+        {
+            _status.Text = $"拆图中... 0 / {selected.Count}";
+            var completed = 0;
+            var explicitPaths = selected.ToDictionary(job => job, job => job.OutputPath);
+            var results = DwgSplitService.SplitMany(
+                selected,
+                _document,
+                _settings,
+                beforeJob: _ =>
+                {
+                    completed++;
+                    _status.Text = $"拆图中... {completed} / {selected.Count}";
+                    System.Windows.Forms.Application.DoEvents();
+                },
+                explicitOutputPaths: explicitPaths);
+
+            var failures = results.Where(result => result.Error != null).ToList();
+            if (failures.Count > 0)
+            {
+                throw new InvalidOperationException(string.Join("\n", failures.Select(result => result.Error?.Message)));
+            }
+
+            foreach (var result in results)
+            {
+                result.Job.OutputPath = result.OutputPath;
+            }
+            RevealOutput(null, directory);
+            _status.Text = $"拆图完成，共 {selected.Count} 张";
+            MessageBox.Show($"DWG 拆图完成，共 {selected.Count} 张。\n{directory}", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            _status.Text = "拆图失败";
+            MessageBox.Show("矩形框批量拆图失败: " + ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            Enabled = true;
+            Cursor = Cursors.Default;
+            UpdateVisuals();
+        }
+    }
+
     private void ApplyLeaveMarginSelection(IEnumerable<PlotJob> jobs)
     {
         var leaveMargin = _leaveMargin.Checked;
@@ -1263,16 +1367,51 @@ public sealed class RectangleBatchPlotForm : Form
 
     private void LoadPlotOptions()
     {
+        _outputFormatCombo.Items.Clear();
+        _outputFormatCombo.Items.AddRange(new object[] { "PDF", "PNG", "JPG", "DWF", "DWG" });
+        _outputFormatCombo.SelectedIndex = 0;
+        RefreshSavePathModeOptions(preserveSelection: false);
+
         AcadPlotterInstaller.InstallBundledPlotter();
-        using var settings = new PlotSettings(true);
+        var installedPngPlotter = AcadPlotterInstaller.InstallPngPlotter();
+        var installedJpgPlotter = AcadPlotterInstaller.InstallJpgPlotter();
+        var installedDwfPlotter = AcadPlotterInstaller.InstallDwfPlotter();
         var validator = PlotSettingsValidator.Current;
-        foreach (var item in validator.GetPlotDeviceList())
-        {
-            if (item is string value && !string.IsNullOrWhiteSpace(value))
-            {
-                _device.Items.Add(value);
-            }
-        }
+        var devices = validator.GetPlotDeviceList()
+            .Cast<object>()
+            .Select(item => item?.ToString() ?? "")
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .ToList();
+        _pngPlotDevice = FindPlotDevice(
+            devices,
+            installedPngPlotter,
+            value => value.IndexOf("PNG", StringComparison.OrdinalIgnoreCase) >= 0
+                     && value.IndexOf("Transparent", StringComparison.OrdinalIgnoreCase) < 0,
+            AcadPlotterInstaller.PreferredPngPlotter,
+            "PublishToWeb PNG.pc3",
+            "ZWCAD Virtual PNG Plotter.pc5",
+            "ZWPLOT_PNG.pc5",
+            "M_PNG.pc5");
+        _jpgPlotDevice = FindPlotDevice(
+            devices,
+            installedJpgPlotter,
+            value => value.IndexOf("JPG", StringComparison.OrdinalIgnoreCase) >= 0
+                     || value.IndexOf("JPEG", StringComparison.OrdinalIgnoreCase) >= 0,
+            AcadPlotterInstaller.PreferredJpgPlotter,
+            "PublishToWeb JPG.pc3",
+            "ZWCAD Virtual JPEG Plotter.pc5",
+            "ZWPLOT_JPG.pc5",
+            "M_JPG.pc5");
+        _dwfPlotDevice = FindPlotDevice(
+            devices,
+            installedDwfPlotter,
+            value => value.IndexOf("DWF", StringComparison.OrdinalIgnoreCase) >= 0
+                     && value.IndexOf("DWFx", StringComparison.OrdinalIgnoreCase) < 0,
+            AcadPlotterInstaller.PreferredDwfPlotter,
+            "DWF6 ePlot.pc3",
+            "DWF6 ePlot.pc5",
+            "ZWPLOT_DWF.pc5",
+            "M_DWF.pc5");
         foreach (var item in validator.GetPlotStyleSheetList())
         {
             if (item is string value && value.EndsWith(".ctb", StringComparison.OrdinalIgnoreCase))
@@ -1280,10 +1419,28 @@ public sealed class RectangleBatchPlotForm : Form
                 _style.Items.Add(value);
             }
         }
-        SelectOption(_device, AcadPlotterInstaller.PreferredPdfPlotter, _settings.LastPlotDevice, "PDF");
-        // 批量打印统一使用随插件安装的 LA_pdf 打印机，不允许用户切换其它打印机。
-        _device.Enabled = false;
         SelectOption(_style, _settings.LastStyleSheet, "monochrome");
+        UpdateOutputFormatUi();
+    }
+
+    private static string FindPlotDevice(
+        IReadOnlyList<string> devices,
+        string installedPlotter,
+        Func<string, bool> fallbackPredicate,
+        params string[] preferred)
+    {
+        foreach (var expected in new[] { installedPlotter }
+                     .Concat(preferred)
+                     .Where(value => !string.IsNullOrWhiteSpace(value)))
+        {
+            var match = devices.FirstOrDefault(value => string.Equals(value, expected, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(match))
+            {
+                return match;
+            }
+        }
+
+        return devices.FirstOrDefault(fallbackPredicate) ?? installedPlotter;
     }
 
     private static void SelectOption(ComboBox combo, params string[] preferred)
@@ -1320,7 +1477,7 @@ public sealed class RectangleBatchPlotForm : Form
     {
         var selected = _rows.Count(row => row.Selected);
         var order = _sortOrder.SelectedIndex == 1 ? "左→右、上→下" : "上→下、左→右";
-        _status.Text = $"识别 {_rows.Count} 个矩形框  |  打印 {selected} 个  |  顺序：{order}  |  输出：{_outputDirectory.Text}";
+        _status.Text = $"识别 {_rows.Count} 个矩形框  |  已选 {selected} 个  |  格式：{SelectedOutputFormat}  |  顺序：{order}  |  输出：{_outputDirectory.Text}";
         try
         {
             var selectedJobs = _displayRows.Where(row => row.Selected).Select(row => row.Job).ToList();
@@ -1338,23 +1495,105 @@ public sealed class RectangleBatchPlotForm : Form
         }
     }
 
-    private void SetOutputDirectory(string directory)
-    {
-        _outputDirectory.Text = directory;
-        RefreshOutputPaths();
-    }
-
     private void ChooseOutputDirectory()
     {
         using var dialog = new FolderBrowserDialog
         {
-            Description = "选择 PDF 输出目录",
+            Description = "选择输出目录",
             SelectedPath = _outputDirectory.Text
         };
         if (dialog.ShowDialog(this) == DialogResult.OK)
         {
-            SetOutputDirectory(dialog.SelectedPath);
+            _outputDirectoryIsCustom = true;
+            _outputDirectory.Text = dialog.SelectedPath;
+            _outputDirectory.Modified = false;
+            SaveCurrentPlotOptions();
+            RefreshOutputPaths();
         }
+    }
+
+    private void ApplyManuallyEnteredOutputDirectory()
+    {
+        if (!_outputDirectory.Modified)
+        {
+            return;
+        }
+
+        _outputDirectory.Modified = false;
+        var directory = _outputDirectory.Text.Trim();
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            _outputDirectoryIsCustom = false;
+            UpdateAutomaticOutputDirectory();
+        }
+        else
+        {
+            _outputDirectoryIsCustom = true;
+            _outputDirectory.Text = directory;
+        }
+
+        SaveCurrentPlotOptions();
+        RefreshOutputPaths();
+    }
+
+    private void RefreshSavePathModeOptions(bool preserveSelection)
+    {
+        var selectedIndex = preserveSelection && _savePathModeCombo.SelectedIndex >= 0
+            ? Math.Min(_savePathModeCombo.SelectedIndex, 1)
+            : 0;
+        var format = SelectedOutputFormat;
+        var formatPathText = string.IsNullOrWhiteSpace(format)
+            ? "源文件路径/输出格式"
+            : "源文件路径/" + format;
+
+        _savePathModeCombo.BeginUpdate();
+        try
+        {
+            _savePathModeCombo.Items.Clear();
+            _savePathModeCombo.Items.Add("源文件路径");
+            _savePathModeCombo.Items.Add(formatPathText);
+            _savePathModeCombo.SelectedIndex = selectedIndex;
+        }
+        finally
+        {
+            _savePathModeCombo.EndUpdate();
+        }
+    }
+
+    private void ApplySelectedSavePathMode()
+    {
+        _outputDirectoryIsCustom = false;
+        UpdateAutomaticOutputDirectory();
+        SaveCurrentPlotOptions();
+        RefreshOutputPaths();
+        UpdateVisuals();
+    }
+
+    private void UpdateAutomaticOutputDirectory()
+    {
+        var subfolder = AutomaticOutputSubfolder;
+        _outputDirectory.Text = string.IsNullOrWhiteSpace(subfolder)
+            ? SourceDirectory()
+            : Path.Combine(SourceDirectory(), subfolder);
+        _outputDirectory.Modified = false;
+    }
+
+    private void UpdateOutputFormatUi()
+    {
+        RefreshSavePathModeOptions(preserveSelection: true);
+        if (!_outputDirectoryIsCustom)
+        {
+            UpdateAutomaticOutputDirectory();
+        }
+
+        var plotOutput = !IsDwgOutput;
+        _style.Enabled = plotOutput;
+        _leaveMargin.Enabled = plotOutput;
+        _marginInput.Enabled = plotOutput && _leaveMargin.Checked;
+        _mergePdf.Enabled = IsPdfOutput;
+        RefreshFileNames();
+        SaveCurrentPlotOptions();
+        UpdateVisuals();
     }
 
     private string SourceDirectory()
@@ -1371,7 +1610,20 @@ public sealed class RectangleBatchPlotForm : Form
         return string.IsNullOrWhiteSpace(value) ? Path.GetFileNameWithoutExtension(_document.Name) : value;
     }
 
-    private string SelectedDevice() => AcadPlotterInstaller.PreferredPdfPlotter;
+    private string SelectedOutputFormat => _outputFormatCombo.SelectedItem?.ToString()?.Trim() ?? "PDF";
+    private string SelectedOutputExtension => "." + SelectedOutputFormat.ToLowerInvariant();
+    private bool IsPdfOutput => string.Equals(SelectedOutputFormat, "PDF", StringComparison.OrdinalIgnoreCase);
+    private bool IsDwgOutput => string.Equals(SelectedOutputFormat, "DWG", StringComparison.OrdinalIgnoreCase);
+    private bool IsJpgOutput => string.Equals(SelectedOutputFormat, "JPG", StringComparison.OrdinalIgnoreCase);
+    private bool IsDwfOutput => string.Equals(SelectedOutputFormat, "DWF", StringComparison.OrdinalIgnoreCase);
+    private string? AutomaticOutputSubfolder => _savePathModeCombo.SelectedIndex == 1
+        ? FileNameSanitizer.Clean(SelectedOutputFormat)
+        : null;
+    private string SelectedDevice() => IsPdfOutput
+        ? AcadPlotterInstaller.PreferredPdfPlotter
+        : IsJpgOutput ? _jpgPlotDevice
+        : IsDwfOutput ? _dwfPlotDevice
+        : _pngPlotDevice;
     private string SelectedStyle() => _style.SelectedItem?.ToString() ?? "";
 
     private void SaveCurrentPlotOptions()

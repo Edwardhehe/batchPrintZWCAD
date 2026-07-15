@@ -27,9 +27,18 @@ public static class FileNameSanitizer
         return MakeUnique(directory, fileNameWithoutExtension, reservedPaths, true);
     }
 
-    public static string MakeUnique(string directory, string fileNameWithoutExtension, ISet<string>? reservedPaths, bool avoidExistingFile, string extension = ".pdf")
+    public static string MakeUnique(
+        string directory,
+        string fileNameWithoutExtension,
+        ISet<string>? reservedPaths,
+        bool avoidExistingFile,
+        string extension = ".pdf",
+        bool createDirectory = true)
     {
-        Directory.CreateDirectory(directory);
+        if (createDirectory)
+        {
+            Directory.CreateDirectory(directory);
+        }
         var clean = TrimFileNameForPath(Clean(fileNameWithoutExtension), directory, extension);
         var path = Path.Combine(directory, clean + extension);
         var index = 1;

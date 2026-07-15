@@ -437,7 +437,7 @@ public static class PlotterService
                 var allMedia = validator.GetCanonicalMediaNameList(plotSettings).Cast<string>().ToList();
                 var debugInfo = string.Join("|", allMedia.Where(x => x.IndexOf("Custom", StringComparison.OrdinalIgnoreCase) >= 0 || x.IndexOf("UserDefined", StringComparison.OrdinalIgnoreCase) >= 0));
                 throw new InvalidOperationException(
-                    $"未找到匹配 {job.PaperSizeText} 的 PDF 纸张（{job.PaperWidthMm:0.##}x{job.PaperHeightMm:0.##}mm, name={job.PaperName}）。自定义纸张列表: {debugInfo}");
+                    $"未找到匹配 {job.PaperSizeText} 的输出纸张（{job.PaperWidthMm:0.##}x{job.PaperHeightMm:0.##}mm, name={job.PaperName}）。自定义纸张列表: {debugInfo}");
             }
 
             validator.SetCanonicalMediaName(plotSettings, media.Name);
@@ -469,7 +469,7 @@ public static class PlotterService
 
             tr.Commit();
             WaitForPlotIdle();
-            ValidatePdfOutput(job.OutputPath);
+            ValidatePlotOutput(job.OutputPath);
         }
         finally
         {
@@ -797,7 +797,7 @@ public static class PlotterService
         var directory = Path.GetDirectoryName(outputPath);
         if (string.IsNullOrWhiteSpace(directory))
         {
-            throw new InvalidOperationException("PDF 输出路径缺少目录: " + outputPath);
+            throw new InvalidOperationException("输出路径缺少目录: " + outputPath);
         }
 
         Directory.CreateDirectory(directory);
@@ -807,11 +807,50 @@ public static class PlotterService
         }
     }
 
-    private static void ValidatePdfOutput(string outputPath)
+    private static void ValidatePlotOutput(string outputPath)
     {
         if (!File.Exists(outputPath) || new FileInfo(outputPath).Length == 0)
         {
-            throw new IOException("打印引擎未生成 PDF 文件: " + outputPath);
+            throw new IOException("打印引擎未生成输出文件: " + outputPath);
+        }
+
+        if (string.Equals(Path.GetExtension(outputPath), ".png", StringComparison.OrdinalIgnoreCase))
+        {
+            var signature = new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 };
+            using var stream = File.OpenRead(outputPath);
+            var actual = new byte[signature.Length];
+            if (stream.Read(actual, 0, actual.Length) != actual.Length || !actual.SequenceEqual(signature))
+            {
+                throw new InvalidDataException("PNG 已生成但文件格式无效，已按打印失败处理: " + outputPath);
+            }
+            return;
+        }
+
+        if (string.Equals(Path.GetExtension(outputPath), ".jpg", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(Path.GetExtension(outputPath), ".jpeg", StringComparison.OrdinalIgnoreCase))
+        {
+            using var stream = File.OpenRead(outputPath);
+            var signature = new byte[3];
+            if (stream.Read(signature, 0, signature.Length) != signature.Length
+                || signature[0] != 0xFF
+                || signature[1] != 0xD8
+                || signature[2] != 0xFF)
+            {
+                throw new InvalidDataException("JPG 已生成但文件格式无效，已按打印失败处理: " + outputPath);
+            }
+            return;
+        }
+
+        if (string.Equals(Path.GetExtension(outputPath), ".dwf", StringComparison.OrdinalIgnoreCase))
+        {
+            using var stream = File.OpenRead(outputPath);
+            var signature = new byte[6];
+            if (stream.Read(signature, 0, signature.Length) != signature.Length
+                || !string.Equals(System.Text.Encoding.ASCII.GetString(signature), "(DWF V", StringComparison.Ordinal))
+            {
+                throw new InvalidDataException("DWF 已生成但文件格式无效，已按打印失败处理: " + outputPath);
+            }
+            return;
         }
 
         using var pdf = PdfReader.Open(outputPath, PdfDocumentOpenMode.Import);

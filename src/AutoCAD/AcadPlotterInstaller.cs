@@ -18,7 +18,13 @@ namespace ZwcadBatchPlot;
 public static class AcadPlotterInstaller
 {
     public const string PreferredPdfPlotter = "LA_pdf.pc3";
+    public const string PreferredPngPlotter = "LA_png.pc3";
+    public const string PreferredJpgPlotter = "LA_jpg.pc3";
+    public const string PreferredDwfPlotter = "LA_dwf.pc3";
     private const string PreferredPmp = "LA_pdf.pmp";
+    private const string PreferredPngPmp = "LA_png.pmp";
+    private const string PreferredJpgPmp = "LA_jpg.pmp";
+    private const string PreferredDwfPmp = "LA_dwf.pmp";
 
     public sealed class InstallResult
     {
@@ -123,6 +129,138 @@ public static class AcadPlotterInstaller
         }
     }
 
+    public static string InstallPngPlotter()
+    {
+        try
+        {
+            var targetRoot = GetAutoCadPlotterDirectory();
+            if (string.IsNullOrWhiteSpace(targetRoot))
+            {
+                return "";
+            }
+
+            var targetPc3 = Path.Combine(targetRoot, PreferredPngPlotter);
+            var targetPmpDir = Path.Combine(targetRoot, "PMP Files");
+            var targetPmp = Path.Combine(targetPmpDir, PreferredPngPmp);
+            Directory.CreateDirectory(targetRoot);
+            Directory.CreateDirectory(targetPmpDir);
+
+            var sourcePc3 = Directory.GetFiles(targetRoot, "*.pc3")
+                .Where(path => !string.Equals(Path.GetFileName(path), PreferredPngPlotter, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(path => string.Equals(Path.GetFileName(path), "PublishToWeb PNG.pc3", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+                .FirstOrDefault(path => Path.GetFileName(path).IndexOf("PNG", StringComparison.OrdinalIgnoreCase) >= 0
+                                        && Path.GetFileName(path).IndexOf("Transparent", StringComparison.OrdinalIgnoreCase) < 0);
+            if (string.IsNullOrWhiteSpace(sourcePc3))
+            {
+                return File.Exists(targetPc3) ? PreferredPngPlotter : "";
+            }
+
+            var raw = File.ReadAllText(sourcePc3);
+            if (TryReadPia3Json(raw, out var pia3Root))
+            {
+                InstallPia3FromCurrentDwgToPdf(pia3Root, targetPc3, targetPmp);
+            }
+            else
+            {
+                InstallPia2FromSource(sourcePc3, targetPc3, targetPmp, "");
+            }
+
+            return File.Exists(targetPc3) && File.Exists(targetPmp) ? PreferredPngPlotter : "";
+        }
+        catch
+        {
+            return "";
+        }
+    }
+
+    public static string InstallJpgPlotter()
+    {
+        try
+        {
+            var targetRoot = GetAutoCadPlotterDirectory();
+            if (string.IsNullOrWhiteSpace(targetRoot))
+            {
+                return "";
+            }
+
+            var targetPc3 = Path.Combine(targetRoot, PreferredJpgPlotter);
+            var targetPmpDir = Path.Combine(targetRoot, "PMP Files");
+            var targetPmp = Path.Combine(targetPmpDir, PreferredJpgPmp);
+            Directory.CreateDirectory(targetRoot);
+            Directory.CreateDirectory(targetPmpDir);
+
+            var sourcePc3 = Directory.GetFiles(targetRoot, "*.pc3")
+                .Where(path => !string.Equals(Path.GetFileName(path), PreferredJpgPlotter, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(path => string.Equals(Path.GetFileName(path), "PublishToWeb JPG.pc3", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+                .FirstOrDefault(path => Path.GetFileName(path).IndexOf("JPG", StringComparison.OrdinalIgnoreCase) >= 0
+                                        || Path.GetFileName(path).IndexOf("JPEG", StringComparison.OrdinalIgnoreCase) >= 0);
+            if (string.IsNullOrWhiteSpace(sourcePc3))
+            {
+                return File.Exists(targetPc3) ? PreferredJpgPlotter : "";
+            }
+
+            var raw = File.ReadAllText(sourcePc3);
+            if (TryReadPia3Json(raw, out var pia3Root))
+            {
+                InstallPia3FromCurrentDwgToPdf(pia3Root, targetPc3, targetPmp);
+            }
+            else
+            {
+                InstallPia2FromSource(sourcePc3, targetPc3, targetPmp, "");
+            }
+
+            return File.Exists(targetPc3) && File.Exists(targetPmp) ? PreferredJpgPlotter : "";
+        }
+        catch
+        {
+            return "";
+        }
+    }
+
+    public static string InstallDwfPlotter()
+    {
+        try
+        {
+            var targetRoot = GetAutoCadPlotterDirectory();
+            if (string.IsNullOrWhiteSpace(targetRoot))
+            {
+                return "";
+            }
+
+            var targetPc3 = Path.Combine(targetRoot, PreferredDwfPlotter);
+            var targetPmpDir = Path.Combine(targetRoot, "PMP Files");
+            var targetPmp = Path.Combine(targetPmpDir, PreferredDwfPmp);
+            Directory.CreateDirectory(targetRoot);
+            Directory.CreateDirectory(targetPmpDir);
+
+            var sourcePc3 = Directory.GetFiles(targetRoot, "*.pc3")
+                .Where(path => !string.Equals(Path.GetFileName(path), PreferredDwfPlotter, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(path => string.Equals(Path.GetFileName(path), "DWF6 ePlot.pc3", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+                .FirstOrDefault(path => Path.GetFileName(path).IndexOf("DWF", StringComparison.OrdinalIgnoreCase) >= 0
+                                        && Path.GetFileName(path).IndexOf("DWFx", StringComparison.OrdinalIgnoreCase) < 0);
+            if (string.IsNullOrWhiteSpace(sourcePc3))
+            {
+                return File.Exists(targetPc3) ? PreferredDwfPlotter : "";
+            }
+
+            var raw = File.ReadAllText(sourcePc3);
+            if (TryReadPia3Json(raw, out var pia3Root))
+            {
+                InstallPia3FromCurrentDwgToPdf(pia3Root, targetPc3, targetPmp);
+            }
+            else
+            {
+                InstallPia2FromSource(sourcePc3, targetPc3, targetPmp, "");
+            }
+
+            return File.Exists(targetPc3) && File.Exists(targetPmp) ? PreferredDwfPlotter : "";
+        }
+        catch
+        {
+            return "";
+        }
+    }
+
     private static bool IsValidPlotterFile(string path)
     {
         if (!File.Exists(path)) return false;
@@ -196,7 +334,11 @@ public static class AcadPlotterInstaller
 
     private static void InstallPia2FromCurrentDwgToPdf(string sourcePc3, string targetPc3, string targetPmp)
     {
-        var driverPath = FindPdfDriverPath();
+        InstallPia2FromSource(sourcePc3, targetPc3, targetPmp, FindPdfDriverPath());
+    }
+
+    private static void InstallPia2FromSource(string sourcePc3, string targetPc3, string targetPmp, string driverPath)
+    {
 
         var pc3 = new PlotterConfiguration(sourcePc3)
         {

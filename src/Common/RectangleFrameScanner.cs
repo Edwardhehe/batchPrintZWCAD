@@ -270,7 +270,11 @@ public static class RectangleFrameScanner
                     MinX = rectangle.MinX,
                     MinY = rectangle.MinY,
                     MaxX = rectangle.MaxX,
-                    MaxY = rectangle.MaxY
+                    MaxY = rectangle.MaxY,
+                    // 打印窗口后续会转换为 DCS；DWG 拆图仍需保留原始 WCS 四角点。
+                    CornerPoints = rectangle.CornerPoints == null
+                        ? null
+                        : (double[])rectangle.CornerPoints.Clone()
                 }
             });
         }
