@@ -6,7 +6,8 @@ namespace ZwcadBatchPlot;
 
 public static class UiLayout
 {
-    public static readonly Font DefaultFont = new("Microsoft YaHei UI", 8F, FontStyle.Regular, GraphicsUnit.Point);
+    // 全部插件窗体统一使用小一号字体，提升信息密度并保持中文显示清晰。
+    public static readonly Font DefaultFont = new("Microsoft YaHei UI", 7F, FontStyle.Regular, GraphicsUnit.Point);
 
     private static readonly float DpiX;
     private static readonly float DpiY;
@@ -55,23 +56,23 @@ public static class UiLayout
 
     public static int ButtonWidth(string text, int minimumWidth)
     {
-        var measured = TextRenderer.MeasureText(text, DefaultFont).Width + Scale(20);
+        var measured = TextRenderer.MeasureText(text, DefaultFont).Width + Scale(16);
         return Math.Max(Scale(minimumWidth), measured);
     }
 
     public static int ButtonHeight()
     {
-        return Math.Max(Scale(24), TextRenderer.MeasureText("批量打印", DefaultFont).Height + Scale(8));
+        return Math.Max(Scale(22), TextRenderer.MeasureText("批量打印", DefaultFont).Height + Scale(6));
     }
 
     public static int ActionButtonRowsHeight()
     {
-        return ButtonHeight() * 2 + Scale(14);
+        return ButtonHeight() * 2 + Scale(10);
     }
 
     public static int ActionPanelHeight()
     {
-        return ActionButtonRowsHeight() + ButtonHeight() * 2 + Scale(30);
+        return ActionButtonRowsHeight() + ButtonHeight() * 2 + Scale(24);
     }
 
     public static Button CreateButton(string text, int minimumWidth)
@@ -81,7 +82,7 @@ public static class UiLayout
             Text = text,
             Width = ButtonWidth(text, minimumWidth),
             Height = ButtonHeight(),
-            Margin = new Padding(0, Scale(2), Scale(6), Scale(2)),
+            Margin = new Padding(0, Scale(1), Scale(5), Scale(1)),
             UseVisualStyleBackColor = true
         };
     }
@@ -89,7 +90,7 @@ public static class UiLayout
     /// <summary>向 TableLayoutPanel 添加标签+控件行。</summary>
     public static void AddRow(TableLayoutPanel table, int row, string labelText, Control control)
     {
-        table.RowStyles.Add(new RowStyle(SizeType.Absolute, Scale(42)));
+        table.RowStyles.Add(new RowStyle(SizeType.Absolute, Scale(34)));
         table.Controls.Add(new Label
         {
             Text = labelText,
@@ -121,8 +122,8 @@ public static class UiLayout
         grid.GridColor = Color.FromArgb(220, 220, 220);
         grid.EnableHeadersVisualStyles = false;
         grid.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
-        grid.ColumnHeadersHeight = Math.Max(Scale(34), font.Height + Scale(16));
-        grid.RowTemplate.Height = Math.Max(Scale(28), font.Height + Scale(12));
+        grid.ColumnHeadersHeight = Math.Max(Scale(29), font.Height + Scale(12));
+        grid.RowTemplate.Height = Math.Max(Scale(24), font.Height + Scale(9));
         grid.DefaultCellStyle.Font = font;
         grid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(51, 122, 183);
         grid.DefaultCellStyle.SelectionForeColor = Color.White;

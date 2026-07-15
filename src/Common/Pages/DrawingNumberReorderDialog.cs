@@ -32,15 +32,16 @@ public sealed class DrawingNumberReorderDialog : Form
         FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.CenterParent;
-        ClientSize = new Size(UiLayout.Scale(420), UiLayout.Scale(320));
+        UiLayout.ConfigureForm(this, 390, 250, 370, 230);
+        ClientSize = new Size(UiLayout.Scale(390), UiLayout.Scale(230));
 
         var table = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
-            Padding = new Padding(UiLayout.Scale(16), UiLayout.Scale(16), UiLayout.Scale(16), UiLayout.Scale(12))
+            Padding = new Padding(UiLayout.Scale(12), UiLayout.Scale(10), UiLayout.Scale(12), UiLayout.Scale(8))
         };
-        table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(100)));
+        table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(82)));
         table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
         // 前缀
@@ -71,7 +72,7 @@ public sealed class DrawingNumberReorderDialog : Form
         _preview.Dock = DockStyle.Fill;
         _preview.TextAlign = ContentAlignment.MiddleLeft;
         _preview.ForeColor = Color.DimGray;
-        _preview.Font = new Font(Font.FontFamily, Math.Max(Font.Size - 1, 8));
+        _preview.Font = new Font(Font.FontFamily, Math.Max(Font.Size - 1, 7));
         table.SetColumnSpan(_preview, 2);
         table.Controls.Add(_preview, 0, 3);
 
@@ -96,8 +97,8 @@ public sealed class DrawingNumberReorderDialog : Form
 
         table.RowCount = 5;
         for (var i = 0; i < 4; i++)
-            table.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(40)));
-        table.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(38)));
+            table.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(32)));
+        table.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(32)));
 
         Controls.Add(table);
         _prefix.TextChanged += (_, _) => UpdatePreview();

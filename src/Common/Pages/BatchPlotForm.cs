@@ -78,12 +78,12 @@ public sealed class BatchPlotForm : Form
     private void InitializeComponents()
     {
 #if AUTOCAD
-        Text = "批量打印(选图框块) - AutoCAD";
+        Text = "LA图框块批量打印";
 #else
-        Text = "批量打印(选图框块) - ZWCAD";
+        Text = "LA图框块批量打印";
 #endif
         FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
-        ClientSize = new Size(UiLayout.Scale(900), UiLayout.Scale(560));
+        ClientSize = new Size(UiLayout.Scale(900), UiLayout.Scale(520));
         StartPosition = FormStartPosition.CenterScreen;
         Font = UiLayout.DefaultFont;
         var tips = new ToolTip

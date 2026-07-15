@@ -25,23 +25,23 @@ public sealed class CustomScaleForm : Form
         _drawingHeight = drawingHeight;
 
         Text = "自定义打印比例";
-        StartPosition = FormStartPosition.CenterParent;
+        UiLayout.ConfigureForm(this, 360, 180, 340, 170);
         FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
         ShowInTaskbar = false;
-        ClientSize = new Size(UiLayout.Scale(380), UiLayout.Scale(210));
+        ClientSize = new Size(UiLayout.Scale(360), UiLayout.Scale(170));
 
         var panel = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
             RowCount = 5,
-            Padding = new Padding(UiLayout.Scale(16), UiLayout.Scale(12), UiLayout.Scale(16), UiLayout.Scale(12))
+            Padding = new Padding(UiLayout.Scale(12), UiLayout.Scale(8), UiLayout.Scale(12), UiLayout.Scale(8))
         };
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(24)));
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(22)));
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(26)));
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(30)));
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(40)));
         panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(38)));
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(32)));
 
         var info = new Label
         {

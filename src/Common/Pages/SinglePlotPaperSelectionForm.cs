@@ -27,9 +27,9 @@ public sealed class SinglePlotPaperSelectionForm : Form
     private void InitializeComponents()
     {
         Text = "选择纸张";
-        UiLayout.ConfigureForm(this, 560, 210, 560, 210);
-        // 高 DPI 下 Form.Size 会包含标题栏和边框，显式设置紧凑 ClientSize，避免内容重叠又不过度占屏。
-        ClientSize = new Size(UiLayout.Scale(560), UiLayout.Scale(180));
+        UiLayout.ConfigureForm(this, 520, 175, 500, 165);
+        // 单项选择对话框采用三行紧凑布局，保留下拉选项完整显示宽度。
+        ClientSize = new Size(UiLayout.Scale(520), UiLayout.Scale(155));
         FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
         ShowInTaskbar = false;
 
@@ -38,10 +38,10 @@ public sealed class SinglePlotPaperSelectionForm : Form
             Dock = DockStyle.Fill,
             ColumnCount = 1,
             RowCount = 3,
-            Padding = new Padding(UiLayout.Scale(14))
+            Padding = new Padding(UiLayout.Scale(10))
         };
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(50)));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(34)));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(40)));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(30)));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
         root.Controls.Add(new Label

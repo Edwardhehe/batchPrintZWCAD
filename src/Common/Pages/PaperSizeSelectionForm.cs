@@ -23,9 +23,9 @@ public sealed class PaperSizeSelectionForm : Form
     private void InitializeComponents()
     {
         Text = "设置图框输出纸张";
-        UiLayout.ConfigureForm(this, 480, 270, 460, 250);
-        // 纸张设置是新增图框流程的最后一步，内容区按 DPI 放宽，避免输入框和按钮在高分屏下挤压。
-        ClientSize = new Size(UiLayout.Scale(480), UiLayout.Scale(240));
+        UiLayout.ConfigureForm(this, 420, 220, 400, 205);
+        // 内容区采用紧凑行高，同时保留长提示文字在高 DPI 下的显示空间。
+        ClientSize = new Size(UiLayout.Scale(420), UiLayout.Scale(200));
         FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
         ShowInTaskbar = false;
 
@@ -34,11 +34,11 @@ public sealed class PaperSizeSelectionForm : Form
             Dock = DockStyle.Fill,
             ColumnCount = 1,
             RowCount = 3,
-            Padding = new Padding(UiLayout.Scale(14))
+            Padding = new Padding(UiLayout.Scale(10))
         };
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(40)));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(46)));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(32)));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(36)));
 
         var fields = new TableLayoutPanel
         {

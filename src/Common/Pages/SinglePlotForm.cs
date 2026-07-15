@@ -50,9 +50,9 @@ public sealed class SinglePlotForm : Form
     private void InitializeComponents(string sourceFile, double width, double height)
     {
         Text = "单张打印";
-        UiLayout.ConfigureForm(this, 720, 420, 680, 380);
-        // 高 DPI 下 Size 包含标题栏和边框，显式设置紧凑 ClientSize 避免控件重叠。
-        ClientSize = new Size(UiLayout.Scale(720), UiLayout.Scale(380));
+        UiLayout.ConfigureForm(this, 660, 330, 620, 300);
+        // 单张打印压缩为必要信息和操作区域，避免字段之间出现大块空白。
+        ClientSize = new Size(UiLayout.Scale(660), UiLayout.Scale(300));
         FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
         ShowInTaskbar = false;
 
@@ -61,15 +61,15 @@ public sealed class SinglePlotForm : Form
             Dock = DockStyle.Fill,
             ColumnCount = 1,
             RowCount = 7,
-            Padding = new Padding(UiLayout.Scale(24))
+            Padding = new Padding(UiLayout.Scale(12))
         };
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(42))); // 区域
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(42))); // 比例
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(50))); // 纸张
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(50))); // 输出
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(38))); // 留白
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(32))); // 区域
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(32))); // 比例
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(40))); // 纸张
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(40))); // 输出
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(32))); // 留白
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));              // 间距
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(52))); // 按钮
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(40))); // 按钮
 
         // 第一行：打印区域
         _areaLabel.Text = $"打印区域: {width:0.##} × {height:0.##}（图纸单位）";

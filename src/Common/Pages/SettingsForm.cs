@@ -53,7 +53,7 @@ public sealed class SettingsForm : Form
     private void InitializeComponents()
     {
         Text = "批量打印设置";
-        UiLayout.ConfigureForm(this, 680, 560, 680, 560);
+        UiLayout.ConfigureForm(this, 620, 500, 600, 470);
         FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
 
         var root = new TableLayoutPanel
@@ -61,11 +61,11 @@ public sealed class SettingsForm : Form
             Dock = DockStyle.Fill,
             ColumnCount = 1,
             RowCount = 3,
-            Padding = new Padding(UiLayout.Scale(14))
+            Padding = new Padding(UiLayout.Scale(10))
         };
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(38)));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(42)));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(30)));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(34)));
 
         var tabs = new TabControl { Dock = DockStyle.Fill };
         tabs.TabPages.Add(BuildGeneralTab());
@@ -167,9 +167,9 @@ public sealed class SettingsForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
-            Padding = new Padding(UiLayout.Scale(12))
+            Padding = new Padding(UiLayout.Scale(8))
         };
-        table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(170)));
+        table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(145)));
         table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
         // 连接符使用固定下拉选项，空格单独显示说明，避免用户误以为没有选中。
@@ -466,9 +466,9 @@ public sealed class SettingsForm : Form
             Dock = DockStyle.Fill,
             ColumnCount = 2,
             RowCount = rows,
-            Padding = new Padding(UiLayout.Scale(12))
+            Padding = new Padding(UiLayout.Scale(8))
         };
-        table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(170)));
+        table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(145)));
         table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         return table;
     }
