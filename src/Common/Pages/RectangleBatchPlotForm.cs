@@ -87,14 +87,13 @@ public sealed class RectangleBatchPlotForm : Form
         var top = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
-            Height = UiLayout.Scale(160),
+            Height = UiLayout.Scale(126),
             ColumnCount = 1,
-            RowCount = 4,
+            RowCount = 3,
             Padding = new Padding(UiLayout.Scale(10), UiLayout.Scale(8), UiLayout.Scale(10), UiLayout.Scale(6)),
             BackColor = Color.FromArgb(245, 247, 250)
         };
         top.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(38)));
-        top.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(34)));
         top.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(34)));
         top.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(34)));
 
@@ -103,17 +102,10 @@ public sealed class RectangleBatchPlotForm : Form
         scanCurrent.Click += (_, _) => ScanCurrentDrawing();
         var scanWindow = UiLayout.CreateButton("框选扫描", 92);
         scanWindow.Click += (_, _) => ScanSelectedWindow();
-        var selectAll = UiLayout.CreateButton("全选", 64);
-        selectAll.Click += (_, _) => SetAll(true);
-        var selectNone = UiLayout.CreateButton("全不选", 76);
-        selectNone.Click += (_, _) => SetAll(false);
         var refresh = UiLayout.CreateButton("重新识别", 88);
         refresh.Click += (_, _) => ReloadFrames();
         actions.Controls.Add(scanCurrent);
         actions.Controls.Add(scanWindow);
-        actions.Controls.Add(Separator());
-        actions.Controls.Add(selectAll);
-        actions.Controls.Add(selectNone);
         actions.Controls.Add(Separator());
         actions.Controls.Add(refresh);
         actions.Controls.Add(new Label
@@ -130,7 +122,7 @@ public sealed class RectangleBatchPlotForm : Form
         var outputRow = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 3,
+            ColumnCount = 8,
             RowCount = 1,
             Margin = Padding.Empty,
             Padding = Padding.Empty
@@ -138,6 +130,11 @@ public sealed class RectangleBatchPlotForm : Form
         outputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(52)));
         outputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         outputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.ButtonWidth("浏览...", 84) + UiLayout.Scale(8)));
+        outputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(72)));
+        outputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(98)));
+        outputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(42)));
+        outputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(100)));
+        outputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.ButtonWidth("开始打印", 98)));
         outputRow.Controls.Add(LabelFor("输出"), 0, 0);
         _outputDirectory.Dock = DockStyle.Fill;
         _outputDirectory.Text = SourceDirectory();
@@ -150,64 +147,59 @@ public sealed class RectangleBatchPlotForm : Form
         browseButton.Click += (_, _) => ChooseOutputDirectory();
         outputRow.Controls.Add(browseButton, 2, 0);
 
-        var pathRow = NewFlow();
-        pathRow.Controls.Add(new Label
+        _savePathModeCombo.DropDownStyle = ComboBoxStyle.DropDownList;
+        // 第三行同时容纳保存路径、排序、合并和留白选项，适当缩短目录选择框。
+        _savePathModeCombo.Width = UiLayout.Scale(170);
+        _savePathModeCombo.Margin = new Padding(0, UiLayout.Scale(3), UiLayout.Scale(8), UiLayout.Scale(3));
+        _savePathModeCombo.SelectionChangeCommitted += (_, _) => ApplySelectedSavePathMode();
+        tips.SetToolTip(browseButton, "选择自定义输出文件夹。");
+
+        var options = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight,
+            WrapContents = false,
+            AutoScroll = false,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty
+        };
+
+        options.Controls.Add(new Label
         {
             Text = "保存路径:",
             AutoSize = true,
             TextAlign = ContentAlignment.MiddleLeft,
             Margin = new Padding(0, UiLayout.Scale(8), UiLayout.Scale(8), 0)
         });
-        _savePathModeCombo.DropDownStyle = ComboBoxStyle.DropDownList;
-        _savePathModeCombo.Width = UiLayout.Scale(210);
-        _savePathModeCombo.Margin = new Padding(0, UiLayout.Scale(3), UiLayout.Scale(8), UiLayout.Scale(3));
-        _savePathModeCombo.SelectionChangeCommitted += (_, _) => ApplySelectedSavePathMode();
-        pathRow.Controls.Add(_savePathModeCombo);
-        tips.SetToolTip(browseButton, "选择自定义输出文件夹。");
-
-        var options = new TableLayoutPanel
+        options.Controls.Add(_savePathModeCombo);
+        options.Controls.Add(new Label
         {
-            Dock = DockStyle.Fill,
-            ColumnCount = 9,
-            RowCount = 1,
-            Margin = Padding.Empty,
-            Padding = Padding.Empty
-        };
-        options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(52)));
-        // 高 DPI 下按实际显示内容预留宽度：排序下拉框要能显示完整选项，
-        // 但不能过宽挤占后面的打印机/CTB区域。
-        options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(180)));
-        options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(128)));
-        options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(150)));
-        options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(52)));
-        options.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55));
-        options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(42)));
-        options.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45));
-        options.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.ButtonWidth("开始打印", 98)));
-
-        options.Controls.Add(LabelFor("排序"), 0, 0);
+            Text = "排序方式:",
+            AutoSize = true,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Margin = new Padding(0, UiLayout.Scale(8), UiLayout.Scale(4), 0)
+        });
         _sortOrder.DropDownStyle = ComboBoxStyle.DropDownList;
         _sortOrder.Height = UiLayout.ButtonHeight();
-        _sortOrder.Dock = DockStyle.Fill;
+        _sortOrder.Width = UiLayout.Scale(180);
         _sortOrder.Margin = new Padding(0, UiLayout.Scale(3), UiLayout.Scale(8), UiLayout.Scale(3));
         _sortOrder.Items.AddRange(new object[] { "从上到下，从左到右", "从左到右，从上到下" });
         _sortOrder.SelectedIndex = 0;
         _sortOrder.SelectedIndexChanged += (_, _) => SortRows();
-        options.Controls.Add(_sortOrder, 1, 0);
+        options.Controls.Add(_sortOrder);
 
         _mergePdf.Text = "合并为一个 PDF";
         _mergePdf.Checked = _settings.MergePdf;
         _mergePdf.AutoSize = true;
         _mergePdf.Anchor = AnchorStyles.Left | AnchorStyles.Top;
         _mergePdf.Margin = new Padding(UiLayout.Scale(4), UiLayout.Scale(7), UiLayout.Scale(8), 0);
-        options.Controls.Add(_mergePdf, 2, 0);
+        options.Controls.Add(_mergePdf);
 
         _leaveMargin.Text = "周边留白";
         _leaveMargin.Checked = _settings.LeavePaperMargin;
         _leaveMargin.AutoSize = true;
         _leaveMargin.Anchor = AnchorStyles.Left | AnchorStyles.Top;
         _leaveMargin.Margin = new Padding(UiLayout.Scale(4), UiLayout.Scale(7), 0, 0);
-        options.Controls.Add(_leaveMargin, 3, 0);
         _marginInput.DecimalPlaces = 1;
         _marginInput.Minimum = 0.1m;
         _marginInput.Maximum = 20m;
@@ -222,41 +214,40 @@ public sealed class RectangleBatchPlotForm : Form
         marginPanel.Controls.Add(_marginInput);
         marginPanel.Controls.Add(new Label { Text = "mm", AutoSize = true, Margin = new Padding(2, UiLayout.Scale(7), 0, 0) });
         options.Controls.Remove(_leaveMargin);
-        options.Controls.Add(marginPanel, 3, 0);
-        options.Controls.Add(LabelFor("输出格式"), 4, 0);
+        options.Controls.Add(marginPanel);
+
+        // 输出格式、CTB 与开始打印和输出目录放在第二行。
+        outputRow.Controls.Add(LabelFor("输出格式"), 3, 0);
         _outputFormatCombo.DropDownStyle = ComboBoxStyle.DropDownList;
         _outputFormatCombo.Height = UiLayout.ButtonHeight();
-        _outputFormatCombo.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
+        _outputFormatCombo.Dock = DockStyle.Fill;
         _outputFormatCombo.Margin = new Padding(0, UiLayout.Scale(3), UiLayout.Scale(8), 0);
         _outputFormatCombo.SelectionChangeCommitted += (_, _) => UpdateOutputFormatUi();
-        options.Controls.Add(_outputFormatCombo, 5, 0);
-        options.Controls.Add(LabelFor("CTB"), 6, 0);
+        outputRow.Controls.Add(_outputFormatCombo, 4, 0);
+        outputRow.Controls.Add(LabelFor("CTB"), 5, 0);
         _style.DropDownStyle = ComboBoxStyle.DropDownList;
         _style.Height = UiLayout.ButtonHeight();
-        _style.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
+        _style.Dock = DockStyle.Fill;
         _style.Margin = new Padding(0, UiLayout.Scale(3), UiLayout.Scale(8), 0);
         // 用户手动切换 CTB 后立即写入设置，图框块/矩形框/单张打印都会读取同一份上次选择。
         _style.SelectionChangeCommitted += (_, _) => SaveCurrentPlotOptions();
-        options.Controls.Add(_style, 7, 0);
+        outputRow.Controls.Add(_style, 6, 0);
 
         _printButton = UiLayout.CreateButton("开始打印", 98);
-        // 开始打印按钮使用普通按钮高度并居中，不再 Fill 整行，避免撑高打印设置行导致其它控件看起来不对齐。
-        _printButton.Anchor = AnchorStyles.Left | AnchorStyles.Top;
         _printButton.Margin = new Padding(0, UiLayout.Scale(2), 0, 0);
         _printButton.BackColor = Color.FromArgb(0, 120, 215);
         _printButton.ForeColor = Color.White;
         _printButton.FlatStyle = FlatStyle.Flat;
         _printButton.FlatAppearance.BorderColor = Color.FromArgb(0, 95, 170);
         _printButton.Click += (_, _) => PrintOrStop();
-        options.Controls.Add(_printButton, 8, 0);
+        outputRow.Controls.Add(_printButton, 7, 0);
         tips.SetToolTip(_sortOrder, "改变列表、红框编号和最终输出文件的顺序。");
         tips.SetToolTip(_mergePdf, "仅 PDF 可用；勾选后只保留一个合并 PDF。");
         tips.SetToolTip(marginPanel, "勾选后按设定距离在纸张短边两侧留白，居中等比例缩小打印。");
 
         top.Controls.Add(actions, 0, 0);
         top.Controls.Add(outputRow, 0, 1);
-        top.Controls.Add(pathRow, 0, 2);
-        top.Controls.Add(options, 0, 3);
+        top.Controls.Add(options, 0, 2);
 
         UiLayout.StyleGrid(_grid, Font);
         _grid.BorderStyle = BorderStyle.None;
