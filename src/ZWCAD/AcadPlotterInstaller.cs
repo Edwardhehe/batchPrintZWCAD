@@ -61,6 +61,15 @@ public static class AcadPlotterInstaller
 
             var targetPc5 = Path.Combine(targetRoot, PreferredPdfPlotter);
             var targetPmp = Path.Combine(targetPmpDir, PreferredPmp);
+
+            // PMP 可能包含用户或本插件动态注册的纸张，已有有效配置时不得覆盖。
+            if (IsUsableFile(targetPc5) && IsUsableFile(targetPmp))
+            {
+                result.Installed = true;
+                result.Message = "LA_pdf 打印机配置已存在，已保留现有 PC5/PMP。";
+                return result;
+            }
+
             File.Copy(sourcePmp, targetPmp, overwrite: true);
             InstallPc5(sourcePc5, targetPc5, targetPmp);
 
@@ -74,6 +83,18 @@ public static class AcadPlotterInstaller
         {
             result.Message = ex.Message;
             return result;
+        }
+    }
+
+    private static bool IsUsableFile(string path)
+    {
+        try
+        {
+            return File.Exists(path) && new FileInfo(path).Length > 0;
+        }
+        catch
+        {
+            return false;
         }
     }
 

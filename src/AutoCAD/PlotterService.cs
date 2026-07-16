@@ -21,6 +21,7 @@ namespace ZwcadBatchPlot;
 public static class PlotterService
 {
     private const double MediaMatchToleranceMm = 3d;
+    private const double ExactMediaToleranceMm = 0.05d;
 
     public sealed class PlotJobResult
     {
@@ -38,6 +39,7 @@ public static class PlotterService
         public bool IsFullBleed { get; set; }
         public bool UseClosestBySize { get; set; }
         public bool RequiresExactSize { get; set; }
+        public double SizeToleranceMm { get; set; } = MediaMatchToleranceMm;
         public bool FromCachedCatalog { get; set; }
         public PlotRotation PreferredRotation { get; set; }
     }
@@ -445,6 +447,12 @@ public static class PlotterService
     {
         if (!job.LeavePaperMargin)
         {
+            if (job.UseExactWindowScale)
+            {
+                SetExactWindowScale(validator, settings, window);
+                return;
+            }
+
             validator.SetUseStandardScale(settings, true);
             validator.SetStdScaleType(settings, StdScaleType.ScaleToFit);
             return;
@@ -469,6 +477,26 @@ public static class PlotterService
         validator.SetCustomPrintScale(settings, new CustomScale(scale, 1d));
     }
 
+    private static void SetExactWindowScale(
+        PlotSettingsValidator validator,
+        PlotSettings settings,
+        Extents2d window)
+    {
+        var paper = settings.PlotPaperSize;
+        var windowWidth = Math.Abs(window.MaxPoint.X - window.MinPoint.X);
+        var windowHeight = Math.Abs(window.MaxPoint.Y - window.MinPoint.Y);
+        var paperLong = Math.Max(paper.X, paper.Y);
+        var paperShort = Math.Min(paper.X, paper.Y);
+        var windowLong = Math.Max(windowWidth, windowHeight);
+        var windowShort = Math.Min(windowWidth, windowHeight);
+        if (paperShort <= 0d || windowShort <= 0d)
+            throw new InvalidOperationException("任意纸张或打印窗口尺寸无效，无法计算精确打印比例。");
+
+        var scale = Math.Min(paperLong / windowLong, paperShort / windowShort);
+        validator.SetUseStandardScale(settings, false);
+        validator.SetCustomPrintScale(settings, new CustomScale(scale, 1d));
+    }
+
     private static MediaChoice ChooseMedia(
         PlotSettingsValidator validator,
         Layout layout,
@@ -476,7 +504,12 @@ public static class PlotterService
         PlotJob job,
         out bool usedCachedCatalog)
     {
-        var catalog = GetMediaCatalog(validator, layout, deviceName, out usedCachedCatalog);
+        var catalog = GetMediaCatalog(
+            validator,
+            layout,
+            deviceName,
+            forceDeviceReload: job.RequireExactPaperSize,
+            out usedCachedCatalog);
         var names = catalog.Select(x => x.Name).ToList();
         if (names.Count == 0)
         {
@@ -500,16 +533,30 @@ public static class PlotterService
             };
         }).ToList();
 
+        var matchTolerance = job.RequireExactPaperSize ? ExactMediaToleranceMm : MediaMatchToleranceMm;
         var exact = choices
-            .Where(x => x.Error <= MediaMatchToleranceMm)
+            .Where(x => x.Error <= matchTolerance)
             .OrderBy(x => x.Error)
             .ThenBy(x => x.IsFullBleed ? 0 : 1)
             .ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
             .FirstOrDefault();
-        if (exact != null && IsLongPaperName(job.PaperName ?? ""))
+        if (exact != null && (job.RequireExactPaperSize || IsLongPaperName(job.PaperName ?? "")))
         {
             exact.RequiresExactSize = true;
+            exact.SizeToleranceMm = matchTolerance;
             return exact;
+        }
+
+        if (job.RequireExactPaperSize)
+        {
+            var nearest = string.Join(", ", choices
+                .OrderBy(x => x.Error)
+                .Take(5)
+                .Select(x => $"{x.Name}[{x.WidthMm:0.######}x{x.HeightMm:0.######},误差{x.Error:0.######}]")
+                .ToArray());
+            throw new InvalidOperationException(
+                $"AutoCAD 的 {deviceName} 未加载精确任意纸张 {targetWidth:0.######} x {targetHeight:0.######} mm；"
+                + $"已停止打印，禁止回退到相近或同名纸张。介质数={choices.Count}；最近={nearest}");
         }
 
         var named = BestNamedMedia(choices, job);
@@ -560,8 +607,23 @@ public static class PlotterService
         PlotSettingsValidator validator,
         Layout layout,
         string deviceName,
+        bool forceDeviceReload,
         out bool usedCache)
     {
+        if (forceDeviceReload)
+        {
+            InvalidateMediaCatalog(deviceName);
+            try
+            {
+                // PMP 是 PC3 的附属配置。先让 AutoCAD 全局重新枚举 PC3，再刷新当前 PlotSettings。
+                PlotConfigManager.RefreshList(RefreshCode.RefreshPC3DevicesList);
+            }
+            catch
+            {
+                // 老版本若不支持全局刷新，仍继续执行下面的设备解绑/重绑刷新。
+            }
+        }
+
         var cacheKey = BuildMediaCatalogCacheKey(deviceName, layout.ModelType);
         lock (MediaCatalogCacheLock)
         {
@@ -575,6 +637,19 @@ public static class PlotterService
         usedCache = false;
         using var settings = new PlotSettings(layout.ModelType);
         settings.CopyFrom(layout);
+        if (forceDeviceReload)
+        {
+            try
+            {
+                validator.SetPlotConfigurationName(settings, "None", null);
+                validator.RefreshLists(settings);
+            }
+            catch
+            {
+                // 某些 AutoCAD 版本不允许对当前布局设置 None；下面仍会重新绑定目标设备。
+            }
+        }
+
         validator.SetPlotConfigurationName(settings, deviceName, null);
         validator.RefreshLists(settings);
         validator.SetPlotPaperUnits(settings, PlotPaperUnit.Millimeters);
@@ -671,7 +746,7 @@ public static class PlotterService
         var directError = DirectSizeError(size.X, size.Y, media.WidthMm, media.HeightMm);
         var rotatedError = DirectSizeError(size.X, size.Y, media.HeightMm, media.WidthMm);
         var error = Math.Min(directError, rotatedError);
-        if (error <= MediaMatchToleranceMm)
+        if (error <= media.SizeToleranceMm)
         {
             return;
         }

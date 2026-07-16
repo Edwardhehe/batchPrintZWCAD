@@ -116,6 +116,12 @@ public sealed class PlotJob
 
     /// <summary>MinX/Y/MaxX/MaxY 已经是 DCS 坐标，GetPlotWindow 跳过 WCS→DCS 变换。</summary>
     public bool IsDcsWindow { get; set; }
+    /// <summary>任意纸张单张打印必须使用精确物理尺寸，禁止名称或相近纸张回退。</summary>
+    public bool RequireExactPaperSize { get; set; }
+    /// <summary>不依赖 ScaleToFit，按打印窗口与纸张物理尺寸计算精确等比缩放。</summary>
+    public bool UseExactWindowScale { get; set; }
+    /// <summary>本次命令是否向 PMP 新增了纸张，供 CAD 决定是否强制刷新介质列表。</summary>
+    public bool CustomPaperWasAdded { get; set; }
     /// <summary>打印区域 4 个实际 WCS 角点，格式 [x0,y0,x1,y1,x2,y2,x3,y3]。null 时用 Min/Max。</summary>
     public double[]? CornerPoints { get; set; }
 }

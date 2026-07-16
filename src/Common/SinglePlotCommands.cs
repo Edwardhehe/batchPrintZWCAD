@@ -35,7 +35,8 @@ public sealed partial class BatchPlotCommands
 
         var editor = doc.Editor;
         string? customPmpPath = null;
-        string? customPaperName = null;
+        PmpCustomPaper.Registration? customPaperRegistration = null;
+        var isArbitraryPaper = false;
         try
         {
             var first = editor.GetPoint(new PromptPointOptions("\n选择图纸外框第一个角点: "));
@@ -86,18 +87,28 @@ public sealed partial class BatchPlotCommands
                 return;
             }
 
-            // 确保 LA_pdf 打印机已安装（必须在 PMP 修改之前，否则会被覆盖）
-            var installResult = AcadPlotterInstaller.InstallBundledPlotter();
-            if (!installResult.Installed)
+            // 只在 LA_pdf 缺失时安装。已存在的 PMP 可能包含用户纸张，不得每次打印覆盖。
+            var plottersDir = AcadPlotterInstaller.GetPlottersDirectory();
+            var installedPlotter = Path.Combine(plottersDir, AcadPlotterInstaller.PreferredPdfPlotter);
+            var installedPmp = Path.Combine(plottersDir, "PMP Files", "LA_pdf.pmp");
+            if (!File.Exists(installedPlotter) || !File.Exists(installedPmp))
             {
-                editor.WriteMessage($"\nLA_pdf 打印机未安装: {installResult.Message}");
-                MessageBox.Show("LA_pdf 打印机配置不完整，无法打印: " + installResult.Message,
-                    "单张打印", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                var installResult = AcadPlotterInstaller.InstallBundledPlotter();
+                if (!installResult.Installed)
+                    throw new InvalidOperationException("LA_pdf 打印机配置不完整: " + installResult.Message);
+
+                // 安装器可能选择了 CAD 当前配置目录，重新取路径，不能继续使用安装前的空目录。
+                plottersDir = AcadPlotterInstaller.GetPlottersDirectory();
+                installedPlotter = Path.Combine(plottersDir, AcadPlotterInstaller.PreferredPdfPlotter);
+                installedPmp = Path.Combine(plottersDir, "PMP Files", "LA_pdf.pmp");
+                if (!File.Exists(installedPlotter) || !File.Exists(installedPmp))
+                    throw new InvalidOperationException("LA_pdf 打印机安装后仍未找到 PC3/PC5 或 PMP 文件。");
             }
 
             var candidates = PaperSizeDetector.DetectCandidates(width, height);
             if (candidates.Count == 0)
             {
+                isArbitraryPaper = true;
                 // 推测比例，弹出自定义比例对话框
                 var guessedScale = PaperSizeDetector.GuessScale(width, height);
                 using var scaleForm = new CustomScaleForm(width, height, guessedScale);
@@ -113,24 +124,35 @@ public sealed partial class BatchPlotCommands
                 // 向 LA_pdf.pmp 注册自定义纸张（自动适配 PIA 3.0 / PIA 2.0 / ZWCAD INI）
                 try
                 {
-                    var plottersDir = AcadPlotterInstaller.GetPlottersDirectory();
                     customPmpPath = Path.Combine(plottersDir, "PMP Files", "LA_pdf.pmp");
-                    if (File.Exists(customPmpPath))
+                    if (!File.Exists(customPmpPath))
+                        throw new FileNotFoundException("LA_pdf.pmp 不存在，无法注册任意纸张。", customPmpPath);
+
+                    customPaperRegistration = PmpCustomPaper.RegisterCustomPaper(customPmpPath, paperW, paperH)
+                        ?? throw new InvalidOperationException("LA_pdf.pmp 注册任意纸张失败。");
+#if AUTOCAD
+                    if (!AcadPlotterInstaller.EnsurePmpAttachment(
+                            installedPlotter,
+                            customPmpPath,
+                            forceRewrite: customPaperRegistration.WasAdded,
+                            out var attachmentMessage))
                     {
-                        customPaperName = PmpCustomPaper.RegisterCustomPaper(customPmpPath, paperW, paperH);
-                        editor.WriteMessage($"\n自定义纸张注册: pmp={customPmpPath}, paperName={customPaperName ?? "(null)"}, paperW={paperW:0.##}, paperH={paperH:0.##}");
+                        throw new InvalidOperationException("LA_pdf.pc3 关联当前 PMP 失败：" + attachmentMessage);
                     }
+                    editor.WriteMessage("\nAutoCAD 打印机关联刷新: " + attachmentMessage);
+#endif
+                    editor.WriteMessage($"\n自定义纸张注册: pmp={customPmpPath}, paperName={customPaperRegistration.PaperName}, wasAdded={customPaperRegistration.WasAdded}, paperW={paperW:0.######}, paperH={paperH:0.######}");
                 }
-                catch
+                catch (Exception ex)
                 {
-                    // PMP 注册失败不阻塞，继续用 UserDefined 名称尝试
+                    throw new InvalidOperationException("任意纸张注册失败，已停止打印，避免回退到错误纸张。", ex);
                 }
 
                 candidates = new List<PaperDetection>
                 {
                     new()
                     {
-                        PaperName = customPaperName ?? "UserDefined",
+                        PaperName = customPaperRegistration.PaperName,
                         PaperWidthMm = paperW,
                         PaperHeightMm = paperH,
                         ScaleValue = scale,
@@ -185,7 +207,10 @@ public sealed partial class BatchPlotCommands
                 MaxY = maxY,
                 OutputPath = outputPath,
                 LeavePaperMargin = form.LeavePaperMargin,
-                PaperMarginMm = form.PaperMarginMm
+                PaperMarginMm = form.PaperMarginMm,
+                RequireExactPaperSize = isArbitraryPaper,
+                UseExactWindowScale = isArbitraryPaper,
+                CustomPaperWasAdded = customPaperRegistration?.WasAdded == true
             };
 
             if (form.IsPreview)
@@ -214,9 +239,9 @@ public sealed partial class BatchPlotCommands
         }
         finally
         {
-            if (customPmpPath != null && customPaperName != null)
+            if (customPmpPath != null && customPaperRegistration?.WasAdded == true)
             {
-                PmpCustomPaper.RemoveCustomPaper(customPmpPath, customPaperName);
+                PmpCustomPaper.RemoveCustomPaper(customPmpPath, customPaperRegistration.PaperName);
             }
         }
     }

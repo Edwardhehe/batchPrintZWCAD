@@ -16,6 +16,8 @@ namespace ZwcadBatchPlot;
 
 public static class PlotterService
 {
+    private const double ExactMediaToleranceMm = 0.05d;
+
     public sealed class PlotJobResult
     {
         public PlotJob Job { get; set; } = new();
@@ -417,12 +419,16 @@ public static class PlotterService
             plotSettings.CopyFrom(layout);
 
             var validator = PlotSettingsValidator.Current;
-            if (HasCachedMediaNames(deviceName, layout.ModelType))
+            var media = job.RequireExactPaperSize
+                ? TrySelectExactSingleMediaWithoutRefresh(
+                    validator, plotSettings, job, settings, deviceName, layout.ModelType)
+                : null;
+            if (media == null && HasCachedMediaNames(deviceName, layout.ModelType))
             {
                 // 已有同一 PC5/PMP 的纸张目录时，只绑定设备，不再卸载设备和刷新全部列表。
                 validator.SetPlotConfigurationName(plotSettings, deviceName, null);
             }
-            else
+            else if (media == null)
             {
                 // 首次使用或配置文件变化后强制重新读取 PMP，随后缓存纸张目录。
                 validator.SetPlotConfigurationName(plotSettings, "None", null);
@@ -431,7 +437,7 @@ public static class PlotterService
             }
             TrySetPlotPaperUnits(validator, plotSettings, PlotPaperUnit.Millimeters);
 
-            var media = SelectMedia(validator, plotSettings, job, settings, deviceName, layout.ModelType);
+            media ??= SelectMedia(validator, plotSettings, job, settings, deviceName, layout.ModelType);
             if (media == null)
             {
                 var allMedia = validator.GetCanonicalMediaNameList(plotSettings).Cast<string>().ToList();
@@ -441,6 +447,7 @@ public static class PlotterService
             }
 
             validator.SetCanonicalMediaName(plotSettings, media.Name);
+            EnsureExactMediaSize(plotSettings, job);
             if (!string.IsNullOrWhiteSpace(styleSheet))
             {
                 validator.SetCurrentStyleSheet(plotSettings, styleSheet);
@@ -510,6 +517,12 @@ public static class PlotterService
     {
         if (!job.LeavePaperMargin)
         {
+            if (job.UseExactWindowScale)
+            {
+                SetExactWindowScale(validator, plotSettings, window);
+                return;
+            }
+
             validator.SetUseStandardScale(plotSettings, true);
             validator.SetStdScaleType(plotSettings, StdScaleType.ScaleToFit);
             return;
@@ -530,6 +543,26 @@ public static class PlotterService
 
         // 保持原图框窗口不变，只缩小打印比例。扩大窗口会把图框外的相邻对象带入 PDF。
         var scale = usableShortSide / windowShortSide;
+        validator.SetUseStandardScale(plotSettings, false);
+        validator.SetCustomPrintScale(plotSettings, new CustomScale(scale, 1d));
+    }
+
+    private static void SetExactWindowScale(
+        PlotSettingsValidator validator,
+        PlotSettings plotSettings,
+        Extents2d window)
+    {
+        var paper = plotSettings.PlotPaperSize;
+        var windowWidth = Math.Abs(window.MaxPoint.X - window.MinPoint.X);
+        var windowHeight = Math.Abs(window.MaxPoint.Y - window.MinPoint.Y);
+        var paperLong = Math.Max(paper.X, paper.Y);
+        var paperShort = Math.Min(paper.X, paper.Y);
+        var windowLong = Math.Max(windowWidth, windowHeight);
+        var windowShort = Math.Min(windowWidth, windowHeight);
+        if (paperShort <= 0d || windowShort <= 0d)
+            throw new InvalidOperationException("任意纸张或打印窗口尺寸无效，无法计算精确打印比例。");
+
+        var scale = Math.Min(paperLong / windowLong, paperShort / windowShort);
         validator.SetUseStandardScale(plotSettings, false);
         validator.SetCustomPrintScale(plotSettings, new CustomScale(scale, 1d));
     }
@@ -702,12 +735,17 @@ public static class PlotterService
             plotSettings.CopyFrom(layout);
 
             var validator = PlotSettingsValidator.Current;
-            if (HasCachedMediaNames(deviceName, layout.ModelType))
+            var singleSettings = AppSettingsStore.Load();
+            var media = job.RequireExactPaperSize
+                ? TrySelectExactSingleMediaWithoutRefresh(
+                    validator, plotSettings, job, singleSettings, deviceName, layout.ModelType)
+                : null;
+            if (media == null && HasCachedMediaNames(deviceName, layout.ModelType))
             {
                 // 已有同一 PC5/PMP 的纸张目录时，只绑定设备，不再卸载设备和刷新全部列表。
                 validator.SetPlotConfigurationName(plotSettings, deviceName, null);
             }
-            else
+            else if (media == null)
             {
                 // 首次使用或配置文件变化后强制重新读取 PMP，随后缓存纸张目录。
                 validator.SetPlotConfigurationName(plotSettings, "None", null);
@@ -716,13 +754,14 @@ public static class PlotterService
             }
             TrySetPlotPaperUnits(validator, plotSettings, PlotPaperUnit.Millimeters);
 
-            var media = SelectMedia(validator, plotSettings, job, AppSettingsStore.Load(), deviceName, layout.ModelType);
+            media ??= SelectMedia(validator, plotSettings, job, singleSettings, deviceName, layout.ModelType);
             if (media == null)
             {
                 throw new InvalidOperationException($"未找到匹配 {job.PaperSizeText} 的打印纸张。");
             }
 
             validator.SetCanonicalMediaName(plotSettings, media.Name);
+            EnsureExactMediaSize(plotSettings, job);
             if (!string.IsNullOrWhiteSpace(styleSheet))
             {
                 validator.SetCurrentStyleSheet(plotSettings, styleSheet);
@@ -909,16 +948,30 @@ public static class PlotterService
         bool modelType)
     {
         var media = GetMediaNames(validator, plotSettings, deviceName, modelType);
+        return SelectMediaFromNames(media, job, settings);
+    }
+
+    private static MediaSelection? SelectMediaFromNames(
+        IReadOnlyList<string> media,
+        PlotJob job,
+        AppSettings settings)
+    {
         if (media.Count == 0)
         {
             return null;
         }
 
-        var exact = FindByPhysicalSize(media, job.PaperWidthMm, job.PaperHeightMm, settings.PaperMatchToleranceMm);
+        var tolerance = job.RequireExactPaperSize
+            ? ExactMediaToleranceMm
+            : settings.PaperMatchToleranceMm;
+        var exact = FindByPhysicalSize(media, job.PaperWidthMm, job.PaperHeightMm, tolerance);
         if (exact != null)
         {
             return exact;
         }
+
+        if (job.RequireExactPaperSize)
+            return null;
 
         if (!settings.AllowStandardPaperNameFallback)
         {
@@ -940,12 +993,43 @@ public static class PlotterService
         return named == null ? null : new MediaSelection { Name = named, NeedsRotation = false };
     }
 
+    private static MediaSelection? TrySelectExactSingleMediaWithoutRefresh(
+        PlotSettingsValidator validator,
+        PlotSettings plotSettings,
+        PlotJob job,
+        AppSettings settings,
+        string deviceName,
+        bool modelType)
+    {
+        // 先只重绑设备并读取当前列表；只有新 PMP 尚未可见时，调用方才回退到完整 RefreshLists。
+        if (job.CustomPaperWasAdded)
+            validator.SetPlotConfigurationName(plotSettings, "None", null);
+
+        validator.SetPlotConfigurationName(plotSettings, deviceName, null);
+        TrySetPlotPaperUnits(validator, plotSettings, PlotPaperUnit.Millimeters);
+        var names = validator.GetCanonicalMediaNameList(plotSettings).Cast<string>().ToList();
+        var media = SelectMediaFromNames(names, job, settings);
+        if (media != null)
+            SetCachedMediaNames(deviceName, modelType, names);
+
+        return media;
+    }
+
     private static bool HasCachedMediaNames(string deviceName, bool modelType)
     {
         var cacheKey = BuildMediaNameCacheKey(deviceName, modelType);
         lock (MediaNameCacheLock)
         {
             return MediaNameCache.ContainsKey(cacheKey);
+        }
+    }
+
+    private static void SetCachedMediaNames(string deviceName, bool modelType, IReadOnlyList<string> media)
+    {
+        var cacheKey = BuildMediaNameCacheKey(deviceName, modelType);
+        lock (MediaNameCacheLock)
+        {
+            MediaNameCache[cacheKey] = media;
         }
     }
 
@@ -1070,6 +1154,23 @@ public static class PlotterService
     private static double DirectSizeError(double mediaWidth, double mediaHeight, double targetWidth, double targetHeight)
     {
         return Math.Max(Math.Abs(mediaWidth - targetWidth), Math.Abs(mediaHeight - targetHeight));
+    }
+
+    private static void EnsureExactMediaSize(PlotSettings plotSettings, PlotJob job)
+    {
+        if (!job.RequireExactPaperSize)
+            return;
+
+        var size = plotSettings.PlotPaperSize;
+        var direct = DirectSizeError(size.X, size.Y, job.PaperWidthMm, job.PaperHeightMm);
+        var rotated = DirectSizeError(size.X, size.Y, job.PaperHeightMm, job.PaperWidthMm);
+        if (Math.Min(direct, rotated) <= ExactMediaToleranceMm)
+            return;
+
+        throw new InvalidOperationException(
+            $"中望 CAD 实际加载纸张 {size.X:0.######} x {size.Y:0.######} mm，"
+            + $"与任意纸张 {job.PaperWidthMm:0.######} x {job.PaperHeightMm:0.######} mm 不一致；"
+            + "已停止打印，禁止生成错误页幅。");
     }
 
     private static PlotRotation DetectRotation(MediaSelection? media, PlotJob job, Extents2d window)

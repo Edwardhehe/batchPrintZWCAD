@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Text.RegularExpressions;
 #if !ZWCAD
 using Newtonsoft.Json;
@@ -20,11 +21,19 @@ namespace ZwcadBatchPlot;
 /// </summary>
 public static class PmpCustomPaper
 {
+    private const double ExactSizeToleranceMm = 0.05d;
+
+    public sealed class Registration
+    {
+        public string PaperName { get; set; } = "";
+        public bool WasAdded { get; set; }
+    }
+
     /// <summary>
     /// 在 PMP 文件中注册自定义纸张尺寸。如果已存在同尺寸则跳过。
-    /// 返回纸张名称（用于 CanonicalMediaName 和删除），失败返回 null。
+    /// 返回纸张注册结果（名称及是否为本次新增），失败返回 null。
     /// </summary>
-    public static string? RegisterCustomPaper(string pmpPath, double widthMm, double heightMm)
+    public static Registration? RegisterCustomPaper(string pmpPath, double widthMm, double heightMm)
     {
         if (!File.Exists(pmpPath)) return null;
 
@@ -52,7 +61,7 @@ public static class PmpCustomPaper
 
     /// <summary>
     /// 从 PMP 文件中删除已注册的自定义纸张。
-    /// paperName 为 RegisterCustomPaper 的返回值。
+    /// paperName 为 RegisterCustomPaper 返回结果中的 PaperName。
     /// </summary>
     public static void RemoveCustomPaper(string pmpPath, string paperName)
     {
@@ -82,7 +91,7 @@ public static class PmpCustomPaper
     }
 
 #if !ZWCAD
-    private static string? RegisterPia3(string pmpPath, string raw, double widthMm, double heightMm)
+    private static Registration? RegisterPia3(string pmpPath, string raw, double widthMm, double heightMm)
     {
         var jsonStart = raw.IndexOf('{');
         if (jsonStart < 0) return null;
@@ -106,11 +115,15 @@ public static class PmpCustomPaper
             if (entry == null || entry["caps_type"]?.Value<int>() != 2) continue;
             var urx = entry["media_bounds_urx"]?.Value<double>() ?? 0;
             var ury = entry["media_bounds_ury"]?.Value<double>() ?? 0;
-            if (Math.Abs(urx - widthMm) < 0.5 && Math.Abs(ury - heightMm) < 0.5)
+            if (SameSize(urx, ury, widthMm, heightMm))
             {
                 // 返回已有的 localized_name
                 var match = size[prop.Name] as JObject;
-                return match?["localized_name"]?.Value<string>() ?? prop.Name;
+                return new Registration
+                {
+                    PaperName = match?["localized_name"]?.Value<string>() ?? prop.Name,
+                    WasAdded = false
+                };
             }
         }
 
@@ -155,11 +168,11 @@ public static class PmpCustomPaper
         var newJson = root.ToString(Formatting.Indented);
         File.WriteAllText(pmpPath, "PIAFILEVERSION_3.0,json\n" + newJson);
 
-        return paperName;
+        return new Registration { PaperName = paperName, WasAdded = true };
     }
 #endif
 
-    private static string? RegisterPia2(string pmpPath, double widthMm, double heightMm)
+    private static Registration? RegisterPia2(string pmpPath, double widthMm, double heightMm)
     {
         // PIA 2.0：使用 PianNoCN 库，结构与 PIA 3.0 一致：udm.media.description/{N} + udm.media.size/{N}
         try
@@ -176,14 +189,28 @@ public static class PmpCustomPaper
             {
                 var caps = child.GetValue("caps_type");
                 if (caps != "2") continue;
-                double.TryParse(child.GetValue("media_bounds_urx"), out var urx);
-                double.TryParse(child.GetValue("media_bounds_ury"), out var ury);
-                if (Math.Abs(urx - widthMm) < 0.5 && Math.Abs(ury - heightMm) < 0.5)
+                double.TryParse(child.GetValue("media_bounds_urx"), NumberStyles.Float, CultureInfo.InvariantCulture, out var urx);
+                double.TryParse(child.GetValue("media_bounds_ury"), NumberStyles.Float, CultureInfo.InvariantCulture, out var ury);
+                if (SameSize(urx, ury, widthMm, heightMm))
                 {
                     // 返回已有的 localized_name
                     var match = size[child.NodeName];
-                    var matchName = match?.GetValue("localized_name");
-                    return !string.IsNullOrWhiteSpace(matchName) ? matchName : child.NodeName;
+                    var repaired = MovePia2StringValue(child, "name");
+                    if (match != null)
+                    {
+                        repaired |= MovePia2StringValue(match, "name");
+                        repaired |= MovePia2StringValue(match, "localized_name");
+                        repaired |= MovePia2StringValue(match, "media_description_name");
+                    }
+                    if (repaired)
+                        config.Saves(pmpPath);
+
+                    var matchName = match == null ? "" : GetPia2StringValue(match, "localized_name");
+                    return new Registration
+                    {
+                        PaperName = !string.IsNullOrWhiteSpace(matchName) ? matchName : child.NodeName,
+                        WasAdded = false
+                    };
                 }
             }
 
@@ -202,7 +229,7 @@ public static class PmpCustomPaper
             descEntry.SetValue("dimensional", "TRUE");
             descEntry.SetValue("media_bounds_urx", FormatNumber(widthMm));
             descEntry.SetValue("media_bounds_ury", FormatNumber(heightMm));
-            descEntry.SetValue("name", descName);
+            descEntry.SetValue("name_str", descName);
             descEntry.SetValue("printable_area", FormatNumber(area));
             descEntry.SetValue("printable_bounds_llx", "0.0");
             descEntry.SetValue("printable_bounds_lly", "0.0");
@@ -213,13 +240,13 @@ public static class PmpCustomPaper
             var sizeEntry = size.Add(index);
             sizeEntry.SetValue("caps_type", "2");
             sizeEntry.SetValue("landscape_mode", "TRUE");
-            sizeEntry.SetValue("localized_name", paperName);
-            sizeEntry.SetValue("media_description_name", descName);
+            sizeEntry.SetValue("localized_name_str", paperName);
+            sizeEntry.SetValue("media_description_name_str", descName);
             sizeEntry.SetValue("media_group", "15");
-            sizeEntry.SetValue("name", $"UserDefinedMetric {paperName} ({FormatMm(widthMm)} x {FormatMm(heightMm)}mm)");
+            sizeEntry.SetValue("name_str", $"UserDefinedMetric {paperName} ({FormatMm(widthMm)} x {FormatMm(heightMm)}mm)");
 
             config.Saves(pmpPath);
-            return paperName;
+            return new Registration { PaperName = paperName, WasAdded = true };
         }
         catch
         {
@@ -233,11 +260,12 @@ public static class PmpCustomPaper
     /// [user]
     /// paper_name0=...  paper_local_name0=...  size_x0=...  size_y0=...
     /// </summary>
-    private static string? RegisterZwcadIni(string pmpPath, string raw, double widthMm, double heightMm)
+    private static Registration? RegisterZwcadIni(string pmpPath, string raw, double widthMm, double heightMm)
     {
         // 检查同尺寸是否已存在
         var existingLocalName = FindZwcadPaperBySize(raw, widthMm, heightMm);
-        if (existingLocalName != null) return existingLocalName;
+        if (existingLocalName != null)
+            return new Registration { PaperName = existingLocalName, WasAdded = false };
 
         // 解析 userdef_num
         var numMatch = Regex.Match(raw, @"userdef_num=(\d+)");
@@ -245,21 +273,23 @@ public static class PmpCustomPaper
         var index = int.Parse(numMatch.Groups[1].Value);
 
         // 生成唯一本地名称
-        var localName = $"LA_Custom_{widthMm:0.}x{heightMm:0.}";
+        var localName = $"LA_Custom_{FormatPlain(widthMm)}x{FormatPlain(heightMm)}";
 
         // 检查 local_name 冲突
-        while (raw.Contains($"paper_local_name{index - 1}=") || raw.Contains(localName))
+        while (Regex.IsMatch(raw, $@"(?m)^paper_name{index}=")
+               || Regex.IsMatch(raw, $@"(?m)^paper_local_name{index}=")
+               || raw.IndexOf(localName, StringComparison.OrdinalIgnoreCase) >= 0)
         {
             // 确保下一个 index 也不冲突
             index++;
-            localName = $"LA_Custom_{widthMm:0.}x{heightMm:0.}_{index}";
+            localName = $"LA_Custom_{FormatPlain(widthMm)}x{FormatPlain(heightMm)}_{index}";
             if (index > 9999) return null;
         }
 
         // 构建新纸张条目
-        var w = widthMm.ToString("0.000000");
-        var h = heightMm.ToString("0.000000");
-        var area = (widthMm * heightMm).ToString("0.000000");
+        var w = widthMm.ToString("0.000000", CultureInfo.InvariantCulture);
+        var h = heightMm.ToString("0.000000", CultureInfo.InvariantCulture);
+        var area = (widthMm * heightMm).ToString("0.000000", CultureInfo.InvariantCulture);
         var newEntry = $"\r\npaper_name{index}=UserDefinedMetric ({w} x {h} 毫米)\r\n" +
                        $"paper_local_name{index}={localName}\r\n" +
                        $"size_x{index}={w}\r\n" +
@@ -280,28 +310,64 @@ public static class PmpCustomPaper
         newRaw = newRaw.TrimEnd() + newEntry + "\r\n";
 
         File.WriteAllText(pmpPath, newRaw);
-        return localName;
+        return new Registration { PaperName = localName, WasAdded = true };
     }
 
     private static string? FindZwcadPaperBySize(string raw, double widthMm, double heightMm)
     {
-        var pattern = $@"paper_local_name(\d+)=(.+?)[\r\n].*?size_x\1={widthMm:0.000000}[\r\n].*?size_y\1={heightMm:0.000000}";
-        var match = Regex.Match(raw, pattern, RegexOptions.Singleline);
-        if (match.Success)
-            return match.Groups[2].Value.Trim();
+        foreach (Match match in Regex.Matches(raw, @"(?m)^paper_local_name(?<index>\d+)=(?<name>[^\r\n]+)"))
+        {
+            var index = match.Groups["index"].Value;
+            var x = Regex.Match(raw, $@"(?m)^size_x{index}=(?<value>[-+0-9.,]+)");
+            var y = Regex.Match(raw, $@"(?m)^size_y{index}=(?<value>[-+0-9.,]+)");
+            if (!x.Success || !y.Success
+                || !double.TryParse(x.Groups["value"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var actualX)
+                || !double.TryParse(y.Groups["value"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var actualY))
+            {
+                continue;
+            }
 
-        // 也尝试反向
-        pattern = $@"paper_local_name(\d+)=(.+?)[\r\n].*?size_x\1={heightMm:0.000000}[\r\n].*?size_y\1={widthMm:0.000000}";
-        match = Regex.Match(raw, pattern, RegexOptions.Singleline);
-        if (match.Success)
-            return match.Groups[2].Value.Trim();
+            if (SameSize(actualX, actualY, widthMm, heightMm))
+                return match.Groups["name"].Value.Trim();
+        }
 
         return null;
     }
 
+    private static string GetPia2StringValue(PiaNode node, string key)
+    {
+        if (node.NodeMap.TryGetValue(key + "_str", out var quotedValue))
+            return quotedValue;
+        return node.NodeMap.TryGetValue(key, out var legacyValue) ? legacyValue : "";
+    }
+
+    private static bool MovePia2StringValue(PiaNode node, string key)
+    {
+        var quotedKey = key + "_str";
+        if (node.NodeMap.ContainsKey(quotedKey))
+        {
+            // 清掉旧代码可能写入的同名无引号空字段。
+            return node.NodeMap.Remove(key);
+        }
+
+        if (!node.NodeMap.TryGetValue(key, out var value) || string.IsNullOrWhiteSpace(value))
+            return false;
+
+        node.NodeMap[quotedKey] = value;
+        node.NodeMap.Remove(key);
+        return true;
+    }
+
+    private static bool SameSize(double leftWidth, double leftHeight, double rightWidth, double rightHeight)
+    {
+        var direct = Math.Max(Math.Abs(leftWidth - rightWidth), Math.Abs(leftHeight - rightHeight));
+        var rotated = Math.Max(Math.Abs(leftWidth - rightHeight), Math.Abs(leftHeight - rightWidth));
+        return Math.Min(direct, rotated) <= ExactSizeToleranceMm;
+    }
+
     private static string CustomPaperName(double widthMm, double heightMm)
     {
-        return $"LA_Custom_{widthMm:0.#}x{heightMm:0.#}";
+        return $"LA_Custom_{FormatPlain(widthMm)}x{FormatPlain(heightMm)}";
     }
 
     private static string MediaDescriptionName(string paperName, double widthMm, double heightMm)
@@ -343,6 +409,7 @@ public static class PmpCustomPaper
         // 删除 description 和 size 条目
         desc.Remove(targetIndex);
         size.Remove(targetIndex);
+        ReindexPia3Media(desc, size);
 
         var newJson = root.ToString(Formatting.Indented);
         File.WriteAllText(pmpPath, "PIAFILEVERSION_3.0,json\n" + newJson);
@@ -372,6 +439,8 @@ public static class PmpCustomPaper
 
             desc.Remove(targetIndex);
             size.Remove(targetIndex);
+            ReindexPia2Node(desc);
+            ReindexPia2Node(size);
             config.Saves(pmpPath);
         }
         catch { }
@@ -379,22 +448,87 @@ public static class PmpCustomPaper
 
     private static void RemoveZwcadIni(string pmpPath, string raw, string paperName)
     {
-        // 匹配以这个 local_name 开头的一整块（名字→末尾，含尾部 \r\n）
-        var pattern = $@"\r\npaper_local_name\d+={Regex.Escape(paperName)}[\r\n].*?Unit\d+=1[\r\n]*";
-        var newRaw = Regex.Replace(raw, pattern, "", RegexOptions.Singleline);
-        if (newRaw == raw) return; // 没找到
+        var blockPattern = @"(?ms)^paper_name(?<index>\d+)=[^\r\n]*\r?\n"
+            + @"paper_local_name\k<index>=(?<local>[^\r\n]*)\r?\n"
+            + @"size_x\k<index>=[^\r\n]*\r?\nsize_y\k<index>=[^\r\n]*\r?\n"
+            + @"llx\k<index>=[^\r\n]*\r?\nlly\k<index>=[^\r\n]*\r?\n"
+            + @"urx\k<index>=[^\r\n]*\r?\nury\k<index>=[^\r\n]*\r?\n"
+            + @"actual_x\k<index>=[^\r\n]*\r?\nactual_y\k<index>=[^\r\n]*\r?\n"
+            + @"area\k<index>=[^\r\n]*\r?\nUnit\k<index>=1[^\r\n]*(?:\r?\n)?";
+        var matches = Regex.Matches(raw, blockPattern);
+        if (matches.Count == 0)
+            return;
 
-        // 清理可能产生的多余空行
-        newRaw = Regex.Replace(newRaw, @"[\r\n]{3,}", "\r\n\r\n");
-
-        // 更新 userdef_num（少一个）
-        var numMatch = Regex.Match(newRaw, @"userdef_num=(\d+)");
-        if (numMatch.Success)
+        var remaining = new List<string>();
+        var removed = false;
+        foreach (Match match in matches)
         {
-            var count = int.Parse(numMatch.Groups[1].Value) - 1;
-            newRaw = Regex.Replace(newRaw, @"userdef_num=\d+", $"userdef_num={Math.Max(0, count)}");
+            if (string.Equals(match.Groups["local"].Value.Trim(), paperName, StringComparison.OrdinalIgnoreCase))
+            {
+                removed = true;
+                continue;
+            }
+
+            var newIndex = remaining.Count;
+            var block = Regex.Replace(
+                match.Value,
+                @"(?m)^(paper_name|paper_local_name|size_x|size_y|llx|lly|urx|ury|actual_x|actual_y|area|Unit)\d+=",
+                m => m.Groups[1].Value + newIndex.ToString(CultureInfo.InvariantCulture) + "=");
+            remaining.Add(block.TrimEnd('\r', '\n'));
         }
 
+        if (!removed)
+            return;
+
+        var prefix = raw.Substring(0, matches[0].Index).TrimEnd('\r', '\n');
+        var suffixStart = matches[matches.Count - 1].Index + matches[matches.Count - 1].Length;
+        var suffix = raw.Substring(suffixStart).Trim('\r', '\n');
+        var newRaw = Regex.Replace(prefix, @"userdef_num=\d+", $"userdef_num={remaining.Count}");
+        newRaw += "\r\n" + string.Join("\r\n", remaining) + "\r\n";
+        if (!string.IsNullOrWhiteSpace(suffix))
+            newRaw += suffix + "\r\n";
+
         File.WriteAllText(pmpPath, newRaw);
+    }
+
+#if !ZWCAD
+    private static void ReindexPia3Media(JObject desc, JObject size)
+    {
+        var keys = desc.Properties().Select(x => x.Name)
+            .Union(size.Properties().Select(x => x.Name), StringComparer.OrdinalIgnoreCase)
+            .OrderBy(ParseIndex)
+            .ThenBy(x => x, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var descValues = keys.Select(key => desc[key]?.DeepClone()).ToList();
+        var sizeValues = keys.Select(key => size[key]?.DeepClone()).ToList();
+        desc.RemoveAll();
+        size.RemoveAll();
+        for (var i = 0; i < keys.Count; i++)
+        {
+            if (descValues[i] != null) desc[i.ToString(CultureInfo.InvariantCulture)] = descValues[i];
+            if (sizeValues[i] != null) size[i.ToString(CultureInfo.InvariantCulture)] = sizeValues[i];
+        }
+    }
+#endif
+
+    private static void ReindexPia2Node(PiaNode node)
+    {
+        var ordered = node.ChildNodes
+            .OrderBy(child => ParseIndex(child.NodeName))
+            .ThenBy(child => child.NodeName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        node.ChildNodes.Clear();
+        for (var i = 0; i < ordered.Count; i++)
+        {
+            ordered[i].NodeName = i.ToString(CultureInfo.InvariantCulture);
+            node.ChildNodes.Add(ordered[i]);
+        }
+    }
+
+    private static int ParseIndex(string value)
+    {
+        return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var index)
+            ? index
+            : int.MaxValue;
     }
 }
