@@ -143,7 +143,7 @@ public static class PaperSizeDetector
         }
 
         var scoreLimit = Math.Min(0.04d, Math.Max(0.015d, details[0].Score + 0.015d));
-        return details
+        var filtered = details
             .Where(candidate => candidate.Score <= scoreLimit)
             .GroupBy(
                 candidate => $"{candidate.Paper.Name}|{candidate.IsLong}|{candidate.Scale:0.########}|{candidate.PaperWidthMm:0.##}|{candidate.PaperHeightMm:0.##}",
@@ -152,6 +152,17 @@ public static class PaperSizeDetector
             .Take(12)
             .Select(ToDetection)
             .ToList();
+
+        // 优先1:100：如果候选列表中有1:100，将其排到第一位
+        var indexOf1To100 = filtered.FindIndex(x => Math.Abs(x.ScaleValue - 100d) < 0.001);
+        if (indexOf1To100 > 0)
+        {
+            var preferred = filtered[indexOf1To100];
+            filtered.RemoveAt(indexOf1To100);
+            filtered.Insert(0, preferred);
+        }
+
+        return filtered;
     }
 
     private static List<PaperCandidate> GetCandidateDetails(double width, double height, DetectionOptions options)

@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("Zwcad", "AutoCAD2019", "AutoCAD2021", "AutoCAD2025", "All")]
+    [ValidateSet("Zwcad", "AutoCAD", "AutoCAD2025", "All")]
     [string]$Target = "Zwcad",
 
     [ValidateSet("Debug", "Release")]
@@ -18,12 +18,7 @@ $projects = [ordered]@{
         Output = "bin"
         Dll = "BatchPlotter.dll"
     }
-    AutoCAD2019 = @{
-        Project = "AcadBatchPlot.AutoCAD2019.csproj"
-        Output = "bin-acad2019"
-        Dll = "AcadBatchPlot.dll"
-    }
-    AutoCAD2021 = @{
+    AutoCAD = @{
         Project = "AcadBatchPlot.csproj"
         Output = "bin-acad"
         Dll = "AcadBatchPlot.dll"

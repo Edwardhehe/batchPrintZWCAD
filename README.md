@@ -14,10 +14,9 @@
 | --- | --- | --- |
 | 中望 CAD | ZWCAD Enterprise x64 | `BatchPlotter.dll` |
 | AutoCAD | AutoCAD 2015 ~ 2024 x64 | `AcadBatchPlot.dll` |
-| AutoCAD | AutoCAD 2019 ~ 2020 x64（精确匹配 SDK） | `AcadBatchPlot.dll` |
 | AutoCAD | AutoCAD 2025 及以后 x64 | `AcadBatchPlot.Core.dll` |
 
-AutoCAD 2015 ~ 2024 使用 .NET Framework 4.8（AutoCAD.NET 20.0），AutoCAD 2019 ~ 2020 使用 .NET Framework 4.7（AutoCAD.NET 23.0），AutoCAD 2025 及以后使用 .NET 8（AutoCAD.NET.Core 25.0），因此需要分别发布 DLL。代码主体复用，但项目文件和 CAD 托管 API 引用不同。
+AutoCAD 2015 ~ 2024 统一使用 .NET Framework 4.8 + AutoCAD.NET 20.0 SDK（2015）编译，最低兼容 AutoCAD 2015。AutoCAD 2025 及以后使用 .NET 8 + AutoCAD.NET.Core 25.0。代码主体复用，仅项目文件和 CAD API 引用不同。
 
 ## 主要功能
 
@@ -71,7 +70,6 @@ AutoCAD 2015 ~ 2024 使用 .NET Framework 4.8（AutoCAD.NET 20.0），AutoCAD 20
 AutoCAD 版本请下载与本机 AutoCAD 年份对应的发布包，解压后关闭 AutoCAD，双击 `安装.cmd`。安装脚本会复制插件文件、写入自动加载注册表项，并保留 `卸载.cmd` 供以后卸载。安装成功后用户以后不需要每次 `NETLOAD`。
 
 - AutoCAD 2015 ~ 2024：使用 `AcadBatchPlot-AutoCAD2015-2024-*.zip`。
-- AutoCAD 2019 ~ 2020：使用 `AcadBatchPlot-AutoCAD2019-2020-*.zip`（精确匹配 AutoCAD.NET 23.0 SDK）。
 - AutoCAD 2025 及以后：使用 `AcadBatchPlot-AutoCAD2025+-*.zip`。
 
 AutoCAD 包内带有 `LA_pdf.pc3` 和 `LA_pdf.pmp`。插件首次自动加载时会把它们复制到 AutoCAD 的 Plotters 目录，用户不需要手动安装 PDF 绘图仪。
@@ -213,7 +211,6 @@ dotnet build BatchPlotter.csproj -c Release
 ```powershell
 dotnet build BatchPlotter.csproj -c Release
 dotnet build AcadBatchPlot.csproj -c Release
-dotnet build AcadBatchPlot.AutoCAD2019.csproj -c Release
 dotnet build AcadBatchPlot.Core.csproj -c Release
 ```
 
@@ -223,8 +220,7 @@ dotnet build AcadBatchPlot.Core.csproj -c Release
 | --- | --- | --- |
 | `BatchPlotter.csproj` | `bin\` | `BatchPlotter.dll` |
 | `AcadBatchPlot.csproj` | `bin-acad\` | `AcadBatchPlot.dll` |
-| `AcadBatchPlot.AutoCAD2019.csproj` | `bin-acad2019\` | `AcadBatchPlot.dll` |
-| `AcadBatchPlot.Core.csproj` | `bin-acad-core\` | `AcadBatchPlot.Core.dll` |
+| `AcadBatchPlot.Core.csproj` | `bin-acad2025之后\` | `AcadBatchPlot.Core.dll` |
 
 ## 说明
 
