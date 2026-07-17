@@ -737,6 +737,7 @@ public sealed class RectangleBatchPlotForm : Form
             stem = Path.GetFileNameWithoutExtension(_document.Name);
         }
 
+        var digits = Math.Max(1, Math.Min(10, _settings.FileNameSequenceDigits));
         var printIndex = 0;
         for (var i = 0; i < _rows.Count; i++)
         {
@@ -746,8 +747,8 @@ public sealed class RectangleBatchPlotForm : Form
             }
 
             printIndex++;
-            _rows[i].Job.DrawingNumber = printIndex.ToString("D2");
-            _rows[i].FileName = $"{stem}{printIndex:D2}{SelectedOutputExtension}";
+            _rows[i].Job.DrawingNumber = printIndex.ToString($"D{digits}");
+            _rows[i].FileName = $"{stem}{printIndex.ToString($"D{digits}")}{SelectedOutputExtension}";
         }
 
         RefreshOutputPaths();

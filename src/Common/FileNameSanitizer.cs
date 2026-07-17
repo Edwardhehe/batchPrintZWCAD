@@ -81,8 +81,9 @@ public static class FileNameSanitizer
     /// <summary>
     /// 根据用户配置的字段键列表，从 PlotJob 中提取对应的值组成文件名片段。
     /// 空值自动跳过，确保最终文件名不含多余分隔符。
+    /// sequenceNumber > 0 时 "Sequence" 键生效，按 sequenceDigits 补零。
     /// </summary>
-    public static List<string> GetFileNameParts(PlotJob job, List<string> fieldKeys)
+    public static List<string> GetFileNameParts(PlotJob job, List<string> fieldKeys, int sequenceNumber = 0, int sequenceDigits = 2)
     {
         var parts = new List<string>();
         foreach (var key in fieldKeys)
@@ -97,6 +98,7 @@ public static class FileNameSanitizer
                 "Info1" => job.Info1,
                 "Info2" => job.Info2,
                 "PaperName" => job.PaperName,
+                "Sequence" => sequenceNumber > 0 ? sequenceNumber.ToString($"D{Math.Max(1, Math.Min(10, sequenceDigits))}") : "",
                 _ => ""
             };
             if (!string.IsNullOrWhiteSpace(value))

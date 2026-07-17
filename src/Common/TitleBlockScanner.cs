@@ -114,10 +114,13 @@ public static class TitleBlockScanner
                 var definition = library.Blocks.FirstOrDefault(x =>
                     string.Equals(x.BlockName, blockName, StringComparison.OrdinalIgnoreCase));
 
-                // If no direct match, peek one level deeper: the outer block may be a
+                // If no direct match, peek deeper: the outer block may be a
                 // dynamic-block container whose visible inner block was registered instead.
                 Matrix3d effectiveBlockTransform = blockRef.BlockTransform;
                 string effectiveBlockName = blockName;
+                // 嵌套匹配时需记录从内层块定义到外层块定义空间的累积变换，用于后续 region 坐标对齐。
+                Matrix3d nestedToOuter = Matrix3d.Identity;
+                bool isNestedMatch = false;
                 if (definition == null)
                 {
                     definition = ResolveNestedLibraryMatch(
@@ -126,6 +129,8 @@ public static class TitleBlockScanner
                     {
                         effectiveBlockTransform = nestedTransform * blockRef.BlockTransform;
                         effectiveBlockName = definition.BlockName;
+                        nestedToOuter = nestedTransform;
+                        isNestedMatch = true;
                     }
                 }
 
@@ -166,6 +171,24 @@ public static class TitleBlockScanner
                     info2Region = definition.Info2Region.HasArea()
                         ? ResolveLocalRegion(definition.Info2Region, effectiveBlockTransform, coordinateMode, referenceFrame)
                         : new LocalRectangle();
+
+                    // 嵌套匹配时 ResolveLocalRegion 返回的 region 处于内层块定义空间，
+                    // 而 ExtractRegionText 从外层 blockRef 定义空间起算，需统一坐标系。
+                    if (isNestedMatch && coordinateMode != RegionCoordinateMode.Frame)
+                    {
+                        titleRegion = TransformLocalRegion(titleRegion, nestedToOuter);
+                        numberRegion = TransformLocalRegion(numberRegion, nestedToOuter);
+                        if (dateRegion.HasArea())
+                            dateRegion = TransformLocalRegion(dateRegion, nestedToOuter);
+                        if (revisionRegion.HasArea())
+                            revisionRegion = TransformLocalRegion(revisionRegion, nestedToOuter);
+                        if (phaseRegion.HasArea())
+                            phaseRegion = TransformLocalRegion(phaseRegion, nestedToOuter);
+                        if (info1Region.HasArea())
+                            info1Region = TransformLocalRegion(info1Region, nestedToOuter);
+                        if (info2Region.HasArea())
+                            info2Region = TransformLocalRegion(info2Region, nestedToOuter);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -214,6 +237,21 @@ public static class TitleBlockScanner
                     warnings.Add($"布局={spaceName} 块={blockName} 句柄={blockRef.Handle} 文字提取失败: {ex.Message}");
                     title = "";
                     number = "";
+                }
+
+                // 嵌套匹配时输出诊断信息，方便排查深度嵌套场景下的字段提取问题。
+                if (isNestedMatch)
+                {
+                    if (dateRegion.HasArea() && string.IsNullOrWhiteSpace(date))
+                        warnings.Add($"布局={spaceName} 块={effectiveBlockName}(嵌套) 日期字段区域有定义但未提取到文字");
+                    if (revisionRegion.HasArea() && string.IsNullOrWhiteSpace(revision))
+                        warnings.Add($"布局={spaceName} 块={effectiveBlockName}(嵌套) 版次字段区域有定义但未提取到文字");
+                    if (phaseRegion.HasArea() && string.IsNullOrWhiteSpace(phase))
+                        warnings.Add($"布局={spaceName} 块={effectiveBlockName}(嵌套) 设计阶段字段区域有定义但未提取到文字");
+                    if (info1Region.HasArea() && string.IsNullOrWhiteSpace(info1))
+                        warnings.Add($"布局={spaceName} 块={effectiveBlockName}(嵌套) 信息1字段区域有定义但未提取到文字");
+                    if (info2Region.HasArea() && string.IsNullOrWhiteSpace(info2))
+                        warnings.Add($"布局={spaceName} 块={effectiveBlockName}(嵌套) 信息2字段区域有定义但未提取到文字");
                 }
 
                 if (string.IsNullOrWhiteSpace(title))
@@ -566,6 +604,22 @@ public static class TitleBlockScanner
             new Point3d(extents.MaxPoint.X, extents.MaxPoint.Y, 0).TransformBy(transform)
         };
 
+        return LocalRectangle.FromPoints(
+            points.Min(p => p.X),
+            points.Min(p => p.Y),
+            points.Max(p => p.X),
+            points.Max(p => p.Y));
+    }
+
+    private static LocalRectangle TransformLocalRegion(LocalRectangle region, Matrix3d transform)
+    {
+        var points = new[]
+        {
+            new Point3d(region.MinX, region.MinY, 0).TransformBy(transform),
+            new Point3d(region.MinX, region.MaxY, 0).TransformBy(transform),
+            new Point3d(region.MaxX, region.MinY, 0).TransformBy(transform),
+            new Point3d(region.MaxX, region.MaxY, 0).TransformBy(transform)
+        };
         return LocalRectangle.FromPoints(
             points.Min(p => p.X),
             points.Min(p => p.Y),

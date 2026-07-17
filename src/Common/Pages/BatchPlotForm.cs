@@ -37,7 +37,6 @@ public sealed class BatchPlotForm : Form
     private readonly ComboBox _savePathModeCombo = new();
     private readonly ComboBox _styleCombo = new();
     private readonly CheckBox _mergePdfCheckBox = new();
-    private readonly CheckBox _addSeqCheckBox = new();
     private readonly CheckBox _leaveMarginCheckBox = new();
     private readonly NumericUpDown _marginInput = new();
     private readonly Button _printButton = new();
@@ -234,14 +233,6 @@ public sealed class BatchPlotForm : Form
         _mergePdfCheckBox.Margin = new Padding(UiLayout.Scale(12), UiLayout.Scale(7), UiLayout.Scale(12), 0);
         SetTip(_mergePdfCheckBox, "勾选后选择最终文件名；打印过程只使用临时单页，完成后仅保留一个合并 PDF。");
 
-        _addSeqCheckBox.Text = "文件名加序号";
-        _addSeqCheckBox.AutoSize = true;
-        _addSeqCheckBox.Checked = _settings.AddFileNameSequence;
-        _addSeqCheckBox.TextAlign = ContentAlignment.MiddleLeft;
-        _addSeqCheckBox.Margin = new Padding(UiLayout.Scale(12), UiLayout.Scale(7), UiLayout.Scale(12), 0);
-        _addSeqCheckBox.CheckedChanged += (_, _) => SortAndRefreshOutputPaths();
-        SetTip(_addSeqCheckBox, "勾选后文件名前自动加序号，序号与图号的连接符使用设置中的连接符。");
-
         _leaveMarginCheckBox.Text = "周边留白";
         _leaveMarginCheckBox.AutoSize = true;
         _leaveMarginCheckBox.Checked = _settings.LeavePaperMargin;
@@ -288,7 +279,6 @@ public sealed class BatchPlotForm : Form
         pathRow.Controls.Add(savePathLabel);
         pathRow.Controls.Add(_savePathModeCombo);
         pathRow.Controls.Add(_mergePdfCheckBox);
-        pathRow.Controls.Add(_addSeqCheckBox);
         pathRow.Controls.Add(_leaveMarginCheckBox);
         pathRow.Controls.Add(_marginInput);
         pathRow.Controls.Add(new Label { Text = "mm", AutoSize = true, Margin = new Padding(3, UiLayout.Scale(8), UiLayout.Scale(8), 0) });
@@ -297,7 +287,6 @@ public sealed class BatchPlotForm : Form
         _plotOnlyControls.AddRange(new Control[]
         {
             _styleCombo,
-            _addSeqCheckBox,
             _leaveMarginCheckBox,
             _marginInput
         });
@@ -840,8 +829,8 @@ public sealed class BatchPlotForm : Form
             }
             else
             {
-                var seq = _addSeqCheckBox.Checked ? $"{++idx}{_settings.PdfFileNameSeparator}" : "";
-                job.OutputPath = BuildOutputPath(job, seq, reservedPaths);
+                idx++;
+                job.OutputPath = BuildOutputPath(job, idx, reservedPaths);
             }
             _jobs.Add(job);
         }
@@ -1298,7 +1287,7 @@ public sealed class BatchPlotForm : Form
         RefreshStatus();
     }
 
-    private string BuildOutputPath(PlotJob job, string seqPrefix, ISet<string> reservedPaths)
+    private string BuildOutputPath(PlotJob job, int sequenceNumber, ISet<string> reservedPaths)
     {
         var fields = _settings.PdfFileNameFields;
         if (fields == null || fields.Count == 0)
@@ -1306,14 +1295,26 @@ public sealed class BatchPlotForm : Form
             fields = new System.Collections.Generic.List<string> { "DrawingNumber", "Title" };
         }
 
-        var parts = FileNameSanitizer.GetFileNameParts(job, fields);
+        var parts = FileNameSanitizer.GetFileNameParts(job, fields, sequenceNumber, _settings.FileNameSequenceDigits);
+        // 图号为必选项，如果用户配置中漏了则自动补在末尾
+        if (!fields.Any(f => string.Equals(f, "DrawingNumber", StringComparison.OrdinalIgnoreCase)))
+        {
+            var number = job.DrawingNumber;
+            if (!string.IsNullOrWhiteSpace(number))
+                parts.Add(number.Trim());
+        }
+        // 如果所有字段都为空，至少用图号兜底
+        if (parts.Count == 0 && !string.IsNullOrWhiteSpace(job.DrawingNumber))
+        {
+            parts.Add(job.DrawingNumber);
+        }
         if (parts.Count == 0)
         {
-            parts.Add(job.DrawingNumber); // fallback
+            parts.Add("未命名");
         }
 
         var separator = _settings.PdfFileNameSeparator;
-        var baseName = seqPrefix + string.Join(separator, parts);
+        var baseName = string.Join(separator, parts);
         return FileNameSanitizer.MakeUnique(
             GetOutputDirectory(job),
             baseName,
@@ -1551,6 +1552,7 @@ public sealed class BatchPlotForm : Form
         _settings.AddSequenceWhenPdfExists = updated.AddSequenceWhenPdfExists;
         _settings.PdfFileNameSeparator = updated.PdfFileNameSeparator;
         _settings.PdfFileNameFields = updated.PdfFileNameFields.ToList();
+        _settings.FileNameSequenceDigits = updated.FileNameSequenceDigits;
         _settings.OpenExternalDwgForPlot = updated.OpenExternalDwgForPlot;
         _settings.DirectoryIndexWidth = updated.DirectoryIndexWidth;
         _settings.DirectoryNumberWidth = updated.DirectoryNumberWidth;
@@ -2251,7 +2253,6 @@ public sealed class BatchPlotForm : Form
         _settings.LastStyleSheet = _styleCombo.SelectedItem?.ToString() ?? "";
         _settings.AutoScanCurrentDrawing = false;
         _settings.MergePdf = _mergePdfCheckBox.Checked;
-        _settings.AddFileNameSequence = _addSeqCheckBox.Checked;
         _settings.LeavePaperMargin = _leaveMarginCheckBox.Checked;
         _settings.PaperMarginMm = (double)_marginInput.Value;
         AppSettingsStore.Save(_settings);

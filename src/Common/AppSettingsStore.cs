@@ -45,6 +45,8 @@ public sealed class AppSettings
     public double PaperMarginMm { get; set; } = 1;
     public string PdfFileNameSeparator { get; set; } = "_";
     public List<string> PdfFileNameFields { get; set; } = new() { "DrawingNumber", "Title" };
+    /// <summary>文件名中序号的补零位数，默认 2 位（如 01, 02, …）。</summary>
+    public int FileNameSequenceDigits { get; set; } = 2;
     public bool OpenExternalDwgForPlot { get; set; } = true;
     public double DirectoryIndexWidth { get; set; } = 900;
     public double DirectoryNumberWidth { get; set; } = 3200;
@@ -212,10 +214,26 @@ public static class AppSettingsStore
         }
         else
         {
-            // 去重，防止旧版 UI 产生的重复项
-            settings.PdfFileNameFields = settings.PdfFileNameFields
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            // 显式保序去重，不依赖 Enumerable.Distinct 的内部实现顺序
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var deduped = new List<string>();
+            foreach (var item in settings.PdfFileNameFields)
+            {
+                if (seen.Add(item))
+                    deduped.Add(item);
+            }
+            settings.PdfFileNameFields = deduped;
+        }
+
+        // 图号为文件名必选字段
+        if (!settings.PdfFileNameFields.Any(f => string.Equals(f, "DrawingNumber", StringComparison.OrdinalIgnoreCase)))
+        {
+            settings.PdfFileNameFields.Add("DrawingNumber");
+        }
+
+        if (settings.FileNameSequenceDigits < 1 || settings.FileNameSequenceDigits > 10)
+        {
+            settings.FileNameSequenceDigits = 2;
         }
 
         return settings;

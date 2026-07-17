@@ -493,7 +493,7 @@ public static class DwgSplitService
             fields = new List<string> { "DrawingNumber", "Title" };
         }
 
-        var parts = FileNameSanitizer.GetFileNameParts(job, fields);
+        var parts = FileNameSanitizer.GetFileNameParts(job, fields, sequenceDigits: settings.FileNameSequenceDigits);
         if (parts.Count == 0)
         {
             parts.Add(job.DrawingNumber);

@@ -376,7 +376,7 @@ public static class DirectoryTableGenerator
                 return ObjectId.Null;
             }
 
-            // 默认“宋体”样式缺失时仅在当前图纸中创建，不修改 CAD 全局模板或用户配置。
+            // 默认”宋体”样式缺失时仅在当前图纸中创建，不修改 CAD 全局模板或用户配置。
             table.UpgradeOpen();
             var record = new TextStyleTableRecord
             {

@@ -44,9 +44,23 @@ public sealed class SettingsForm : Form
     private readonly Label _fileNamePreview = new();
     private readonly ListBox _availableFields = new();
     private readonly ListBox _selectedFields = new();
+    private readonly NumericUpDown _fileNameSequenceDigits = new();
 
     public string? RequestedDirectoryColumnKey { get; private set; }
     public bool RequestPickDirectoryRowHeight { get; private set; }
+
+    /// <summary>
+    /// 设置/获取下次打开设置窗口时默认显示的标签页索引（0=常规, 1=文件名, 2=图纸目录）。
+    /// 调用方在窗体关闭后读取 <see cref="SelectedTabIndex"/> 并传入下一次构造，实现图中交互后回到原标签页。
+    /// </summary>
+    public static int InitialTabIndex { get; set; }
+
+    /// <summary>
+    /// 窗体关闭前记录当前标签页索引，供调用方传给 <see cref="InitialTabIndex"/>。
+    /// </summary>
+    public int SelectedTabIndex { get; private set; }
+
+    private TabControl _tabs = null!;
 
     public SettingsForm(Document? document = null)
     {
@@ -72,10 +86,10 @@ public sealed class SettingsForm : Form
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(24)));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(30)));
 
-        var tabs = new TabControl { Dock = DockStyle.Fill };
-        tabs.TabPages.Add(BuildGeneralTab());
-        tabs.TabPages.Add(BuildFileNameTab());
-        tabs.TabPages.Add(BuildDirectoryTab());
+        _tabs = new TabControl { Dock = DockStyle.Fill };
+        _tabs.TabPages.Add(BuildGeneralTab());
+        _tabs.TabPages.Add(BuildFileNameTab());
+        _tabs.TabPages.Add(BuildDirectoryTab());
 
         var hint = new Label
         {
@@ -101,10 +115,16 @@ public sealed class SettingsForm : Form
         buttons.Controls.Add(cancel);
         buttons.Controls.Add(reset);
 
-        root.Controls.Add(tabs, 0, 0);
+        root.Controls.Add(_tabs, 0, 0);
         root.Controls.Add(hint, 0, 1);
         root.Controls.Add(buttons, 0, 2);
         Controls.Add(root);
+
+        // 恢复上次关闭时的标签页（如从 CAD 交互返回后回到"图纸目录"而非"常规"）
+        if (InitialTabIndex >= 0 && InitialTabIndex < _tabs.TabCount)
+        {
+            _tabs.SelectedIndex = InitialTabIndex;
+        }
     }
 
     private TabPage BuildGeneralTab()
@@ -153,6 +173,9 @@ public sealed class SettingsForm : Form
         return page;
     }
 
+    /// <summary>
+    /// 文件名可用的全部字段。与 FileNameSanitizer.GetFileNameParts 中的 key 保持一一对应。
+    /// </summary>
     private static readonly (string Key, string Display)[] AllFileNameFields =
     {
         ("DrawingNumber", "图号"),
@@ -163,6 +186,7 @@ public sealed class SettingsForm : Form
         ("Info1", "信息1"),
         ("Info2", "信息2"),
         ("PaperName", "纸张尺寸"),
+        ("Sequence", "序号"),
     };
 
     private TabPage BuildFileNameTab()
@@ -195,6 +219,27 @@ public sealed class SettingsForm : Form
         _fileNameSeparator.Width = UiLayout.Scale(160);
         _fileNameSeparator.SelectedIndexChanged += (_, _) => UpdateFileNamePreview();
         UiLayout.AddRow(table, 0, "字段连接符", _fileNameSeparator);
+
+        // 序号补零位数，默认 2 位 → 01, 02, …
+        ConfigureNumber(_fileNameSequenceDigits, 1, 10, 1, 0);
+        _fileNameSequenceDigits.Dock = DockStyle.Left;
+        _fileNameSequenceDigits.Width = UiLayout.Scale(80);
+        var seqRow = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight,
+            WrapContents = false
+        };
+        seqRow.Controls.Add(_fileNameSequenceDigits);
+        seqRow.Controls.Add(new Label
+        {
+            Text = "位（例：2→01，3→001）",
+            Dock = DockStyle.Left,
+            TextAlign = ContentAlignment.MiddleLeft,
+            ForeColor = Color.DimGray,
+            AutoSize = true
+        });
+        UiLayout.AddRow(table, 1, "序号补零位数", seqRow);
 
         // 双列表：可用字段 → 已选字段
         var fieldLabel = new Label
@@ -277,18 +322,19 @@ public sealed class SettingsForm : Form
 
         panel.Controls.Add(rightPanel, 2, 1);
 
-        table.Controls.Add(fieldLabel, 0, 1);
-        table.Controls.Add(panel, 1, 1);
+        table.Controls.Add(fieldLabel, 0, 2);
+        table.Controls.Add(panel, 1, 2);
 
         // 预览
         _fileNamePreview.Dock = DockStyle.Fill;
         _fileNamePreview.TextAlign = ContentAlignment.MiddleLeft;
         _fileNamePreview.ForeColor = Color.DimGray;
         _fileNamePreview.AutoSize = true;
-        table.Controls.Add(_fileNamePreview, 1, 2);
+        table.Controls.Add(_fileNamePreview, 1, 3);
 
-        table.RowCount = 3;
+        table.RowCount = 4;
         table.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(42)));
+        table.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(34)));
         table.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         table.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(32)));
 
@@ -299,7 +345,6 @@ public sealed class SettingsForm : Form
     private void MoveSelectedItems(ListBox from, ListBox to)
     {
         var selected = from.SelectedItems.Cast<FileNameFieldItem>().ToList();
-        // 目标列表已有的 key 不再添加，防止重复
         var existingKeys = new HashSet<string>(
             to.Items.Cast<FileNameFieldItem>().Select(x => x.Key),
             StringComparer.OrdinalIgnoreCase);
@@ -321,9 +366,18 @@ public sealed class SettingsForm : Form
         var idx = _selectedFields.SelectedIndex;
         if (idx <= 0) return;
         var item = _selectedFields.Items[idx];
-        _selectedFields.Items.RemoveAt(idx);
-        _selectedFields.Items.Insert(idx - 1, item);
-        _selectedFields.SelectedIndex = idx - 1;
+        _selectedFields.BeginUpdate();
+        try
+        {
+            _selectedFields.Items.RemoveAt(idx);
+            _selectedFields.Items.Insert(idx - 1, item);
+            _selectedFields.SelectedIndex = idx - 1;
+        }
+        finally
+        {
+            _selectedFields.EndUpdate();
+        }
+        UpdateFileNamePreview();
     }
 
     private void MoveSelectedFieldDown()
@@ -331,9 +385,18 @@ public sealed class SettingsForm : Form
         var idx = _selectedFields.SelectedIndex;
         if (idx < 0 || idx >= _selectedFields.Items.Count - 1) return;
         var item = _selectedFields.Items[idx];
-        _selectedFields.Items.RemoveAt(idx);
-        _selectedFields.Items.Insert(idx + 1, item);
-        _selectedFields.SelectedIndex = idx + 1;
+        _selectedFields.BeginUpdate();
+        try
+        {
+            _selectedFields.Items.RemoveAt(idx);
+            _selectedFields.Items.Insert(idx + 1, item);
+            _selectedFields.SelectedIndex = idx + 1;
+        }
+        finally
+        {
+            _selectedFields.EndUpdate();
+        }
+        UpdateFileNamePreview();
     }
 
     private void UpdateFileNamePreview()
@@ -361,7 +424,7 @@ public sealed class SettingsForm : Form
                 _selectedFields.Items.Add(new FileNameFieldItem(match.Key, match.Display));
             }
         }
-        // 其余加入可用列表
+        // 其余加入可用列表（图号不可移到可用列表）
         foreach (var (key, display) in AllFileNameFields)
         {
             if (!seen.Contains(key))
@@ -861,6 +924,7 @@ public sealed class SettingsForm : Form
         _addSequenceWhenPdfExists.Checked = settings.AddSequenceWhenPdfExists;
         SelectFileNameSeparator(settings.PdfFileNameSeparator);
         LoadFileNameFields(settings.PdfFileNameFields);
+        _fileNameSequenceDigits.Value = Math.Max(1, Math.Min(10, settings.FileNameSequenceDigits));
         _openExternalDwgForPlot.Checked = settings.OpenExternalDwgForPlot;
         _directoryColorIndex.SelectedIndex = Math.Max(0, Math.Min(256, settings.DirectoryColorIndex));
         _directoryTextHeight.Value = UiLayout.Clamp(_directoryTextHeight, settings.DirectoryTextHeight);
@@ -906,6 +970,12 @@ public sealed class SettingsForm : Form
             .Select(x => x.Key)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
+        if (current.PdfFileNameFields.Count == 0)
+        {
+            MessageBox.Show("文件名至少需要一个字段。", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return false;
+        }
+        current.FileNameSequenceDigits = (int)_fileNameSequenceDigits.Value;
         current.OpenExternalDwgForPlot = _openExternalDwgForPlot.Checked;
         current.DirectoryColorIndex = _directoryColorIndex.SelectedItem is DirectoryColorItem colorItem
             ? colorItem.Index
@@ -1250,6 +1320,13 @@ public sealed class SettingsForm : Form
         RequestPickDirectoryRowHeight = true;
         DialogResult = DialogResult.OK;
         Close();
+    }
+
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        SelectedTabIndex = _tabs.SelectedIndex;
+        InitialTabIndex = SelectedTabIndex;
+        base.OnFormClosing(e);
     }
 
     private void ResetDefaults()
