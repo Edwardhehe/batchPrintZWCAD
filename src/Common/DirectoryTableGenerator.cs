@@ -17,8 +17,6 @@ namespace ZwcadBatchPlot;
 
 public static class DirectoryTableGenerator
 {
-    private static readonly string[] Headers = { "序号", "图号", "图名", "图幅", "备注" };
-
     public static bool PromptAndGenerate(Document document, IReadOnlyList<PlotJob> jobs, AppSettings settings, out string message)
     {
         message = "";
@@ -26,6 +24,12 @@ public static class DirectoryTableGenerator
         if (selected.Count == 0)
         {
             message = "没有勾选任何图纸。";
+            return false;
+        }
+
+        if (GetEnabledColumns(settings).Count == 0)
+        {
+            message = "图纸目录没有启用任何字段，请先在设置中启用目录列。";
             return false;
         }
 
@@ -44,9 +48,16 @@ public static class DirectoryTableGenerator
 
     public static void Generate(Document document, IReadOnlyList<PlotJob> jobs, AppSettings settings, Point3d origin)
     {
-        var widths = GetWidths(settings);
-        var rowHeight = settings.DirectoryRowHeight;
-        var rowCount = jobs.Count + 1;
+        var columns = GetEnabledColumns(settings);
+        if (columns.Count == 0)
+        {
+            return;
+        }
+
+        var widths = columns.Select(x => Math.Max(1, x.Width)).ToArray();
+        var rowHeight = Math.Max(1, settings.DirectoryRowHeight);
+        var headerRows = settings.DirectoryDrawHeader ? 1 : 0;
+        var rowCount = jobs.Count + headerRows;
         var totalWidth = widths.Sum();
         var totalHeight = rowHeight * rowCount;
 
@@ -54,42 +65,36 @@ public static class DirectoryTableGenerator
         using (var tr = document.Database.TransactionManager.StartTransaction())
         {
             var space = (BlockTableRecord)tr.GetObject(document.Database.CurrentSpaceId, OpenMode.ForWrite);
-            var textStyleId = ResolveTextStyleId(tr, document.Database, settings.DirectoryTextStyleName);
+            var textStyleId = EnsureTextStyleId(tr, document.Database, settings.DirectoryTextStyleName);
+            var layerName = EnsureLayer(tr, document.Database, settings.DirectoryLayerName);
 
-            var x = origin.X;
-            AddVerticalLine(space, tr, x, origin.Y, totalHeight);
-            foreach (var width in widths)
+            if (settings.DirectoryDrawGridLines)
             {
-                x += width;
-                AddVerticalLine(space, tr, x, origin.Y, totalHeight);
+                DrawGrid(space, tr, origin, widths, rowHeight, rowCount, totalWidth, totalHeight, layerName, settings.DirectoryColorIndex);
             }
 
-            for (var i = 0; i <= rowCount; i++)
+            if (settings.DirectoryDrawHeader)
             {
-                var y = origin.Y - i * rowHeight;
-                AddHorizontalLine(space, tr, origin.X, y, totalWidth);
-            }
-
-            for (var col = 0; col < Headers.Length; col++)
-            {
-                AddCellText(space, tr, document.Database, textStyleId, Headers[col], origin, widths, col, 0, rowHeight, settings, bold: false);
-            }
-
-            for (var row = 0; row < jobs.Count; row++)
-            {
-                var job = jobs[row];
-                var values = new[]
+                for (var columnIndex = 0; columnIndex < columns.Count; columnIndex++)
                 {
-                    (row + 1).ToString(),
-                    job.DrawingNumber,
-                    job.Title,
-                    job.PaperName,
-                    ""
-                };
+                    AddCellText(
+                        space, tr, document.Database, textStyleId, columns[columnIndex].Header,
+                        origin, widths, columnIndex, 0, rowHeight, settings,
+                        columns[columnIndex].Centered, layerName);
+                }
+            }
 
-                for (var col = 0; col < values.Length; col++)
+            for (var rowIndex = 0; rowIndex < jobs.Count; rowIndex++)
+            {
+                var drawingRow = rowIndex + headerRows;
+                for (var columnIndex = 0; columnIndex < columns.Count; columnIndex++)
                 {
-                    AddCellText(space, tr, document.Database, textStyleId, values[col], origin, widths, col, row + 1, rowHeight, settings, bold: false);
+                    var column = columns[columnIndex];
+                    var value = GetColumnValue(column.Key, jobs[rowIndex], rowIndex);
+                    AddCellText(
+                        space, tr, document.Database, textStyleId, value,
+                        origin, widths, columnIndex, drawingRow, rowHeight, settings,
+                        column.Centered, layerName);
                 }
             }
 
@@ -97,75 +102,170 @@ public static class DirectoryTableGenerator
         }
     }
 
-    public static bool PromptCellSizes(Document document, AppSettings settings, out AppSettings updated, out string message)
+    public static bool PromptColumnSize(
+        Document document,
+        AppSettings settings,
+        string columnKey,
+        out AppSettings updated,
+        out string message)
     {
         updated = settings;
-        message = "";
-        var editor = document.Editor;
-        var labels = new[] { "序号", "图号", "图名", "图幅", "备注" };
-        var widths = new double[labels.Length];
-        double rowHeight = 0;
-
-        for (var i = 0; i < labels.Length; i++)
+        var column = settings.DirectoryColumns.FirstOrDefault(x =>
+            string.Equals(x.Key, columnKey, StringComparison.OrdinalIgnoreCase));
+        if (column == null)
         {
-            var first = editor.GetPoint(new PromptPointOptions($"\n框选目录“{labels[i]}”单元格第一个角点: "));
-            if (first.Status != PromptStatus.OK)
-            {
-                message = "已取消目录单元格设置。";
-                return false;
-            }
-
-            var second = editor.GetCorner(new PromptCornerOptions($"\n框选目录“{labels[i]}”单元格对角点: ", first.Value));
-            if (second.Status != PromptStatus.OK)
-            {
-                message = "已取消目录单元格设置。";
-                return false;
-            }
-
-            widths[i] = Math.Abs(second.Value.X - first.Value.X);
-            var height = Math.Abs(second.Value.Y - first.Value.Y);
-            if (i == 0)
-            {
-                rowHeight = height;
-            }
+            message = "没有找到要设置的目录字段。";
+            return false;
         }
 
-        updated.DirectoryIndexWidth = Math.Max(1, widths[0]);
-        updated.DirectoryNumberWidth = Math.Max(1, widths[1]);
-        updated.DirectoryTitleWidth = Math.Max(1, widths[2]);
-        updated.DirectoryPaperWidth = Math.Max(1, widths[3]);
-        updated.DirectoryRemarkWidth = Math.Max(1, widths[4]);
-        updated.DirectoryRowHeight = Math.Max(1, rowHeight);
+        var editor = document.Editor;
+        var first = editor.GetPoint(new PromptPointOptions($"\n框选目录“{column.Header}”单元格第一个角点: "));
+        if (first.Status != PromptStatus.OK)
+        {
+            message = "已取消目录列宽设置。";
+            return false;
+        }
+
+        var second = editor.GetCorner(new PromptCornerOptions($"\n框选目录“{column.Header}”单元格对角点: ", first.Value));
+        if (second.Status != PromptStatus.OK)
+        {
+            message = "已取消目录列宽设置。";
+            return false;
+        }
+
+        var width = Math.Abs(second.Value.X - first.Value.X);
+        if (width <= 1e-6)
+        {
+            message = "框选区域的宽度为 0，目录列宽未修改。";
+            return false;
+        }
+
+        // 每行“图中交互”只负责当前列宽；目录行高由顶部独立按钮量取，避免两种参数互相覆盖。
+        column.Width = width;
         AppSettingsStore.Save(updated);
-        message = "目录单元格尺寸已保存。";
+        message = $"“{column.Header}”列宽已设置为 {width:0.##}。";
         return true;
     }
 
-    private static double[] GetWidths(AppSettings settings)
+    public static bool PromptRowHeight(Document document, AppSettings settings, out AppSettings updated, out string message)
     {
-        return new[]
+        updated = settings;
+        var options = new PromptDistanceOptions("\n在图中点取目录行高的两个端点: ")
         {
-            settings.DirectoryIndexWidth,
-            settings.DirectoryNumberWidth,
-            settings.DirectoryTitleWidth,
-            settings.DirectoryPaperWidth,
-            settings.DirectoryRemarkWidth
+            UseDefaultValue = false,
+            Only2d = true
         };
+        var result = document.Editor.GetDistance(options);
+        if (result.Status != PromptStatus.OK)
+        {
+            message = "已取消目录行高设置。";
+            return false;
+        }
+
+        var height = Math.Abs(result.Value);
+        if (height <= 1e-6)
+        {
+            message = "量取的目录行高为 0，设置未修改。";
+            return false;
+        }
+
+        // 高度使用 CAD 两点量距结果，不依赖当前视图方向，适合水平或旋转后的目录模板。
+        updated.DirectoryRowHeight = height;
+        AppSettingsStore.Save(updated);
+        message = $"目录行高已设置为 {height:0.##}。";
+        return true;
     }
 
-    private static void AddVerticalLine(BlockTableRecord space, Transaction tr, double x, double topY, double height)
+    private static List<DirectoryColumnSetting> GetEnabledColumns(AppSettings settings)
     {
-        AddLine(space, tr, new Point3d(x, topY, 0), new Point3d(x, topY - height, 0));
+        return (settings.DirectoryColumns ?? new List<DirectoryColumnSetting>())
+            .Where(x => x.Enabled && x.Width > 0)
+            .Select(x => x.Clone())
+            .ToList();
     }
 
-    private static void AddHorizontalLine(BlockTableRecord space, Transaction tr, double leftX, double y, double width)
+    private static string GetColumnValue(string key, PlotJob job, int rowIndex)
     {
-        AddLine(space, tr, new Point3d(leftX, y, 0), new Point3d(leftX + width, y, 0));
+        // 这里的字段键与 TitleBlockScanner 写入 PlotJob 的识别结果保持一一对应。
+        return key switch
+        {
+            "Sequence" => (rowIndex + 1).ToString(),
+            "DrawingNumber" => job.DrawingNumber,
+            "Title" => job.Title,
+            "PaperName" => job.PaperName,
+            "Date" => job.Date,
+            "Revision" => job.Revision,
+            "Phase" => job.Phase,
+            "Info1" => job.Info1,
+            "Info2" => job.Info2,
+            _ => ""
+        } ?? "";
     }
 
-    private static void AddLine(BlockTableRecord space, Transaction tr, Point3d start, Point3d end)
+    private static void DrawGrid(
+        BlockTableRecord space,
+        Transaction tr,
+        Point3d origin,
+        IReadOnlyList<double> widths,
+        double rowHeight,
+        int rowCount,
+        double totalWidth,
+        double totalHeight,
+        string layerName,
+        int colorIndex)
     {
-        var line = new Line(start, end);
+        var x = origin.X;
+        AddVerticalLine(space, tr, x, origin.Y, totalHeight, layerName, colorIndex);
+        foreach (var width in widths)
+        {
+            x += width;
+            AddVerticalLine(space, tr, x, origin.Y, totalHeight, layerName, colorIndex);
+        }
+
+        for (var rowIndex = 0; rowIndex <= rowCount; rowIndex++)
+        {
+            var y = origin.Y - rowIndex * rowHeight;
+            AddHorizontalLine(space, tr, origin.X, y, totalWidth, layerName, colorIndex);
+        }
+    }
+
+    private static void AddVerticalLine(
+        BlockTableRecord space,
+        Transaction tr,
+        double x,
+        double topY,
+        double height,
+        string layerName,
+        int colorIndex)
+    {
+        AddLine(space, tr, new Point3d(x, topY, 0), new Point3d(x, topY - height, 0), layerName, colorIndex);
+    }
+
+    private static void AddHorizontalLine(
+        BlockTableRecord space,
+        Transaction tr,
+        double leftX,
+        double y,
+        double width,
+        string layerName,
+        int colorIndex)
+    {
+        AddLine(space, tr, new Point3d(leftX, y, 0), new Point3d(leftX + width, y, 0), layerName, colorIndex);
+    }
+
+    private static void AddLine(
+        BlockTableRecord space,
+        Transaction tr,
+        Point3d start,
+        Point3d end,
+        string layerName,
+        int colorIndex)
+    {
+        var line = new Line(start, end)
+        {
+            Layer = layerName,
+            ColorIndex = colorIndex
+        };
         space.AppendEntity(line);
         tr.AddNewlyCreatedDBObject(line, true);
     }
@@ -182,22 +282,29 @@ public static class DirectoryTableGenerator
         int row,
         double rowHeight,
         AppSettings settings,
-        bool bold)
+        bool centered,
+        string layerName)
     {
         var left = origin.X + widths.Take(column).Sum();
         var top = origin.Y - row * rowHeight;
         var width = widths[column];
-        var center = new Point3d(left + width / 2.0, top - rowHeight / 2.0, 0);
-        var height = GetTextHeight(text, width, rowHeight, settings);
+        var centerY = top - rowHeight / 2.0;
+        var horizontalPadding = Math.Min(width * 0.05, rowHeight * 0.25);
+        var insertion = centered
+            ? new Point3d(left + width / 2.0, centerY, 0)
+            : new Point3d(left + horizontalPadding, centerY, 0);
 
         var dbText = new DBText
         {
             TextString = text ?? "",
-            Height = height,
-            Position = center,
-            HorizontalMode = TextHorizontalMode.TextCenter,
+            Height = GetTextHeight(text ?? "", width, rowHeight, settings),
+            WidthFactor = settings.DirectoryTextWidthFactor,
+            Position = insertion,
+            HorizontalMode = centered ? TextHorizontalMode.TextCenter : TextHorizontalMode.TextLeft,
             VerticalMode = TextVerticalMode.TextVerticalMid,
-            AlignmentPoint = center
+            AlignmentPoint = insertion,
+            Layer = layerName,
+            ColorIndex = settings.DirectoryColorIndex
         };
         if (!textStyleId.IsNull)
         {
@@ -217,13 +324,38 @@ public static class DirectoryTableGenerator
 
     private static double GetTextHeight(string text, double width, double rowHeight, AppSettings settings)
     {
-        var byRow = rowHeight * settings.DirectoryTextHeightRatio;
+        var configured = Math.Max(1, settings.DirectoryTextHeight);
+        var byRow = rowHeight * 0.8;
         var charCount = Math.Max(1, (text ?? "").Length);
-        var byWidth = width / Math.Max(3.0, charCount * 0.9);
-        return Math.Max(1, Math.Min(byRow, byWidth));
+        var byWidth = width * 0.9 / Math.Max(1, charCount * settings.DirectoryTextWidthFactor);
+        return Math.Max(1, Math.Min(configured, Math.Min(byRow, byWidth)));
     }
 
-    private static ObjectId ResolveTextStyleId(Transaction tr, Database db, string? textStyleName)
+    private static string EnsureLayer(Transaction tr, Database db, string? configuredName)
+    {
+        var layerName = string.IsNullOrWhiteSpace(configuredName) ? "0" : configuredName!.Trim();
+        try
+        {
+            var table = (LayerTable)tr.GetObject(db.LayerTableId, OpenMode.ForRead);
+            if (table.Has(layerName))
+            {
+                return layerName;
+            }
+
+            // 用户输入的新图层在生成目录时自动创建，只影响当前图纸，不修改 CAD 全局设置。
+            table.UpgradeOpen();
+            var record = new LayerTableRecord { Name = layerName };
+            table.Add(record);
+            tr.AddNewlyCreatedDBObject(record, true);
+            return layerName;
+        }
+        catch
+        {
+            return "0";
+        }
+    }
+
+    private static ObjectId EnsureTextStyleId(Transaction tr, Database db, string? textStyleName)
     {
         if (string.IsNullOrWhiteSpace(textStyleName))
         {
@@ -233,7 +365,27 @@ public static class DirectoryTableGenerator
         try
         {
             var table = (TextStyleTable)tr.GetObject(db.TextStyleTableId, OpenMode.ForRead);
-            return table.Has(textStyleName) ? table[textStyleName] : ObjectId.Null;
+            var styleName = textStyleName!.Trim();
+            if (table.Has(styleName))
+            {
+                return table[styleName];
+            }
+
+            if (!string.Equals(styleName, "宋体", StringComparison.OrdinalIgnoreCase))
+            {
+                return ObjectId.Null;
+            }
+
+            // 默认“宋体”样式缺失时仅在当前图纸中创建，不修改 CAD 全局模板或用户配置。
+            table.UpgradeOpen();
+            var record = new TextStyleTableRecord
+            {
+                Name = styleName,
+                FileName = "simsun.ttc"
+            };
+            var id = table.Add(record);
+            tr.AddNewlyCreatedDBObject(record, true);
+            return id;
         }
         catch
         {

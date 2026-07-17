@@ -110,12 +110,26 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
     public void ShowSettings()
     {
         var doc = CadApp.DocumentManager.MdiActiveDocument;
-        using var form = new SettingsForm(doc);
-        if (ShowModalDialog(form) == DialogResult.OK && form.RequestPickDirectoryCellSizes && doc != null)
+        while (true)
         {
+            using var form = new SettingsForm(doc);
+            if (ShowModalDialog(form) != DialogResult.OK || doc == null)
+            {
+                return;
+            }
+
+            if (!form.RequestPickDirectoryRowHeight && string.IsNullOrWhiteSpace(form.RequestedDirectoryColumnKey))
+            {
+                return;
+            }
+
             var settings = AppSettingsStore.Load();
-            var ok = DirectoryTableGenerator.PromptCellSizes(doc, settings, out _, out var message);
+            var ok = form.RequestPickDirectoryRowHeight
+                ? DirectoryTableGenerator.PromptRowHeight(doc, settings, out _, out var message)
+                : DirectoryTableGenerator.PromptColumnSize(
+                    doc, settings, form.RequestedDirectoryColumnKey ?? "", out _, out message);
             MessageBox.Show(message, "批量打印设置", MessageBoxButtons.OK, ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+            // 每次 CAD 取样后重新打开设置页，支持连续调整目录行高和多个列宽。
         }
     }
 
