@@ -69,6 +69,8 @@ public sealed class RectangleBatchPlotForm : Form
         _document = document;
         _settings = AppSettingsStore.Load();
         _overlay = new TemporarySequenceOverlay(document);
+        // 订阅红框删除事件：在 CAD 中 ERASE 红框即可同步删除列表中对应的矩形框行
+        _overlay.FrameErased += OverlayFrameErased;
         InitializeComponents();
         LoadPlotOptions();
         FormClosed += (_, _) => _overlay.Clear();
@@ -1035,6 +1037,41 @@ public sealed class RectangleBatchPlotForm : Form
         UpdateVisuals();
     }
 
+    // CAD 中红框被 ERASE 删除后的回调：同步从矩形框清单中移除对应行
+    private void OverlayFrameErased(PlotJob job)
+    {
+        if (IsDisposed || !IsHandleCreated)
+        {
+            return;
+        }
+
+        void RemoveRow()
+        {
+            var row = _rows.FirstOrDefault(candidate => ReferenceEquals(candidate.Job, job));
+            if (row == null)
+            {
+                return;
+            }
+
+            _rows.Remove(row);
+            _highlightedJobIndex = -1;
+            // 移除后重新编号、刷新文件名并重绘覆盖层，保持列表与 CAD 红框一致
+            RefreshDisplayRows();
+            RefreshFileNames();
+            UpdateVisuals();
+        }
+
+        // CAD 事件可能来自非 UI 线程，需切回窗体线程再操作绑定列表
+        if (InvokeRequired)
+        {
+            BeginInvoke((Action)RemoveRow);
+        }
+        else
+        {
+            RemoveRow();
+        }
+    }
+
     private void RemoveUnselectedRows()
     {
         var removed = false;
@@ -1657,5 +1694,17 @@ public sealed class RectangleBatchPlotForm : Form
         catch
         {
         }
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            // 窗体销毁时退订事件并释放覆盖层（内部会退订 CAD 文档事件），防止关窗后仍拦截 ERASE 命令
+            _overlay.FrameErased -= OverlayFrameErased;
+            _overlay.Dispose();
+        }
+
+        base.Dispose(disposing);
     }
 }

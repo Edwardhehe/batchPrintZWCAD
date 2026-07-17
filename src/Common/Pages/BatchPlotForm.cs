@@ -68,6 +68,8 @@ public sealed class BatchPlotForm : Form
     {
         _currentDocument = currentDocument;
         _sequenceOverlay = new TemporarySequenceOverlay(currentDocument);
+        // 订阅红框删除事件：在 CAD 中 ERASE 红框即可同步删除表格中对应的打印任务
+        _sequenceOverlay.FrameErased += SequenceOverlayFrameErased;
         _settings = AppSettingsStore.Load();
         _settings.AutoScanCurrentDrawing = false;
         InitializeComponents();
@@ -1052,6 +1054,42 @@ public sealed class BatchPlotForm : Form
         RefreshSelectedOverlay();
     }
 
+    // CAD 中红框被 ERASE 删除后的回调：同步从任务列表中移除对应打印任务
+    private void SequenceOverlayFrameErased(PlotJob job)
+    {
+        if (IsDisposed || !IsHandleCreated)
+        {
+            return;
+        }
+
+        void RemoveJob()
+        {
+            if (!_jobs.Contains(job))
+            {
+                return;
+            }
+
+            if (ReferenceEquals(_highlightedJob, job))
+            {
+                _highlightedJob = null;
+            }
+
+            _jobs.Remove(job);
+            // 移除后重新排序、编号并刷新覆盖层，保持表格与 CAD 红框一致
+            SortAndRefreshOutputPaths();
+        }
+
+        // CAD 事件可能来自非 UI 线程，需切回窗体线程再操作绑定列表
+        if (InvokeRequired)
+        {
+            BeginInvoke((Action)RemoveJob);
+        }
+        else
+        {
+            RemoveJob();
+        }
+    }
+
     private void GridCellValueChanged(object? sender, DataGridViewCellEventArgs e)
     {
         if (_updatingPrintSelection
@@ -1458,27 +1496,38 @@ public sealed class BatchPlotForm : Form
 
     private void ShowSettings()
     {
-        using var form = new SettingsForm(_currentDocument);
-        if (form.ShowDialog(this) == DialogResult.OK)
+        while (true)
         {
+            using var form = new SettingsForm(_currentDocument);
+            if (form.ShowDialog(this) != DialogResult.OK)
+            {
+                return;
+            }
+
             ReloadSettings();
             SortAndRefreshOutputPaths();
             AppendLog("INFO", "设置已更新。");
 
-            if (form.RequestPickDirectoryCellSizes)
+            if (!form.RequestPickDirectoryRowHeight && string.IsNullOrWhiteSpace(form.RequestedDirectoryColumnKey))
             {
-                PickDirectoryCellSizesFromCad();
+                return;
             }
+
+            PickDirectorySizeFromCad(form.RequestPickDirectoryRowHeight, form.RequestedDirectoryColumnKey);
+            // 图中交互完成后重新打开设置页，让用户可以连续调整行高和多个列宽。
         }
     }
 
-    private void PickDirectoryCellSizesFromCad()
+    private void PickDirectorySizeFromCad(bool pickRowHeight, string? columnKey)
     {
         Hide();
         System.Windows.Forms.Application.DoEvents();
         try
         {
-            var ok = DirectoryTableGenerator.PromptCellSizes(_currentDocument, _settings, out _, out var message);
+            var settings = AppSettingsStore.Load();
+            var ok = pickRowHeight
+                ? DirectoryTableGenerator.PromptRowHeight(_currentDocument, settings, out _, out var message)
+                : DirectoryTableGenerator.PromptColumnSize(_currentDocument, settings, columnKey ?? "", out _, out message);
             ReloadSettings();
             AppendLog(ok ? "INFO" : "WARN", message);
             MessageBox.Show(message, "批量打印设置", MessageBoxButtons.OK, ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
@@ -1501,6 +1550,7 @@ public sealed class BatchPlotForm : Form
         _settings.ShowPlotProgress = updated.ShowPlotProgress;
         _settings.AddSequenceWhenPdfExists = updated.AddSequenceWhenPdfExists;
         _settings.PdfFileNameSeparator = updated.PdfFileNameSeparator;
+        _settings.PdfFileNameFields = updated.PdfFileNameFields.ToList();
         _settings.OpenExternalDwgForPlot = updated.OpenExternalDwgForPlot;
         _settings.DirectoryIndexWidth = updated.DirectoryIndexWidth;
         _settings.DirectoryNumberWidth = updated.DirectoryNumberWidth;
@@ -1510,6 +1560,13 @@ public sealed class BatchPlotForm : Form
         _settings.DirectoryRowHeight = updated.DirectoryRowHeight;
         _settings.DirectoryTextHeightRatio = updated.DirectoryTextHeightRatio;
         _settings.DirectoryTextStyleName = updated.DirectoryTextStyleName;
+        _settings.DirectoryColorIndex = updated.DirectoryColorIndex;
+        _settings.DirectoryTextHeight = updated.DirectoryTextHeight;
+        _settings.DirectoryTextWidthFactor = updated.DirectoryTextWidthFactor;
+        _settings.DirectoryLayerName = updated.DirectoryLayerName;
+        _settings.DirectoryDrawHeader = updated.DirectoryDrawHeader;
+        _settings.DirectoryDrawGridLines = updated.DirectoryDrawGridLines;
+        _settings.DirectoryColumns = updated.DirectoryColumns.Select(x => x.Clone()).ToList();
     }
 
     private void ImportLibrary()
@@ -2173,6 +2230,18 @@ public sealed class BatchPlotForm : Form
 
         SaveCurrentSettings();
         base.OnFormClosing(e);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            // 窗体销毁时退订事件并释放覆盖层（内部会退订 CAD 文档事件），防止关窗后仍拦截 ERASE 命令
+            _sequenceOverlay.FrameErased -= SequenceOverlayFrameErased;
+            _sequenceOverlay.Dispose();
+        }
+
+        base.Dispose(disposing);
     }
 
     private void SaveCurrentSettings()
