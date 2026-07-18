@@ -20,8 +20,6 @@ public sealed class SettingsForm : Form
     private const string DefaultTextStyleDisplay = "(默认)";
 
     private readonly Document? _document;
-    private readonly CheckBox _rememberOutput = new();
-    private readonly TextBox _outputSubfolder = new();
     private readonly CheckBox _autoScan = new();
     private readonly NumericUpDown _paperTolerance = new();
     private readonly CheckBox _allowPaperNameFallback = new();
@@ -40,11 +38,11 @@ public sealed class SettingsForm : Form
     private readonly DirectoryPreviewControl _directoryOrderPreview = new();
 
     // 文件名设置
-    private readonly ComboBox _fileNameSeparator = new();
+    private readonly TextBox _fileNamePattern = new();
     private readonly Label _fileNamePreview = new();
-    private readonly ListBox _availableFields = new();
-    private readonly ListBox _selectedFields = new();
+    private readonly NumericUpDown _fileNameSequenceStart = new();
     private readonly NumericUpDown _fileNameSequenceDigits = new();
+    private readonly CheckBox _autoFileNameSequenceDigits = new();
 
     public string? RequestedDirectoryColumnKey { get; private set; }
     public bool RequestPickDirectoryRowHeight { get; private set; }
@@ -130,13 +128,7 @@ public sealed class SettingsForm : Form
     private TabPage BuildGeneralTab()
     {
         var page = new TabPage("常规");
-        var table = CreateSettingsTable(8);
-
-        _rememberOutput.Text = "记住上次输出目录";
-        _rememberOutput.AutoSize = true;
-        _rememberOutput.Dock = DockStyle.Fill;
-
-        _outputSubfolder.Dock = DockStyle.Fill;
+        var table = CreateSettingsTable(6);
 
         _autoScan.Text = "打开窗口不自动扫描，点击扫描才扫描";
         _autoScan.AutoSize = true;
@@ -161,328 +153,253 @@ public sealed class SettingsForm : Form
         _openExternalDwgForPlot.AutoSize = true;
         _openExternalDwgForPlot.Dock = DockStyle.Fill;
 
-        UiLayout.AddRow(table, 0, "", _rememberOutput);
-        UiLayout.AddRow(table, 1, "默认输出子文件夹", _outputSubfolder);
-        UiLayout.AddRow(table, 2, "", _autoScan);
-        UiLayout.AddRow(table, 3, "纸张匹配容差(mm)", _paperTolerance);
-        UiLayout.AddRow(table, 4, "", _allowPaperNameFallback);
-        UiLayout.AddRow(table, 5, "", _showProgress);
-        UiLayout.AddRow(table, 6, "", _addSequenceWhenPdfExists);
-        UiLayout.AddRow(table, 7, "", _openExternalDwgForPlot);
+        UiLayout.AddRow(table, 0, "", _autoScan);
+        UiLayout.AddRow(table, 1, "纸张匹配容差(mm)", _paperTolerance);
+        UiLayout.AddRow(table, 2, "", _allowPaperNameFallback);
+        UiLayout.AddRow(table, 3, "", _showProgress);
+        UiLayout.AddRow(table, 4, "", _addSequenceWhenPdfExists);
+        UiLayout.AddRow(table, 5, "", _openExternalDwgForPlot);
         page.Controls.Add(table);
         return page;
     }
-
-    /// <summary>
-    /// 文件名可用的全部字段。与 FileNameSanitizer.GetFileNameParts 中的 key 保持一一对应。
-    /// </summary>
-    private static readonly (string Key, string Display)[] AllFileNameFields =
-    {
-        ("DrawingNumber", "图号"),
-        ("Title", "图名"),
-        ("Date", "日期"),
-        ("Revision", "版次"),
-        ("Phase", "设计阶段"),
-        ("Info1", "信息1"),
-        ("Info2", "信息2"),
-        ("PaperName", "纸张尺寸"),
-        ("Sequence", "序号"),
-    };
 
     private TabPage BuildFileNameTab()
     {
-        var page = new TabPage("文件名");
-        var table = new TableLayoutPanel
+        var page = new TabPage("文件名")
+        {
+            Padding = new Padding(UiLayout.Scale(12))
+        };
+        var root = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 2,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty
+        };
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(178)));
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+
+        var instructionPanel = new Panel
+        {
+            Dock = DockStyle.Fill,
+            Margin = Padding.Empty,
+            Padding = new Padding(UiLayout.Scale(12), UiLayout.Scale(8), UiLayout.Scale(12), UiLayout.Scale(8)),
+            BackColor = Color.FromArgb(247, 252, 247),
+            BorderStyle = BorderStyle.FixedSingle
+        };
+        var instructionLayout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 4,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty
+        };
+        instructionLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(30)));
+        instructionLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(54)));
+        instructionLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(28)));
+        instructionLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        instructionLayout.Controls.Add(new Label
+        {
+            Dock = DockStyle.Fill,
+            Margin = Padding.Empty,
+            ForeColor = Color.FromArgb(35, 145, 55),
+            TextAlign = ContentAlignment.MiddleLeft,
+            Text = "文件命名用以下字母表示各类信息："
+        }, 0, 0);
+        var tokenGrid = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 4,
+            RowCount = 2,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty
+        };
+        for (var column = 0; column < 4; column++)
+        {
+            tokenGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25));
+        }
+        tokenGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+        tokenGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+        var tokens = new[]
+        {
+            "A：图号", "B：版次", "C：图名", "D：日期",
+            "E：信息1", "F：信息2", "G：设计阶段", "T：图幅"
+        };
+        for (var index = 0; index < tokens.Length; index++)
+        {
+            tokenGrid.Controls.Add(new Label
+            {
+                Dock = DockStyle.Fill,
+                Margin = Padding.Empty,
+                ForeColor = Color.FromArgb(35, 145, 55),
+                TextAlign = ContentAlignment.MiddleLeft,
+                Text = tokens[index]
+            }, index % 4, index / 4);
+        }
+        instructionLayout.Controls.Add(tokenGrid, 0, 1);
+        instructionLayout.Controls.Add(new Label
+        {
+            Dock = DockStyle.Fill,
+            Margin = Padding.Empty,
+            ForeColor = Color.FromArgb(35, 145, 55),
+            TextAlign = ContentAlignment.MiddleLeft,
+            Text = "N：序号（顺序与打印顺序一致）"
+        }, 0, 2);
+        instructionLayout.Controls.Add(new Label
+        {
+            Dock = DockStyle.Fill,
+            Margin = Padding.Empty,
+            TextAlign = ContentAlignment.MiddleLeft,
+            ForeColor = Color.FromArgb(35, 145, 55),
+            Text = "输入这些字母本身时请用 \\ 转义，例如 \\A 输出 A。"
+        }, 0, 3);
+        instructionPanel.Controls.Add(instructionLayout);
+        root.Controls.Add(instructionPanel, 0, 0);
+
+        var editor = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
-            Padding = new Padding(UiLayout.Scale(8))
+            RowCount = 5,
+            Margin = Padding.Empty,
+            Padding = new Padding(0, UiLayout.Scale(10), 0, 0)
         };
-        table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(145)));
-        table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-
-        // 连接符使用固定下拉选项，空格单独显示说明，避免用户误以为没有选中。
-        _fileNameSeparator.DropDownStyle = ComboBoxStyle.DropDownList;
-        _fileNameSeparator.Items.AddRange(new object[]
+        editor.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(125)));
+        editor.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        for (var row = 0; row < 4; row++)
         {
-            new FileNameSeparatorItem("_", "_（下划线）"),
-            new FileNameSeparatorItem(" ", "空格"),
-            new FileNameSeparatorItem("+", "+（加号）"),
-            new FileNameSeparatorItem("-", "-（短横线）"),
-            new FileNameSeparatorItem(".", ".（点号）"),
-            new FileNameSeparatorItem("~", "~（波浪线）"),
-            new FileNameSeparatorItem("=", "=（等号）"),
-            new FileNameSeparatorItem("", "无连接符")
-        });
-        _fileNameSeparator.SelectedIndex = 0;
-        _fileNameSeparator.Dock = DockStyle.Left;
-        _fileNameSeparator.Width = UiLayout.Scale(160);
-        _fileNameSeparator.SelectedIndexChanged += (_, _) => UpdateFileNamePreview();
-        UiLayout.AddRow(table, 0, "字段连接符", _fileNameSeparator);
+            editor.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(42)));
+        }
+        editor.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
-        // 序号补零位数，默认 2 位 → 01, 02, …
-        ConfigureNumber(_fileNameSequenceDigits, 1, 10, 1, 0);
-        _fileNameSequenceDigits.Dock = DockStyle.Left;
-        _fileNameSequenceDigits.Width = UiLayout.Scale(80);
-        var seqRow = new FlowLayoutPanel
+        Label CreateRowLabel(string text, Color? color = null)
+        {
+            return new Label
+            {
+                Dock = DockStyle.Fill,
+                Margin = Padding.Empty,
+                Text = text,
+                TextAlign = ContentAlignment.MiddleLeft,
+                ForeColor = color ?? SystemColors.ControlText
+            };
+        }
+
+        editor.Controls.Add(CreateRowLabel("文件命名："), 0, 0);
+        _fileNamePattern.Dock = DockStyle.None;
+        _fileNamePattern.Anchor = AnchorStyles.Left | AnchorStyles.Right;
+        _fileNamePattern.Margin = Padding.Empty;
+        _fileNamePattern.MaxLength = 240;
+        _fileNamePattern.TextChanged += (_, _) => UpdateFileNamePreview();
+        editor.Controls.Add(_fileNamePattern, 1, 0);
+
+        editor.Controls.Add(CreateRowLabel("开始序号："), 0, 1);
+        var startEditor = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight,
-            WrapContents = false
+            ColumnCount = 2,
+            RowCount = 1,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty
         };
-        seqRow.Controls.Add(_fileNameSequenceDigits);
-        seqRow.Controls.Add(new Label
-        {
-            Text = "位（例：2→01，3→001）",
-            Dock = DockStyle.Left,
-            TextAlign = ContentAlignment.MiddleLeft,
-            ForeColor = Color.DimGray,
-            AutoSize = true
-        });
-        UiLayout.AddRow(table, 1, "序号补零位数", seqRow);
+        startEditor.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(115)));
+        startEditor.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        ConfigureNumber(_fileNameSequenceStart, 0, 999999999, 1, 0);
+        _fileNameSequenceStart.Dock = DockStyle.None;
+        _fileNameSequenceStart.Anchor = AnchorStyles.Left;
+        _fileNameSequenceStart.Margin = Padding.Empty;
+        _fileNameSequenceStart.Width = UiLayout.Scale(105);
+        _fileNameSequenceStart.ValueChanged += (_, _) => UpdateFileNamePreview();
+        startEditor.Controls.Add(_fileNameSequenceStart, 0, 0);
+        startEditor.Controls.Add(CreateRowLabel("例如从 100 开始"), 1, 0);
+        editor.Controls.Add(startEditor, 1, 1);
 
-        // 双列表：可用字段 → 已选字段
-        var fieldLabel = new Label
-        {
-            Text = "已选字段（按顺序输出）:",
-            Dock = DockStyle.Fill,
-            TextAlign = ContentAlignment.MiddleLeft
-        };
-
-        var panel = new TableLayoutPanel
+        editor.Controls.Add(CreateRowLabel("序号位数："), 0, 2);
+        var digitsEditor = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             ColumnCount = 3,
-            RowCount = 2,
-            MinimumSize = new Size(0, UiLayout.Scale(200))
+            RowCount = 1,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty
         };
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45));
-        // 中间操作按钮实际宽度大于原列宽，预留足够空间避免按钮压到右侧“已选字段”列表。
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(92)));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55));
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(22)));
-        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-
-        // 列标题
-        panel.Controls.Add(new Label { Text = "可用字段", Dock = DockStyle.Fill, TextAlign = ContentAlignment.BottomLeft, ForeColor = Color.DimGray }, 0, 0);
-        panel.Controls.Add(new Label(), 1, 0);
-        panel.Controls.Add(new Label { Text = "已选字段", Dock = DockStyle.Fill, TextAlign = ContentAlignment.BottomLeft, ForeColor = Color.DimGray }, 2, 0);
-
-        // 左：可用字段
-        _availableFields.Dock = DockStyle.Fill;
-        _availableFields.IntegralHeight = false;
-        panel.Controls.Add(_availableFields, 0, 1);
-
-        // 中：添加/移除按钮
-        var midButtons = new FlowLayoutPanel
+        digitsEditor.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(80)));
+        digitsEditor.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(120)));
+        digitsEditor.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        ConfigureNumber(_fileNameSequenceDigits, 0, 10, 1, 0);
+        _fileNameSequenceDigits.Dock = DockStyle.None;
+        _fileNameSequenceDigits.Anchor = AnchorStyles.Left;
+        _fileNameSequenceDigits.Margin = Padding.Empty;
+        _fileNameSequenceDigits.Width = UiLayout.Scale(70);
+        _fileNameSequenceDigits.ValueChanged += (_, _) => UpdateFileNamePreview();
+        digitsEditor.Controls.Add(_fileNameSequenceDigits, 0, 0);
+        digitsEditor.Controls.Add(CreateRowLabel("0 表示不补零"), 1, 0);
+        _autoFileNameSequenceDigits.Text = "按清单总张数自动推断";
+        _autoFileNameSequenceDigits.AutoSize = true;
+        _autoFileNameSequenceDigits.Dock = DockStyle.None;
+        _autoFileNameSequenceDigits.Anchor = AnchorStyles.Left;
+        _autoFileNameSequenceDigits.Margin = Padding.Empty;
+        _autoFileNameSequenceDigits.CheckedChanged += (_, _) =>
         {
-            Dock = DockStyle.Fill,
-            FlowDirection = System.Windows.Forms.FlowDirection.TopDown,
-            WrapContents = false,
-            AutoScroll = false,
-            Padding = new Padding(UiLayout.Scale(6), UiLayout.Scale(10), UiLayout.Scale(6), 0)
+            UpdateSequenceDigitsState();
+            UpdateFileNamePreview();
         };
-        var addBtn = UiLayout.CreateButton("添加 →", 76);
-        addBtn.Margin = new Padding(0, 0, 0, UiLayout.Scale(6));
-        addBtn.Click += (_, _) => MoveSelectedItems(_availableFields, _selectedFields);
-        var removeBtn = UiLayout.CreateButton("← 移除", 76);
-        removeBtn.Margin = Padding.Empty;
-        removeBtn.Click += (_, _) => MoveSelectedItems(_selectedFields, _availableFields);
-        midButtons.Controls.Add(addBtn);
-        midButtons.Controls.Add(removeBtn);
-        panel.Controls.Add(midButtons, 1, 1);
+        digitsEditor.Controls.Add(_autoFileNameSequenceDigits, 2, 0);
+        editor.Controls.Add(digitsEditor, 1, 2);
 
-        // 右：已选字段 + 上移/下移
-        var rightPanel = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            ColumnCount = 2,
-            RowCount = 1
-        };
-        rightPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        rightPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(40)));
-
-        _selectedFields.Dock = DockStyle.Fill;
-        _selectedFields.IntegralHeight = false;
-        rightPanel.Controls.Add(_selectedFields, 0, 0);
-
-        var sortButtons = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            FlowDirection = System.Windows.Forms.FlowDirection.TopDown,
-            Padding = new Padding(UiLayout.Scale(2), UiLayout.Scale(10), 0, 0)
-        };
-        var upBtn = UiLayout.CreateButton("▲", 36);
-        upBtn.Click += (_, _) => { MoveSelectedFieldUp(); UpdateFileNamePreview(); };
-        var downBtn = UiLayout.CreateButton("▼", 36);
-        downBtn.Click += (_, _) => { MoveSelectedFieldDown(); UpdateFileNamePreview(); };
-        sortButtons.Controls.Add(upBtn);
-        sortButtons.Controls.Add(downBtn);
-        rightPanel.Controls.Add(sortButtons, 1, 0);
-
-        panel.Controls.Add(rightPanel, 2, 1);
-
-        table.Controls.Add(fieldLabel, 0, 2);
-        table.Controls.Add(panel, 1, 2);
-
-        // 预览
+        editor.Controls.Add(CreateRowLabel("输出示例：", Color.Navy), 0, 3);
         _fileNamePreview.Dock = DockStyle.Fill;
+        _fileNamePreview.Margin = Padding.Empty;
         _fileNamePreview.TextAlign = ContentAlignment.MiddleLeft;
-        _fileNamePreview.ForeColor = Color.DimGray;
-        _fileNamePreview.AutoSize = true;
-        table.Controls.Add(_fileNamePreview, 1, 3);
+        _fileNamePreview.ForeColor = Color.Navy;
+        _fileNamePreview.AutoSize = false;
+        editor.Controls.Add(_fileNamePreview, 1, 3);
+        root.Controls.Add(editor, 0, 1);
 
-        table.RowCount = 4;
-        table.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(42)));
-        table.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(34)));
-        table.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        table.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(32)));
-
-        page.Controls.Add(table);
+        page.Controls.Add(root);
         return page;
-    }
-
-    private void MoveSelectedItems(ListBox from, ListBox to)
-    {
-        var selected = from.SelectedItems.Cast<FileNameFieldItem>().ToList();
-        var existingKeys = new HashSet<string>(
-            to.Items.Cast<FileNameFieldItem>().Select(x => x.Key),
-            StringComparer.OrdinalIgnoreCase);
-        foreach (var item in selected)
-        {
-            if (existingKeys.Add(item.Key))
-            {
-                from.Items.Remove(item);
-                to.Items.Add(item);
-            }
-        }
-        if (from.Items.Count > 0) from.SelectedIndex = 0;
-        if (to.Items.Count > 0) to.SelectedIndex = to.Items.Count - 1;
-        UpdateFileNamePreview();
-    }
-
-    private void MoveSelectedFieldUp()
-    {
-        var idx = _selectedFields.SelectedIndex;
-        if (idx <= 0) return;
-        var item = _selectedFields.Items[idx];
-        _selectedFields.BeginUpdate();
-        try
-        {
-            _selectedFields.Items.RemoveAt(idx);
-            _selectedFields.Items.Insert(idx - 1, item);
-            _selectedFields.SelectedIndex = idx - 1;
-        }
-        finally
-        {
-            _selectedFields.EndUpdate();
-        }
-        UpdateFileNamePreview();
-    }
-
-    private void MoveSelectedFieldDown()
-    {
-        var idx = _selectedFields.SelectedIndex;
-        if (idx < 0 || idx >= _selectedFields.Items.Count - 1) return;
-        var item = _selectedFields.Items[idx];
-        _selectedFields.BeginUpdate();
-        try
-        {
-            _selectedFields.Items.RemoveAt(idx);
-            _selectedFields.Items.Insert(idx + 1, item);
-            _selectedFields.SelectedIndex = idx + 1;
-        }
-        finally
-        {
-            _selectedFields.EndUpdate();
-        }
-        UpdateFileNamePreview();
     }
 
     private void UpdateFileNamePreview()
     {
-        var separator = SelectedFileNameSeparator();
-        var parts = _selectedFields.Items.Cast<FileNameFieldItem>().Select(x => x.Display).ToList();
-        _fileNamePreview.Text = parts.Count > 0
-            ? "示例: " + string.Join(separator, parts)
-            : "(请添加至少一个字段)";
-    }
-
-    private void LoadFileNameFields(IReadOnlyList<string> fieldKeys)
-    {
-        _availableFields.Items.Clear();
-        _selectedFields.Items.Clear();
-
-        // 去重：已见过的 key 跳过，避免重复
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var key in fieldKeys)
+        if (string.IsNullOrWhiteSpace(_fileNamePattern.Text))
         {
-            if (!seen.Add(key)) continue;
-            var match = AllFileNameFields.FirstOrDefault(f => string.Equals(f.Key, key, StringComparison.OrdinalIgnoreCase));
-            if (match != default)
-            {
-                _selectedFields.Items.Add(new FileNameFieldItem(match.Key, match.Display));
-            }
-        }
-        // 其余加入可用列表（图号不可移到可用列表）
-        foreach (var (key, display) in AllFileNameFields)
-        {
-            if (!seen.Contains(key))
-            {
-                _availableFields.Items.Add(new FileNameFieldItem(key, display));
-            }
+            _fileNamePreview.Text = "（请输入文件命名规则）";
+            return;
         }
 
-        UpdateFileNamePreview();
-    }
-
-    private sealed class FileNameSeparatorItem
-    {
-        public string Value { get; }
-        private string Display { get; }
-
-        public FileNameSeparatorItem(string value, string display)
+        var example = new PlotJob
         {
-            Value = value;
-            Display = display;
-        }
-
-        public override string ToString() => Display;
-    }
-
-    private string SelectedFileNameSeparator()
-    {
-        return _fileNameSeparator.SelectedItem is FileNameSeparatorItem item ? item.Value : "_";
-    }
-
-    private void SelectFileNameSeparator(string? separator)
-    {
-        var expected = AppSettingsStore.NormalizeFileNameSeparator(separator);
-        for (var index = 0; index < _fileNameSeparator.Items.Count; index++)
+            DrawingNumber = "岩施003",
+            Revision = "1.0版",
+            Title = "基坑支护平面布置图",
+            Date = "2026-07-18",
+            Info1 = "信息1",
+            Info2 = "信息2",
+            Phase = "施工图",
+            PaperName = "A2"
+        };
+        var startNumber = (int)_fileNameSequenceStart.Value;
+        var sequenceDigits = FileNameSanitizer.ResolveSequenceDigits(
+            _autoFileNameSequenceDigits.Checked,
+            (int)_fileNameSequenceDigits.Value,
+            startNumber,
+            1);
+        _fileNamePreview.Text = FileNameSanitizer.FormatFileNamePattern(
+            _fileNamePattern.Text,
+            example,
+            startNumber,
+            sequenceDigits);
+        if (_autoFileNameSequenceDigits.Checked)
         {
-            if (_fileNameSeparator.Items[index] is FileNameSeparatorItem item
-                && string.Equals(item.Value, expected, StringComparison.Ordinal))
-            {
-                _fileNameSeparator.SelectedIndex = index;
-                return;
-            }
+            _fileNamePreview.Text += "（实际位数按图框列表总张数计算）";
         }
-
-        _fileNameSeparator.SelectedIndex = 0;
     }
 
-    private sealed class FileNameFieldItem
+    private void UpdateSequenceDigitsState()
     {
-        public string Key { get; }
-        public string Display { get; }
-
-        public FileNameFieldItem(string key, string display)
-        {
-            Key = key;
-            Display = display;
-        }
-
-        public override string ToString() => Display;
+        _fileNameSequenceDigits.Enabled = !_autoFileNameSequenceDigits.Checked;
     }
 
     private TabPage BuildDirectoryTab()
@@ -915,16 +832,21 @@ public sealed class SettingsForm : Form
 
     private void Apply(AppSettings settings)
     {
-        _rememberOutput.Checked = settings.RememberLastOutputDirectory;
-        _outputSubfolder.Text = settings.DefaultOutputSubfolder;
         _autoScan.Checked = false;
         _paperTolerance.Value = UiLayout.Clamp(_paperTolerance, settings.PaperMatchToleranceMm);
         _allowPaperNameFallback.Checked = settings.AllowStandardPaperNameFallback;
         _showProgress.Checked = settings.ShowPlotProgress;
         _addSequenceWhenPdfExists.Checked = settings.AddSequenceWhenPdfExists;
-        SelectFileNameSeparator(settings.PdfFileNameSeparator);
-        LoadFileNameFields(settings.PdfFileNameFields);
-        _fileNameSequenceDigits.Value = Math.Max(1, Math.Min(10, settings.FileNameSequenceDigits));
+        _fileNamePattern.Text = settings.PdfFileNamePattern;
+        _fileNameSequenceStart.Value = Math.Max(
+            _fileNameSequenceStart.Minimum,
+            Math.Min(_fileNameSequenceStart.Maximum, settings.FileNameSequenceStartNumber));
+        _fileNameSequenceDigits.Value = Math.Max(
+            _fileNameSequenceDigits.Minimum,
+            Math.Min(_fileNameSequenceDigits.Maximum, settings.FileNameSequenceDigits));
+        _autoFileNameSequenceDigits.Checked = settings.AutoFileNameSequenceDigits;
+        UpdateSequenceDigitsState();
+        UpdateFileNamePreview();
         _openExternalDwgForPlot.Checked = settings.OpenExternalDwgForPlot;
         _directoryColorIndex.SelectedIndex = Math.Max(0, Math.Min(256, settings.DirectoryColorIndex));
         _directoryTextHeight.Value = UiLayout.Clamp(_directoryTextHeight, settings.DirectoryTextHeight);
@@ -957,25 +879,20 @@ public sealed class SettingsForm : Form
             return false;
         }
 
-        current.RememberLastOutputDirectory = _rememberOutput.Checked;
-        current.DefaultOutputSubfolder = string.IsNullOrWhiteSpace(_outputSubfolder.Text) ? "PDF" : _outputSubfolder.Text.Trim();
         current.AutoScanCurrentDrawing = false;
         current.PaperMatchToleranceMm = (double)_paperTolerance.Value;
         current.AllowStandardPaperNameFallback = _allowPaperNameFallback.Checked;
         current.ShowPlotProgress = _showProgress.Checked;
         current.AddSequenceWhenPdfExists = _addSequenceWhenPdfExists.Checked;
-        current.PdfFileNameSeparator = AppSettingsStore.NormalizeFileNameSeparator(SelectedFileNameSeparator());
-        current.PdfFileNameFields = _selectedFields.Items
-            .Cast<FileNameFieldItem>()
-            .Select(x => x.Key)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-        if (current.PdfFileNameFields.Count == 0)
+        if (string.IsNullOrWhiteSpace(_fileNamePattern.Text))
         {
-            MessageBox.Show("文件名至少需要一个字段。", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show("请输入文件命名规则。", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return false;
         }
+        current.PdfFileNamePattern = _fileNamePattern.Text;
+        current.FileNameSequenceStartNumber = (int)_fileNameSequenceStart.Value;
         current.FileNameSequenceDigits = (int)_fileNameSequenceDigits.Value;
+        current.AutoFileNameSequenceDigits = _autoFileNameSequenceDigits.Checked;
         current.OpenExternalDwgForPlot = _openExternalDwgForPlot.Checked;
         current.DirectoryColorIndex = _directoryColorIndex.SelectedItem is DirectoryColorItem colorItem
             ? colorItem.Index

@@ -94,6 +94,14 @@ public static class DwgSplitService
     {
         var outputPaths = new Dictionary<PlotJob, string>();
         var reservedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var sequenceDigits = FileNameSanitizer.ResolveSequenceDigits(
+            settings.AutoFileNameSequenceDigits,
+            settings.FileNameSequenceDigits,
+            settings.FileNameSequenceStartNumber,
+            jobs.Count);
+        var sequenceNumbers = jobs
+            .Select((job, index) => new { Job = job, Number = settings.FileNameSequenceStartNumber + index })
+            .ToDictionary(x => x.Job, x => x.Number);
         foreach (var group in jobs.GroupBy(x => GetSourceKey(x, currentDocument), StringComparer.OrdinalIgnoreCase))
         {
             foreach (var job in group)
@@ -103,6 +111,8 @@ public static class DwgSplitService
                     job,
                     sourceFile,
                     settings,
+                    sequenceNumbers[job],
+                    sequenceDigits,
                     reservedPaths,
                     createDirectories,
                     customOutputDirectory,
@@ -468,6 +478,8 @@ public static class DwgSplitService
         PlotJob job,
         string sourceFile,
         AppSettings settings,
+        int sequenceNumber,
+        int sequenceDigits,
         ISet<string> reservedPaths,
         bool createDirectory,
         string? customOutputDirectory,
@@ -487,20 +499,11 @@ public static class DwgSplitService
         {
             directory = Path.Combine(sourceDirectory, FileNameSanitizer.Clean(sourceSubfolder!));
         }
-        var fields = settings.PdfFileNameFields;
-        if (fields == null || fields.Count == 0)
-        {
-            fields = new List<string> { "DrawingNumber", "Title" };
-        }
-
-        var parts = FileNameSanitizer.GetFileNameParts(job, fields, sequenceDigits: settings.FileNameSequenceDigits);
-        if (parts.Count == 0)
-        {
-            parts.Add(job.DrawingNumber);
-        }
-
-        var separator = settings.PdfFileNameSeparator;
-        var baseName = string.Join(separator, parts);
+        var baseName = FileNameSanitizer.FormatFileNamePattern(
+            settings.PdfFileNamePattern,
+            job,
+            sequenceNumber,
+            sequenceDigits);
         return FileNameSanitizer.MakeUnique(
             directory,
             baseName,

@@ -799,7 +799,6 @@ public sealed class TitleBlockDefinition
 public sealed class AppSettings
 {
     // 打印选项
-    public string LastOutputDirectory { get; set; }
     public string LastPlotDevice { get; set; }
     public string LastStyleSheet { get; set; }
     public bool OpenExternalDwgForPlot { get; set; } = true;
@@ -809,9 +808,10 @@ public sealed class AppSettings
     public bool MergePdf { get; set; }
     public bool AddFileNameSequence { get; set; }
     public bool AddSequenceWhenPdfExists { get; set; }
-    public string PdfFileNameSeparator { get; set; } = "_";          // 文件名连接符
-    public List<string> PdfFileNameFields { get; set; }               // 文件名组成字段
-    public string DefaultOutputSubfolder { get; set; } = "PDF";
+    public string PdfFileNamePattern { get; set; }                    // 字母占位符命名规则
+    public int FileNameSequenceDigits { get; set; } = 2;
+    public bool AutoFileNameSequenceDigits { get; set; }
+    public int FileNameSequenceStartNumber { get; set; } = 1;
 
     // 留边
     public bool LeavePaperMargin { get; set; }

@@ -29,11 +29,8 @@ public sealed class DirectoryColumnSetting
 
 public sealed class AppSettings
 {
-    public string LastOutputDirectory { get; set; } = "";
     public string LastPlotDevice { get; set; } = "";
     public string LastStyleSheet { get; set; } = "";
-    public bool RememberLastOutputDirectory { get; set; } = true;
-    public string DefaultOutputSubfolder { get; set; } = "PDF";
     public bool AutoScanCurrentDrawing { get; set; }
     public double PaperMatchToleranceMm { get; set; } = 3;
     public bool AllowStandardPaperNameFallback { get; set; } = true;
@@ -45,8 +42,17 @@ public sealed class AppSettings
     public double PaperMarginMm { get; set; } = 1;
     public string PdfFileNameSeparator { get; set; } = "_";
     public List<string> PdfFileNameFields { get; set; } = new() { "DrawingNumber", "Title" };
-    /// <summary>文件名中序号的补零位数，默认 2 位（如 01, 02, …）。</summary>
+    /// <summary>
+    /// 文件名规则：A=图号，B=版次，C=图名，D=日期，E=信息1，F=信息2，G=设计阶段，T=图幅，N=序号。
+    /// 在占位字母前加反斜杠可输出字母本身，例如 \A 输出 A。
+    /// </summary>
+    public string PdfFileNamePattern { get; set; } = "";
+    /// <summary>文件名中序号的补零位数；0 表示不补零。</summary>
     public int FileNameSequenceDigits { get; set; } = 2;
+    /// <summary>是否根据本次清单最后一个序号自动推断补零位数。</summary>
+    public bool AutoFileNameSequenceDigits { get; set; }
+    /// <summary>文件名序号的起始值。</summary>
+    public int FileNameSequenceStartNumber { get; set; } = 1;
     public bool OpenExternalDwgForPlot { get; set; } = true;
     public double DirectoryIndexWidth { get; set; } = 900;
     public double DirectoryNumberWidth { get; set; } = 3200;
@@ -121,11 +127,6 @@ public static class AppSettingsStore
 
     private static AppSettings Normalize(AppSettings settings)
     {
-        if (string.IsNullOrWhiteSpace(settings.DefaultOutputSubfolder))
-        {
-            settings.DefaultOutputSubfolder = "PDF";
-        }
-
         if (settings.PaperMatchToleranceMm <= 0)
         {
             settings.PaperMatchToleranceMm = 3;
@@ -231,9 +232,22 @@ public static class AppSettingsStore
             settings.PdfFileNameFields.Add("DrawingNumber");
         }
 
-        if (settings.FileNameSequenceDigits < 1 || settings.FileNameSequenceDigits > 10)
+        // 旧版使用“字段列表 + 连接符”。第一次读取旧配置时转换为等价的规则字符串，
+        // 保留用户原有的字段顺序和连接符；之后仅以规则字符串生成文件名。
+        if (string.IsNullOrWhiteSpace(settings.PdfFileNamePattern))
+        {
+            settings.PdfFileNamePattern = BuildLegacyFileNamePattern(
+                settings.PdfFileNameFields,
+                settings.PdfFileNameSeparator);
+        }
+
+        if (settings.FileNameSequenceDigits < 0 || settings.FileNameSequenceDigits > 10)
         {
             settings.FileNameSequenceDigits = 2;
+        }
+        if (settings.FileNameSequenceStartNumber < 0)
+        {
+            settings.FileNameSequenceStartNumber = 1;
         }
 
         return settings;
@@ -338,6 +352,33 @@ public static class AppSettingsStore
     public static string NormalizeFileNameSeparator(string? separator)
     {
         return AllowedFileNameSeparators.Contains(separator ?? "_") ? separator ?? "_" : "_";
+    }
+
+    private static string BuildLegacyFileNamePattern(IEnumerable<string> fieldKeys, string separator)
+    {
+        var tokens = new List<string>();
+        foreach (var key in fieldKeys)
+        {
+            var token = key switch
+            {
+                "DrawingNumber" => "A",
+                "Revision" => "B",
+                "Title" => "C",
+                "Date" => "D",
+                "Info1" => "E",
+                "Info2" => "F",
+                "Phase" => "G",
+                "PaperName" => "T",
+                "Sequence" => "N",
+                _ => ""
+            };
+            if (token.Length > 0)
+            {
+                tokens.Add(token);
+            }
+        }
+
+        return tokens.Count > 0 ? string.Join(separator, tokens) : "A_C";
     }
 
     private static void WriteAtomically(string path, string contents)

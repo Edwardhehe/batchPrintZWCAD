@@ -1,7 +1,9 @@
 using System;
 using System.IO;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
+using System.Text;
 
 namespace ZwcadBatchPlot;
 
@@ -70,6 +72,83 @@ public static class FileNameSanitizer
         return Math.Min(
             DefaultMaxFileNameLength,
             Math.Max(1, LegacyMaxPathLength - Path.GetFullPath(directory).Length - extension.Length - 1));
+    }
+
+    /// <summary>
+    /// 按用户输入的规则生成文件名。占位符区分大小写：
+    /// A=图号，B=版次，C=图名，D=日期，E=信息1，F=信息2，G=设计阶段，T=图幅，N=序号。
+    /// 反斜杠转义其后的字符，例如 \A 输出字母 A。
+    /// </summary>
+    public static string FormatFileNamePattern(
+        string? pattern,
+        PlotJob job,
+        int? sequenceNumber = null,
+        int sequenceDigits = 0)
+    {
+        var result = new StringBuilder();
+        var value = pattern ?? "";
+        for (var index = 0; index < value.Length; index++)
+        {
+            var character = value[index];
+            if (character == '\\' && index + 1 < value.Length)
+            {
+                result.Append(value[++index]);
+                continue;
+            }
+
+            var replacement = character switch
+            {
+                'A' => job.DrawingNumber,
+                'B' => job.Revision,
+                'C' => job.Title,
+                'D' => job.Date,
+                'E' => job.Info1,
+                'F' => job.Info2,
+                'G' => job.Phase,
+                'T' => job.PaperName,
+                'N' => sequenceNumber.HasValue ? FormatSequenceNumber(sequenceNumber.Value, sequenceDigits) : "",
+                _ => null
+            };
+            if (replacement == null)
+            {
+                result.Append(character);
+            }
+            else if (!string.IsNullOrWhiteSpace(replacement))
+            {
+                result.Append(replacement.Trim());
+            }
+        }
+
+        var formatted = result.ToString();
+        if (string.IsNullOrWhiteSpace(formatted))
+        {
+            formatted = string.IsNullOrWhiteSpace(job.DrawingNumber) ? "未命名" : job.DrawingNumber;
+        }
+
+        return Clean(formatted);
+    }
+
+    public static int ResolveSequenceDigits(
+        bool autoDigits,
+        int configuredDigits,
+        int startNumber,
+        int totalCount)
+    {
+        if (!autoDigits)
+        {
+            return Math.Max(0, Math.Min(10, configuredDigits));
+        }
+
+        var lastNumber = (long)Math.Max(0, startNumber) + Math.Max(0, totalCount - 1);
+        return Math.Max(1, Math.Min(10, lastNumber.ToString(CultureInfo.InvariantCulture).Length));
+    }
+
+    private static string FormatSequenceNumber(int sequenceNumber, int sequenceDigits)
+    {
+        var digits = Math.Max(0, Math.Min(10, sequenceDigits));
+        return digits == 0
+            ? sequenceNumber.ToString(CultureInfo.InvariantCulture)
+            : sequenceNumber.ToString($"D{digits}", CultureInfo.InvariantCulture);
     }
 
     private static string TrimToLength(string value, int maxLength)

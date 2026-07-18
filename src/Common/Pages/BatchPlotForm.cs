@@ -800,6 +800,11 @@ public sealed class BatchPlotForm : Form
             .ToList();
 
         _jobs.Clear();
+        var sequenceDigits = FileNameSanitizer.ResolveSequenceDigits(
+            _settings.AutoFileNameSequenceDigits,
+            _settings.FileNameSequenceDigits,
+            _settings.FileNameSequenceStartNumber,
+            sorted.Count);
         var dwgOutputPaths = IsDwgOutput
             ? DwgSplitService.BuildOutputPaths(
                 sorted,
@@ -809,17 +814,17 @@ public sealed class BatchPlotForm : Form
                 sourceSubfolder: AutomaticOutputSubfolder)
             : null;
         var reservedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var idx = 0;
-        foreach (var job in sorted)
+        for (var index = 0; index < sorted.Count; index++)
         {
+            var job = sorted[index];
             if (dwgOutputPaths != null)
             {
                 job.OutputPath = dwgOutputPaths[job];
             }
             else
             {
-                idx++;
-                job.OutputPath = BuildOutputPath(job, idx, reservedPaths);
+                var sequenceNumber = _settings.FileNameSequenceStartNumber + index;
+                job.OutputPath = BuildOutputPath(job, sequenceNumber, sequenceDigits, reservedPaths);
             }
             _jobs.Add(job);
         }
@@ -1276,34 +1281,17 @@ public sealed class BatchPlotForm : Form
         RefreshStatus();
     }
 
-    private string BuildOutputPath(PlotJob job, int sequenceNumber, ISet<string> reservedPaths)
+    private string BuildOutputPath(
+        PlotJob job,
+        int sequenceNumber,
+        int sequenceDigits,
+        ISet<string> reservedPaths)
     {
-        var fields = _settings.PdfFileNameFields;
-        if (fields == null || fields.Count == 0)
-        {
-            fields = new System.Collections.Generic.List<string> { "DrawingNumber", "Title" };
-        }
-
-        var parts = FileNameSanitizer.GetFileNameParts(job, fields, sequenceNumber, _settings.FileNameSequenceDigits);
-        // 图号为必选项，如果用户配置中漏了则自动补在末尾
-        if (!fields.Any(f => string.Equals(f, "DrawingNumber", StringComparison.OrdinalIgnoreCase)))
-        {
-            var number = job.DrawingNumber;
-            if (!string.IsNullOrWhiteSpace(number))
-                parts.Add(number.Trim());
-        }
-        // 如果所有字段都为空，至少用图号兜底
-        if (parts.Count == 0 && !string.IsNullOrWhiteSpace(job.DrawingNumber))
-        {
-            parts.Add(job.DrawingNumber);
-        }
-        if (parts.Count == 0)
-        {
-            parts.Add("未命名");
-        }
-
-        var separator = _settings.PdfFileNameSeparator;
-        var baseName = string.Join(separator, parts);
+        var baseName = FileNameSanitizer.FormatFileNamePattern(
+            _settings.PdfFileNamePattern,
+            job,
+            sequenceNumber,
+            sequenceDigits);
         return FileNameSanitizer.MakeUnique(
             GetOutputDirectory(job),
             baseName,
@@ -1435,7 +1423,8 @@ public sealed class BatchPlotForm : Form
                 _settings,
                 job => AppendLog("INFO", $"开始拆图 {job.DrawingNumber}_{job.Title}"),
                 customOutputDirectory: CustomOutputDirectory,
-                sourceSubfolder: AutomaticOutputSubfolder);
+                sourceSubfolder: AutomaticOutputSubfolder,
+                explicitOutputPaths: selectedJobs.ToDictionary(job => job, job => job.OutputPath));
 
             var success = results.Count(x => x.Error == null);
             var failed = results.Count - success;
@@ -1532,16 +1521,17 @@ public sealed class BatchPlotForm : Form
     private void ReloadSettings()
     {
         var updated = AppSettingsStore.Load();
-        _settings.RememberLastOutputDirectory = updated.RememberLastOutputDirectory;
-        _settings.DefaultOutputSubfolder = updated.DefaultOutputSubfolder;
         _settings.AutoScanCurrentDrawing = updated.AutoScanCurrentDrawing;
         _settings.PaperMatchToleranceMm = updated.PaperMatchToleranceMm;
         _settings.AllowStandardPaperNameFallback = updated.AllowStandardPaperNameFallback;
         _settings.ShowPlotProgress = updated.ShowPlotProgress;
         _settings.AddSequenceWhenPdfExists = updated.AddSequenceWhenPdfExists;
+        _settings.PdfFileNamePattern = updated.PdfFileNamePattern;
         _settings.PdfFileNameSeparator = updated.PdfFileNameSeparator;
         _settings.PdfFileNameFields = updated.PdfFileNameFields.ToList();
         _settings.FileNameSequenceDigits = updated.FileNameSequenceDigits;
+        _settings.AutoFileNameSequenceDigits = updated.AutoFileNameSequenceDigits;
+        _settings.FileNameSequenceStartNumber = updated.FileNameSequenceStartNumber;
         _settings.OpenExternalDwgForPlot = updated.OpenExternalDwgForPlot;
         _settings.DirectoryIndexWidth = updated.DirectoryIndexWidth;
         _settings.DirectoryNumberWidth = updated.DirectoryNumberWidth;
@@ -2238,7 +2228,6 @@ public sealed class BatchPlotForm : Form
 
     private void SaveCurrentSettings()
     {
-        _settings.LastOutputDirectory = _outputDirectory.Text;
         _settings.LastPlotDevice = AcadPlotterInstaller.PreferredPdfPlotter;
         _settings.LastStyleSheet = _styleCombo.SelectedItem?.ToString() ?? "";
         _settings.AutoScanCurrentDrawing = false;
