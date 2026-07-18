@@ -1,29 +1,28 @@
-批量打印插件 v1.10.1
+批量打印插件 v1.13
 
 支持的平台和版本范围：
 
-  ZWCAD\            — 中望 CAD 2025（x64）
-  AutoCAD2016\       — AutoCAD 2016（x64）
-  AutoCAD2017\       — AutoCAD 2017（x64）
-  AutoCAD2018\       — AutoCAD 2018（x64）
-  AutoCAD2019-2024\  — AutoCAD 2019-2024（x64）
-  AutoCAD2025Core\   — AutoCAD 2025 以上（x64, .NET 8）
-
+  ZWCAD\                  — ZWCAD Enterprise x64，加载 BatchPlotter.dll
+  AutoCAD2015-2024\       — AutoCAD 2015-2024 x64，共用 AcadBatchPlot.dll
+  AutoCAD2025-2027\       — AutoCAD 2025-2027 x64，共用 AcadBatchPlot.Core.dll
 
 安装：
-  1. 按你的cad版本或者中望版本
-  2. 在 CAD 中执行 NETLOAD 加载 Ac*Plot*.dll，中望中加载BatchPlotter.dll
-  3. 运行 ZBP_INSTALL_AUTOLOAD或者下拉菜单安装自动加载，以后打开cad或者中望就可以自动加载了
+  1. 关闭 CAD，解压完整发布包。
+  2. 双击包内“安装.cmd”。
+  3. 重新打开 CAD，使用“批量打印”菜单；也可通过 NETLOAD 手动加载对应 DLL。
 
-
-使用：
+主要功能：
 
 图框库批量打印（ZBP_SHOW_PANEL）：
-点击新增图框，按提示将图框块加入库，之后任何时候打开图纸即可一键扫描所有图框、自动识别图名图号和纸张尺寸，直接批量输出 PDF。支持合并 PDF、拆图、导出清单。
+建立图框库后扫描当前图或多个 DWG，识别图号、图名、图幅和比例，批量输出 PDF、PNG、JPG、DWF，或按图框拆分 DWG。支持所选格式预览、PDF 合并、图号重排和图纸目录。
 
 矩形框批量打印（ZBP_RECTANGLE_BATCH_PLOT）：
-不需要图框库，框选扫描范围即可自动识别图纸中所有标准尺寸的矩形框，按行列排列顺序，一键批量打印。
+无需图框库，扫描当前空间、多个布局或框选范围，识别有效矩形图框并按空间顺序输出。支持 PDF、PNG、JPG、DWF、DWG。
 
 单张打印（ZBP_SINGLE_PLOT）：
-手动框选打印区域，自动匹配纸张和比例，确认后直接输出 PDF。支持打印前预览。
+手动框选打印区域，自动匹配标准或自定义纸张，输出 PDF，支持打印前预览和周边留白。
 
+绘图仪：
+插件自动安装或修复 LA_pdf、LA_png、LA_jpg、LA_dwf。PNG/JPG 不使用 CAD 自带设备兜底，选择什么格式就使用什么格式预览和打印。
+
+详细操作请查看 docs\用户使用说明.md。

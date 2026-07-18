@@ -11,7 +11,7 @@ namespace ZwcadBatchPlot;
 /// <summary>
 /// AutoCAD 自动加载管理器 — 通过注册表或 Bundle 机制实现插件随 AutoCAD 启动自动加载。
 /// 支持两种模式：
-///   ACAD_CORE（AutoCAD 2025+）：通过 ApplicationPlugins Bundle 机制自动加载；
+///   ACAD_CORE（AutoCAD 2025-2027）：通过 ApplicationPlugins Bundle 机制自动加载；
 ///   传统 AutoCAD：通过 HKCU\Software\Autodesk\AutoCAD\...\Applications 注册表键实现按需加载。
 /// </summary>
 public static class AutoloadManager
@@ -38,7 +38,7 @@ public static class AutoloadManager
     public static IReadOnlyList<string> Install(string? dllPath = null)
     {
 #if ACAD_CORE
-        // AutoCAD 2025+ Core 模式：通过 Bundle 机制安装
+        // AutoCAD 2025-2027 Core 模式：通过 Bundle 机制安装
         var bundlePath = InstallCoreBundle(dllPath);
         return new[] { bundlePath };
 #else
@@ -152,7 +152,7 @@ public static class AutoloadManager
 #if ACAD_CORE
     /// <summary>
     /// Core 模式安装：将 DLL 及依赖文件复制到 %AppData%/Autodesk/ApplicationPlugins/ 下的 Bundle 目录，
-    /// 并生成 PackageContents.xml 和菜单 .mnu 文件，使 AutoCAD 2025+ 启动时自动加载。
+    /// 并生成 PackageContents.xml 和菜单 .mnu 文件，使 AutoCAD 2025-2027 启动时自动加载。
     /// </summary>
     private static string InstallCoreBundle(string? dllPath)
     {
@@ -247,7 +247,7 @@ public static class AutoloadManager
     {
         var escapedInstallFolderName = SecurityElement.Escape(installFolderName);
         return $@"<?xml version=""1.0"" encoding=""utf-8""?>
-<ApplicationPackage SchemaVersion=""1.0"" AutodeskProduct=""AutoCAD"" Name=""LA批量打印"" AppVersion=""1.11.2"" ProductCode=""{{7f2f2f2d-78d1-4df0-8c5d-acadba7c0011}}"" Description=""AutoCAD批量打印插件"">
+<ApplicationPackage SchemaVersion=""1.0"" AutodeskProduct=""AutoCAD"" Name=""LA批量打印"" AppVersion=""1.13"" ProductCode=""{{7f2f2f2d-78d1-4df0-8c5d-acadba7c0011}}"" Description=""AutoCAD批量打印插件"">
   <CompanyDetails Name=""lihao"" />
   <Components>
     <ComponentEntry AppName=""AcadBatchPlot"" AppType="".Net"" ModuleName=""./Contents/{escapedInstallFolderName}/{SecurityElement.Escape(dllName)}"" LoadOnAutoCADStartup=""True"" LoadOnCommandInvocation=""True"">

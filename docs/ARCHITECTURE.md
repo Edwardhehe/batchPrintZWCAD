@@ -1,6 +1,6 @@
 # 批量打印插件架构文档
 
-> 覆盖 ZWCAD 和 AutoCAD 双平台，版本 1.12.1 — 本文档反映当前项目结构，包含可选字段（日期/版次/阶段/信息）、任意纸张单张打印、图号重排、CSV导出、PIA 版本自动适配等新特性。
+> 覆盖 ZWCAD 和 AutoCAD 双平台，版本 1.13 — 本文档反映当前项目结构，包含可选字段（日期/版次/阶段/信息）、任意纸张单张打印、图号重排、CSV导出、PDF/PNG/JPG/DWF/DWG 多格式输出、插件自有栅格绘图仪、所选格式预览、PIA 版本自动适配等特性。
 
 ---
 
@@ -14,6 +14,8 @@
 6. [流程四：单张打印](#6-流程四单张打印)
    - [6.4 自定义纸张尺寸（非标图纸）](#64-自定义纸张尺寸非标图纸)
 7. [打印引擎](#7-打印引擎)
+   - [7.2 输出格式、绘图仪与纸张单位](#72-输出格式绘图仪与纸张单位)
+   - [7.3 输出文件命名](#73-输出文件命名)
 8. [PDF 合并](#8-pdf-合并)
 9. [UCS 坐标变换](#9-ucs-坐标变换)
 10. [动态块处理](#10-动态块处理)
@@ -409,9 +411,9 @@ PlotterService.PlotMany(Jobs, deviceName, styleSheet, settings)
                  ├─ new PlotSettings(layout.ModelType)
                  │   // 模型空间和图纸空间使用不同的默认设置
                  ├─ validator.SetPlotConfigurationName(deviceName, ...)
-                 │   // 选择 PDF 打印机: "LA_pdf.pc3" (AutoCAD) / "LA_pdf.pc5" (ZWCAD)
+                 │   // 使用当前输出格式对应的绘图仪；预览与正式打印传入同一个 deviceName
                  ├─ ChooseMedia(mediaNames, paperWidth, paperHeight)
-                 │   // AutoCAD: 复杂匹配+旋转候选+加长纸处理
+                 │   // AutoCAD: 复杂匹配+旋转候选+加长纸处理；栅格设备按 DPI 匹配像素纸张
                  │   // ZWCAD: SelectMedia 简单匹配
                  ├─ 配置打印参数:
                  │   ├─ PlotType = Window
@@ -423,8 +425,8 @@ PlotterService.PlotMany(Jobs, deviceName, styleSheet, settings)
                  │   ├─ ShadePlotType = AsDisplayed
                  │   └─ CustomPrintScale (微调比例精度)
                  │
-                 └─ 逐 Job 输出 PDF:
-                      ├─ plotInfo.DeviceOverride → job.OutputPath (.pdf)
+                 └─ 逐 Job 输出当前格式:
+                      ├─ plotInfo.DeviceOverride → job.OutputPath (.pdf/.png/.jpg/.dwf)
                       ├─ RunPlot(engine, plotInfo, pageIndex)
                       │   │ // PublishEngine 生命周期
                       │   ├─ BeginPlot(progress)       // 初始化引擎
@@ -436,16 +438,61 @@ PlotterService.PlotMany(Jobs, deviceName, styleSheet, settings)
                       │   ├─ EndDocument(...)
                       │   └─ EndPlot(...)
                       │
-                      └─ ValidatePdfOutput(job.OutputPath)
-                           // PdfSharp 读取验证: 文件存在、非空、至少 1 页
+                      └─ ValidatePlotOutput(job.OutputPath)
+                           // PDF: PdfSharp 打开且至少 1 页
+                           // PNG/JPG/DWF: 检查文件存在、非空及格式签名
                            // 验证失败 → 标记为失败，不阻塞后续 Job
 ```
 
-### 7.2 输出文件命名
+> `DWG` 输出不进入 `PublishEngine`，而是由 `DwgSplitService` 按每个 `PlotJob` 的窗口或布局拆分为独立 DWG。
+
+### 7.2 输出格式、绘图仪与纸张单位
+
+| 输出格式 | AutoCAD 设备 | ZWCAD 设备 | AutoCAD 纸张单位 | ZWCAD 纸张单位 | 设备选择规则 |
+|----------|--------------|------------|------------------|----------------|--------------|
+| PDF | `LA_pdf.pc3` | `LA_pdf.pc5` | 毫米 | 毫米 | 使用插件自有设备 |
+| PNG | `LA_png.pc3` | `LA_png.pc5` | 像素 | 毫米 | 只接受插件自有设备，不使用 CAD 自带 PNG 设备兜底 |
+| JPG | `LA_jpg.pc3` | `LA_jpg.pc5` | 像素 | 毫米 | 只接受插件自有设备，不使用 CAD 自带 JPG 设备兜底 |
+| DWF | 优先 `LA_dwf.pc3` | 优先 `LA_dwf.pc5` | 毫米 | 毫米 | 优先插件设备，兼容 CAD 原生 DWF 设备 |
+| DWG | 无绘图仪 | 无绘图仪 | 不适用 | 不适用 | 由 `DwgSplitService` 拆分；不提供打印预览 |
+
+#### 设备安装、枚举与预览
+
+```text
+插件初始化/批量打印窗体首次打开
+  ├─ 安装或修复插件自有 LA_pdf / LA_png / LA_jpg / LA_dwf 配置
+  ├─ 刷新 CAD 绘图仪设备列表
+  └─ 按当前输出格式解析设备
+       ├─ 预览 → SelectedPlotDevice
+       └─ 打印 → SelectedPlotDevice
+```
+
+- 选择什么格式，就使用该格式的设备进行预览和正式打印，避免预览仍固定走 PDF 设备。
+- PNG/JPG 必须枚举到插件自有的 `LA_png` / `LA_jpg`；如果配置安装失败或 CAD 尚未识别，直接给出明确错误，不回退到 `PublishToWeb PNG/JPG` 等自带设备。
+- 安装器只创建、覆盖或修复 `LA_*` 文件，不修改用户已有的其他 PC3/PC5/PMP 配置。
+
+#### AutoCAD 栅格设备
+
+AutoCAD 的 `PublishToWeb PNG.pc3` / `PublishToWeb JPG.pc3` 仅作为驱动和图像参数模板。安装器基于它们生成插件自有的 `LA_png.pc3` / `LA_jpg.pc3`，并生成对应的 PIA2 或 PIA3 PMP。标准 A4～A0 及加长规格共有 85 个毫米规格，每个规格写入横、竖两个像素介质，共 170 个介质项。
+
+AutoCAD 栅格驱动要求 `PlotPaperUnit.Pixels`。业务层仍以毫米识别图框和纸张，`PlotterService` 读取设备 DPI 后执行双向换算：
+
+```text
+毫米纸张尺寸 × DPI ÷ 25.4 → 匹配 PMP 中的像素介质
+像素可打印区域 × 25.4 ÷ DPI → 参与窗口比例和居中计算
+```
+
+该边界是 PNG/JPG 与 PDF/DWF 的关键差异：不能把栅格设备强制设置为毫米单位，否则 AutoCAD 会在预览或批量打印阶段抛出 `eInvalidInput`。
+
+#### ZWCAD 栅格设备
+
+ZWCAD 使用系统 PNG/JPG PC5 作为驱动模板，但把 PMP 关联改写为插件自有的 `LA_png.pmp` / `LA_jpg.pmp`。栅格纸张表来自插件随包资源，不依赖用户机器已有的自定义纸张文件；打印服务按 ZWCAD 驱动约定使用毫米单位。安装完成后，通过临时 `PlotSettings` 执行 `RefreshLists()`，使当前 CAD 会话重新枚举设备和纸张。
+
+### 7.3 输出文件命名
 
 ```
-{OutputDirectory}\{字段1}{分隔符}{字段2}.pdf
-例: D:\Output\JZ-01_一层平面图.pdf
+{OutputDirectory}\{字段1}{分隔符}{字段2}.{当前格式扩展名}
+例: D:\Output\JZ-01_一层平面图.png
 ```
 
 命名字段和连接符可在设置中配置：
@@ -565,7 +612,11 @@ AutoCAD Core 版本额外使用 `#if ACAD_CORE` 子条件处理 `CadApp.ShowModa
 | 方面 | AutoCAD | ZWCAD |
 |------|---------|-------|
 | 命名空间 | `Autodesk.AutoCAD.*` | `ZwSoft.ZwCAD.*` |
-| 绘图仪配置 | `LA_pdf.pc3` | `LA_pdf.pc5`（需模板替换 PMP 路径） |
+| 绘图仪配置 | 插件自有 `LA_pdf/LA_png/LA_jpg/LA_dwf.pc3` | 插件自有 `LA_pdf/LA_png/LA_jpg/LA_dwf.pc5`（基于模板改写 PMP 路径） |
+| PNG/JPG 设备策略 | 只使用 `LA_png/LA_jpg`，CAD 自带设备仅用于生成配置 | 只使用 `LA_png/LA_jpg`，CAD 自带设备仅作为 PC5 驱动模板 |
+| 栅格纸张来源 | 安装时生成 PIA2/PIA3 PMP，毫米规格转换为像素介质 | 使用插件随包 PMP 纸张表并关联到插件自有 PC5 |
+| 栅格纸张单位 | `Pixels`；根据设备 DPI 与毫米互换 | `Millimeters`；业务层按毫米选择规格 |
+| 设备列表刷新 | `PlotConfigManager` 刷新全局设备列表 | 临时 `PlotSettings` 调用 `RefreshLists()` |
 | 打印纸张匹配 | 复杂权重排序, 支持旋转, 多候选 | `MediaSelection` 简化匹配 |
 | Core Console | `ACAD_CORE` 宏, 无菜单栏, 不同对话框 API | 无此概念 |
 | 菜单命令前缀 | 无 `^C^C` | 需 `^C^C`（取消当前命令再执行） |
@@ -580,9 +631,9 @@ AutoCAD Core 版本额外使用 `#if ACAD_CORE` 子条件处理 `CadApp.ShowModa
 |---------|------|--------|--------|
 | `BatchPlotter.csproj` | ZWCAD | net48 | `bin\BatchPlotter.dll` |
 | `AcadBatchPlot.csproj` | AutoCAD 2015-2024 | net48 | `bin-acad\AcadBatchPlot.dll` |
-| `AcadBatchPlot.Core.csproj` | AutoCAD 2025+ Core | net8.0-windows | `bin-acad2025之后\AcadBatchPlot.Core.dll` |
+| `AcadBatchPlot.Core.csproj` | AutoCAD 2025-2027 Core | net8.0-windows | `bin-acad2025-2027\AcadBatchPlot.Core.dll` |
 
-> 最低支持 AutoCAD 2015。主项目使用 AutoCAD.NET 20.0 SDK (2015) 编译，兼容 2015~2024 全系列。
+> 最低支持 AutoCAD 2015。主项目使用 AutoCAD.NET 20.0 SDK (2015) 编译，2015~2024 全系列共用 `AcadBatchPlot.dll`；2025~2027 全系列共用 `AcadBatchPlot.Core.dll`。
 
 ---
 
@@ -600,7 +651,7 @@ AutoCAD Core 版本额外使用 `#if ACAD_CORE` 子条件处理 `CadApp.ShowModa
 │
 ├── BatchPlotter.csproj             ← ZWCAD 编译入口 (net48)
 ├── AcadBatchPlot.csproj            ← AutoCAD 2015-2024 编译入口 (net48)
-├── AcadBatchPlot.Core.csproj       ← AutoCAD 2025+ Core 编译入口 (net8.0-windows)
+├── AcadBatchPlot.Core.csproj       ← AutoCAD 2025-2027 Core 编译入口 (net8.0-windows)
 ├── Directory.Build.props           ← 共享 MSBuild 属性 (BaseIntermediateOutputPath)
 ├── global.json                     ← .NET SDK 版本 (9.0.315)
 │
@@ -656,19 +707,19 @@ AutoCAD Core 版本额外使用 `#if ACAD_CORE` 子条件处理 `CadApp.ShowModa
 │   │       └── Media.cs
 │   │
 │   ├── AutoCAD/                     ← AutoCAD 专用实现
-│   │   ├── PlotterService.cs        ← 打印引擎: PlotMany→PlotDatabase→RunPlot
-│   │   ├── AcadPlotterInstaller.cs  ← 打印机安装: 复制 LA_pdf.pc3, PMP 关联刷新
+│   │   ├── PlotterService.cs        ← 打印引擎: 多格式输出、栅格 DPI/像素换算、结果签名验证
+│   │   ├── AcadPlotterInstaller.cs  ← 安装 LA_pdf/png/jpg/dwf.pc3，生成 PIA2/PIA3 栅格 PMP
 │   │   └── AutoloadManager.cs       ← 自动加载: 注册表写入/卸载
 │   │
 │   └── ZWCAD/                       ← ZWCAD 专用实现（接口同名，平台适配）
-│       ├── PlotterService.cs        ← 简化纸张匹配, LA_pdf.pc5
-│       ├── AcadPlotterInstaller.cs  ← pc5模板替换PMP路径
+│       ├── PlotterService.cs        ← 多格式输出、简化纸张匹配、结果签名验证
+│       ├── AcadPlotterInstaller.cs  ← 安装 LA_pdf/png/jpg/dwf.pc5，模板改写自有 PMP 路径
 │       ├── AutoloadManager.cs       ← 注册表路径: ZWSOFT\ZWCAD
 │       └── Properties/
 │           └── AssemblyInfo.cs
 │
 ├── resources/
-│   ├── acad/Plotters/               ← AutoCAD PDF 打印机配置
+│   ├── acad/Plotters/               ← AutoCAD PDF 基础配置及 PIA 兼容资源
 │   │   ├── PIA3/                    ← PIA 3.0 JSON 格式 (AutoCAD 2024+)
 │   │   │   ├── LA_pdf.pc3
 │   │   │   └── PMP Files/LA_pdf.pmp
@@ -676,7 +727,7 @@ AutoCAD Core 版本额外使用 `#if ACAD_CORE` 子条件处理 `CadApp.ShowModa
 │   │   │   ├── LA_pdf.pc3
 │   │   │   └── PMP Files/LA_pdf.pmp
 │   │   └── README.md
-│   └── zwcad/Plotters/              ← ZWCAD PDF 打印机配置 (INI 格式)
+│   └── zwcad/Plotters/              ← ZWCAD 基础 PC5/PMP 资源；PMP 同时作为栅格纸张表模板
 │       ├── LA_pdf.pc5
 │       └── PMP Files/LA_pdf.pmp
 │
@@ -694,18 +745,23 @@ AutoCAD Core 版本额外使用 `#if ACAD_CORE` 子条件处理 `CadApp.ShowModa
 │   ├── 安装.cmd / 卸载.cmd
 │   └── 使用说明.txt
 │
-├── release/                         ← 发布包（各版本 zip）
-│   └── v1.12.1/ ...
+├── release/                         ← 本地发布目录（不纳入 Git）
+│   └── v1.13/
+│       ├── ZWCAD/
+│       ├── AutoCAD2015-2024/
+│       ├── AutoCAD2025-2027/
+│       ├── docs/
+│       └── *.zip
 │
 ├── dist/                            ← 分发目录
-│   └── v1.11.2/ ...
+│   └── ...
 │
 ├── lib/
 │   └── PianNoCN/                    ← PianNoCN 原始上游源码 (参考用，编译时使用 src/PianNoCN/)
 │
 ├── bin/                             ← ZWCAD 编译输出
 ├── bin-acad/                        ← AutoCAD 2015-2024 编译输出
-├── bin-acad2025之后/                 ← AutoCAD 2025+ Core 编译输出
+├── bin-acad2025-2027/                ← AutoCAD 2025-2027 Core 编译输出
 │
 └── *.mp4                            ← 功能演示视频（加载设置、选图框块、选矩形框）
 ```

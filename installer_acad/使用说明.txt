@@ -1,26 +1,31 @@
-AutoCAD 批量打印插件
+AutoCAD 批量打印插件 v1.13
 
 支持版本：
-- AcadBatchPlot.dll：AutoCAD 2019 ~ 2020（.NET Framework 4.7，对应 AutoCAD.NET 23.0）
-- AcadBatchPlot.dll：AutoCAD 2021 ~ 2024（.NET Framework 4.8）
-- AcadBatchPlot.Core.dll：AutoCAD 2025 及以后（.NET 8）
+- AcadBatchPlot.dll：AutoCAD 2015 ~ 2024，共用同一个 DLL（.NET Framework 4.8）。
+- AcadBatchPlot.Core.dll：AutoCAD 2025 ~ 2027，共用同一个 Core DLL（.NET 8）。
+
+支持输出：
+- 批量打印：PDF、PNG、JPG、DWF、DWG。
+- 单张框选打印：PDF。
+- PNG/JPG 使用插件自有 LA_png / LA_jpg 设备，不使用 AutoCAD 自带设备兜底。
+- 清单预览使用当前选择的输出格式；DWG 拆图不提供打印预览。
 
 安装：
 1. 关闭 AutoCAD。
-2. 解压对应 AutoCAD 版本的发布包，不要只单独复制 DLL。
-3. 双击"安装.cmd"。
+2. 解压完整发布包，不要只单独复制 DLL。
+3. 双击“安装.cmd”。
 4. 重新打开 AutoCAD。
 5. 插件会自动加载，用户以后不需要每次 NETLOAD。
-6. AutoCAD 2019 ~ 2024 菜单栏会出现"批量打印"；AutoCAD 2025 及以后如果菜单栏未显示，可执行 ZBP_SHOW_PANEL 打开主界面。
-7. 插件首次加载时会自动把随包的 LA_pdf.pc3 / LA_pdf.pmp 安装到 AutoCAD Plotters 目录，不需要用户手动复制打印机配置。
+6. 菜单栏通常会出现“批量打印”；如果未显示，可执行 ZBP_SHOW_PANEL 打开主界面。
+7. 首次打开批量打印窗口时，插件会自动安装或修复 LA_pdf、LA_png、LA_jpg、LA_dwf 绘图仪。
 
 卸载：
 1. 关闭 AutoCAD。
-2. 双击"卸载.cmd"。
-3. 卸载只删除自动加载注册表项和插件文件，不删除图框库、设置和日志。
+2. 双击“卸载.cmd”。
+3. 卸载只删除自动加载配置和插件文件，不删除图框库、设置和日志。
 
 手动加载：
-仅开发测试或临时试用时才需要 NETLOAD。正式安装请使用"安装.cmd"，安装后每次启动 AutoCAD 会自动加载插件。
+仅开发测试或临时试用时才需要 NETLOAD。AutoCAD 2015 ~ 2024 加载 AcadBatchPlot.dll；AutoCAD 2025 ~ 2027 加载 AcadBatchPlot.Core.dll。
 
 用户数据位置：
 %APPDATA%\AcadBatchPlot

@@ -81,7 +81,7 @@ function Install-CoreBundle {
     $dllName = Split-Path $loader -Leaf
     $packageContents = @"
 <?xml version="1.0" encoding="utf-8"?>
-<ApplicationPackage SchemaVersion="1.0" AutodeskProduct="AutoCAD" Name="LA批量打印" AppVersion="1.11.2" ProductCode="{7f2f2f2d-78d1-4df0-8c5d-acadba7c0011}" Description="AutoCAD批量打印插件">
+<ApplicationPackage SchemaVersion="1.0" AutodeskProduct="AutoCAD" Name="LA批量打印" AppVersion="1.13" ProductCode="{7f2f2f2d-78d1-4df0-8c5d-acadba7c0011}" Description="AutoCAD批量打印插件">
   <CompanyDetails Name="lihao" />
   <Components>
     <ComponentEntry AppName="AcadBatchPlot" AppType=".Net" ModuleName="./Contents/$installFolderName/$dllName" LoadOnAutoCADStartup="True" LoadOnCommandInvocation="True">
@@ -136,7 +136,7 @@ if ($isCorePackage) {
     if (Test-Path $plottersDir) {
         Write-Host "Bundled plotter copied: LA_pdf.pc3 / LA_pdf.pmp"
     }
-    Write-Host "AutoCAD 2025+ will load this plugin from the ApplicationPlugins bundle next time."
+    Write-Host "AutoCAD 2025-2027 will load this plugin from the ApplicationPlugins bundle next time."
     Write-Host ""
     Read-Host "Press Enter to exit"
     exit

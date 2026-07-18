@@ -1,6 +1,6 @@
 # 中望 CAD 批量打印插件
 
-一个面向中望 CAD 和 AutoCAD 的 .NET 批量打印插件。插件可以学习图框块，识别图名、图号、图幅、比例，支持跨文件批量扫描和打印，并按 `图号_图名.pdf` 输出 PDF。
+一个面向 ZWCAD 和 AutoCAD 的 .NET 批量打印插件。插件可以学习图框块，识别图名、图号、图幅和比例，支持跨文件批量扫描，并输出 PDF、PNG、JPG、DWF 或按图框拆分 DWG。当前版本：v1.13。
 
 ## 使用教程
 
@@ -14,9 +14,9 @@
 | --- | --- | --- |
 | 中望 CAD | ZWCAD Enterprise x64 | `BatchPlotter.dll` |
 | AutoCAD | AutoCAD 2015 ~ 2024 x64 | `AcadBatchPlot.dll` |
-| AutoCAD | AutoCAD 2025 及以后 x64 | `AcadBatchPlot.Core.dll` |
+| AutoCAD | AutoCAD 2025 ~ 2027 x64 | `AcadBatchPlot.Core.dll` |
 
-AutoCAD 2015 ~ 2024 统一使用 .NET Framework 4.8 + AutoCAD.NET 20.0 SDK（2015）编译，最低兼容 AutoCAD 2015。AutoCAD 2025 及以后使用 .NET 8 + AutoCAD.NET.Core 25.0。代码主体复用，仅项目文件和 CAD API 引用不同。
+AutoCAD 2015 ~ 2024 全系列共用同一个 `AcadBatchPlot.dll`，使用 .NET Framework 4.8 + AutoCAD.NET 20.0 SDK（2015）编译。AutoCAD 2025 ~ 2027 全系列共用同一个 `AcadBatchPlot.Core.dll`，使用 .NET 8 + AutoCAD.NET.Core 25.0。代码主体复用，仅项目文件和 CAD API 引用不同。
 
 ## 主要功能
 
@@ -26,6 +26,8 @@ AutoCAD 2015 ~ 2024 统一使用 .NET Framework 4.8 + AutoCAD.NET 20.0 SDK（201
 - 图幅识别：支持 A0、A1、A2、A3 以及加长图。
 - 比例识别：支持常见比例，如 1:1、1:10、1:100、1:200 等。
 - 批量打印：支持扫描当前图、框选扫描、添加多个 DWG 后跨文件批量打印。
+- 多格式输出：支持 PDF、PNG、JPG、DWF 和 DWG；选择什么格式，预览和正式输出就使用什么格式。
+- 自有栅格设备：PNG/JPG 使用插件自有 `LA_png` / `LA_jpg`，不回退到 CAD 自带设备。
 - 矩形框批量打印：框选范围后识别普通矩形及布局块内矩形，支持纸张/比例候选、连续编号、红框标识和空间排序。
 - 单张打印：直接框选图纸外框，选择纸张与 PDF 保存位置，默认使用 `DWG文件名.pdf`。
 - 布局打印：跨文件打印时可临时打开 DWG，保证布局视口和外部参照正常加载。
@@ -61,7 +63,7 @@ AutoCAD 2015 ~ 2024 统一使用 .NET Framework 4.8 + AutoCAD.NET 20.0 SDK（201
 
 - 中望 CAD：`BatchPlotter.dll`
 - AutoCAD 2015 ~ 2024：`AcadBatchPlot.dll`
-- AutoCAD 2025 及以后：`AcadBatchPlot.Core.dll`
+- AutoCAD 2025 ~ 2027：`AcadBatchPlot.Core.dll`
 
 如果已经加载过旧版本，建议重启 CAD 后再加载新 DLL，或者在菜单里点击"刷新菜单"。
 
@@ -70,11 +72,11 @@ AutoCAD 2015 ~ 2024 统一使用 .NET Framework 4.8 + AutoCAD.NET 20.0 SDK（201
 AutoCAD 版本请下载与本机 AutoCAD 年份对应的发布包，解压后关闭 AutoCAD，双击 `安装.cmd`。安装脚本会复制插件文件、写入自动加载注册表项，并保留 `卸载.cmd` 供以后卸载。安装成功后用户以后不需要每次 `NETLOAD`。
 
 - AutoCAD 2015 ~ 2024：使用 `AcadBatchPlot-AutoCAD2015-2024-*.zip`。
-- AutoCAD 2025 及以后：使用 `AcadBatchPlot-AutoCAD2025+-*.zip`。
+- AutoCAD 2025 ~ 2027：使用 `AcadBatchPlot-AutoCAD2025-2027-*.zip`。
 
-AutoCAD 包内带有 `LA_pdf.pc3` 和 `LA_pdf.pmp`。插件首次自动加载时会把它们复制到 AutoCAD 的 Plotters 目录，用户不需要手动安装 PDF 绘图仪。
+AutoCAD 包内带有 PDF 基础配置；插件首次打开批量打印窗口时还会安装或修复 `LA_pdf`、`LA_png`、`LA_jpg`、`LA_dwf` 绘图仪。PNG/JPG 只使用插件自有设备，不使用 CAD 自带设备兜底。
 
-AutoCAD 2025 及以后如果菜单栏未显示，可以执行 `ZBP_SHOW_PANEL` 打开批量打印主界面。
+AutoCAD 2025 ~ 2027 如果菜单栏未显示，可以执行 `ZBP_SHOW_PANEL` 打开批量打印主界面。
 
 如果 AutoCAD 2015 ~ 2024 点击菜单后提示 `未知命令 "^C^CZBP_..."`，请升级到最新版本。升级后若旧菜单仍存在，执行一次 `ZBP_RELOAD_MENU`，或在菜单中点击"刷新菜单"，让插件重建菜单项。
 
@@ -98,14 +100,14 @@ AutoCAD 2025 及以后如果菜单栏未显示，可以执行 `ZBP_SHOW_PANEL` �
 2. 打开"批量打印"窗口。
 3. 点击"扫描当前图""框选扫描"或"添加 DWG"识别图纸。
 4. 在表格中检查图号、图名、图幅、比例、文件路径和是否打印。
-5. 可选：勾选"合并为单个 PDF"并选择合并输出路径。
-6. 选择输出目录、PDF 打印机和 CTB。
+5. 选择 PDF、PNG、JPG、DWF 或 DWG；PDF 可选“合并为单个 PDF”。
+6. 选择输出目录和 CTB。绘图仪由插件按输出格式自动选择。
 7. 点击"开始打印"。
 
 输出目录快捷按钮：
 
 - 当前文件夹：使用所选 CAD 文件所在文件夹；多个 CAD 不在同一目录时取第一个文件所在目录。
-- 当前文件夹/PDF：使用所选 CAD 文件所在文件夹下的 `PDF` 子目录。
+- 当前文件夹/输出格式：使用源 CAD 文件所在目录下的 `PDF`、`PNG`、`JPG`、`DWF` 或 `DWG` 子目录。
 - 指定文件夹：手动选择输出目录。
 
 ## PDF 工具
@@ -209,9 +211,7 @@ dotnet build BatchPlotter.csproj -c Release
 编译全部平台：
 
 ```powershell
-dotnet build BatchPlotter.csproj -c Release
-dotnet build AcadBatchPlot.csproj -c Release
-dotnet build AcadBatchPlot.Core.csproj -c Release
+.\scripts\build-dll.ps1 -Target All -Configuration Release
 ```
 
 生成结果：
@@ -220,11 +220,19 @@ dotnet build AcadBatchPlot.Core.csproj -c Release
 | --- | --- | --- |
 | `BatchPlotter.csproj` | `bin\` | `BatchPlotter.dll` |
 | `AcadBatchPlot.csproj` | `bin-acad\` | `AcadBatchPlot.dll` |
-| `AcadBatchPlot.Core.csproj` | `bin-acad2025之后\` | `AcadBatchPlot.Core.dll` |
+| `AcadBatchPlot.Core.csproj` | `bin-acad2025-2027\` | `AcadBatchPlot.Core.dll` |
+
+生成本地发布目录与三组 ZIP：
+
+```powershell
+.\scripts\package-release.ps1 -Version 1.13
+```
+
+输出位于 `release\v1.13\`，包含 ZWCAD、AutoCAD 2015–2024、AutoCAD 2025–2027 三组完整安装目录和对应压缩包。
 
 ## 说明
 
-本项目支持中望 CAD Enterprise 和 AutoCAD 2015 ~ 2025+。其他版本可能可以运行，但需要自行验证托管 DLL 兼容性。
+本项目支持 ZWCAD Enterprise，以及 AutoCAD 2015 ~ 2024 和 AutoCAD 2025 ~ 2027 两个兼容组。其他版本可能可以运行，但不在当前发布范围内。
 
 ## 协议
 

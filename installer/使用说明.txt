@@ -1,4 +1,7 @@
-中望 CAD 批量打印插件
+ZWCAD 批量打印插件 v1.13
+
+支持输出：PDF、PNG、JPG、DWF、DWG。
+PNG/JPG 使用插件自有 LA_png / LA_jpg 设备，预览与所选输出格式一致。
 
 安装：
 1. 关闭中望 CAD。
