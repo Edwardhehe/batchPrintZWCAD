@@ -100,49 +100,31 @@ public static class AcadPlotterInstaller
 
     public static string InstallPngPlotter()
     {
-        try
-        {
-            var targetRoot = GetAutoCadPlotterDirectory();
-            if (string.IsNullOrWhiteSpace(targetRoot))
-            {
-                return "";
-            }
-
-            var targetPmpDir = Path.Combine(targetRoot, "PMP Files");
-            var sourcePmp = Path.Combine(targetPmpDir, PreferredPmp);
-            var targetPmp = Path.Combine(targetPmpDir, PreferredPngPmp);
-            if (!File.Exists(sourcePmp))
-            {
-                return "";
-            }
-
-            Directory.CreateDirectory(targetRoot);
-            Directory.CreateDirectory(targetPmpDir);
-            File.Copy(sourcePmp, targetPmp, overwrite: true);
-
-            var sourcePc5 = Directory.GetFiles(targetRoot, "*.pc5")
-                .Where(path => !string.Equals(Path.GetFileName(path), PreferredPngPlotter, StringComparison.OrdinalIgnoreCase))
-                .OrderBy(path => string.Equals(Path.GetFileName(path), "ZWCAD Virtual PNG Plotter.pc5", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
-                .FirstOrDefault(path => Path.GetFileName(path).IndexOf("PNG", StringComparison.OrdinalIgnoreCase) >= 0);
-            var targetPc5 = Path.Combine(targetRoot, PreferredPngPlotter);
-            if (string.IsNullOrWhiteSpace(sourcePc5))
-            {
-                return File.Exists(targetPc5) ? PreferredPngPlotter : "";
-            }
-
-            var encoding = System.Text.Encoding.GetEncoding(936);
-            var text = File.ReadAllText(sourcePc5, encoding);
-            text = Regex.Replace(text, @"(?im)^pmp_filepath=.*$", "pmp_filepath=" + targetPmp);
-            File.WriteAllText(targetPc5, text, encoding);
-            return File.Exists(targetPc5) && File.Exists(targetPmp) ? PreferredPngPlotter : "";
-        }
-        catch
-        {
-            return "";
-        }
+        return InstallRasterPlotter(
+            PreferredPngPlotter,
+            PreferredPngPmp,
+            new[] { "ZWCAD Virtual PNG Plotter.pc5", "ZWPLOT_PNG.pc5" },
+            name => name.IndexOf("PNG", StringComparison.OrdinalIgnoreCase) >= 0,
+            PreferredPngPlotter);
     }
 
     public static string InstallJpgPlotter()
+    {
+        return InstallRasterPlotter(
+            PreferredJpgPlotter,
+            PreferredJpgPmp,
+            new[] { "ZWCAD Virtual JPEG Plotter.pc5", "ZWPLOT_JPG.pc5" },
+            name => name.IndexOf("JPG", StringComparison.OrdinalIgnoreCase) >= 0
+                    || name.IndexOf("JPEG", StringComparison.OrdinalIgnoreCase) >= 0,
+            PreferredJpgPlotter);
+    }
+
+    private static string InstallRasterPlotter(
+        string targetPlotterName,
+        string targetPmpName,
+        string[] preferredNames,
+        Func<string, bool> fallbackPredicate,
+        string excludedGeneratedName)
     {
         try
         {
@@ -152,38 +134,72 @@ public static class AcadPlotterInstaller
                 return "";
             }
 
-            var targetPmpDir = Path.Combine(targetRoot, "PMP Files");
-            var sourcePmp = Path.Combine(targetPmpDir, PreferredPmp);
-            var targetPmp = Path.Combine(targetPmpDir, PreferredJpgPmp);
-            if (!File.Exists(sourcePmp))
+            var bundledRoot = FindBundledPlotterRoot();
+            var bundledPmp = string.IsNullOrWhiteSpace(bundledRoot)
+                ? ""
+                : Path.Combine(bundledRoot, "PMP Files", PreferredPmp);
+            if (string.IsNullOrWhiteSpace(bundledPmp) || !IsUsableFile(bundledPmp))
             {
                 return "";
             }
 
+            var targetPmpDirectory = Path.Combine(targetRoot, "PMP Files");
             Directory.CreateDirectory(targetRoot);
-            Directory.CreateDirectory(targetPmpDir);
-            File.Copy(sourcePmp, targetPmp, overwrite: true);
+            Directory.CreateDirectory(targetPmpDirectory);
+            var targetPc5 = Path.Combine(targetRoot, targetPlotterName);
+            var targetPmp = Path.Combine(targetPmpDirectory, targetPmpName);
 
-            var sourcePc5 = Directory.GetFiles(targetRoot, "*.pc5")
-                .Where(path => !string.Equals(Path.GetFileName(path), PreferredJpgPlotter, StringComparison.OrdinalIgnoreCase))
-                .OrderBy(path => string.Equals(Path.GetFileName(path), "ZWCAD Virtual JPEG Plotter.pc5", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
-                .FirstOrDefault(path => Path.GetFileName(path).IndexOf("JPG", StringComparison.OrdinalIgnoreCase) >= 0
-                                        || Path.GetFileName(path).IndexOf("JPEG", StringComparison.OrdinalIgnoreCase) >= 0);
-            var targetPc5 = Path.Combine(targetRoot, PreferredJpgPlotter);
-            if (string.IsNullOrWhiteSpace(sourcePc5))
+            var sources = Directory.EnumerateFiles(targetRoot, "*.pc5", SearchOption.AllDirectories)
+                .Where(path => !string.Equals(
+                    Path.GetFileName(path),
+                    excludedGeneratedName,
+                    StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            string? sourcePc5 = null;
+            foreach (var preferredName in preferredNames)
             {
-                return File.Exists(targetPc5) ? PreferredJpgPlotter : "";
+                sourcePc5 = sources.FirstOrDefault(path =>
+                    string.Equals(Path.GetFileName(path), preferredName, StringComparison.OrdinalIgnoreCase));
+                if (!string.IsNullOrWhiteSpace(sourcePc5))
+                {
+                    break;
+                }
             }
 
+            sourcePc5 ??= sources.FirstOrDefault(path => fallbackPredicate(Path.GetFileName(path)));
+            if (string.IsNullOrWhiteSpace(sourcePc5))
+            {
+                return "";
+            }
+
+            // 软件自有 PNG/JPG PC5 继承对应栅格驱动，但纸张始终来自随插件发布的独立 PMP。
+            // 覆盖范围仅限 LA_png/LA_jpg，可修复旧版曾错误复制的栅格配置，不影响用户其他设备。
+            File.Copy(bundledPmp, targetPmp, overwrite: true);
             var encoding = System.Text.Encoding.GetEncoding(936);
             var text = File.ReadAllText(sourcePc5, encoding);
             text = Regex.Replace(text, @"(?im)^pmp_filepath=.*$", "pmp_filepath=" + targetPmp);
             File.WriteAllText(targetPc5, text, encoding);
-            return File.Exists(targetPc5) && File.Exists(targetPmp) ? PreferredJpgPlotter : "";
+            return IsUsableFile(targetPc5) && IsUsableFile(targetPmp) ? targetPlotterName : "";
         }
         catch
         {
             return "";
+        }
+    }
+
+    public static void RefreshPlotterDevices()
+    {
+        try
+        {
+            // ZWCAD 没有公开的全局 PC5 刷新入口，通过临时 PlotSettings 强制重读设备/纸张列表。
+            using var settings = new ZwSoft.ZwCAD.DatabaseServices.PlotSettings(true);
+            var validator = ZwSoft.ZwCAD.DatabaseServices.PlotSettingsValidator.Current;
+            validator.SetPlotConfigurationName(settings, "None", null);
+            validator.RefreshLists(settings);
+        }
+        catch
+        {
+            // 调用方会检查 LA_png/LA_jpg 是否出现在当前枚举中；失败时明确报错，不回退自带设备。
         }
     }
 

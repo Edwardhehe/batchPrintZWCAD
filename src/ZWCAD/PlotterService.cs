@@ -948,13 +948,14 @@ public static class PlotterService
         bool modelType)
     {
         var media = GetMediaNames(validator, plotSettings, deviceName, modelType);
-        return SelectMediaFromNames(media, job, settings);
+        return SelectMediaFromNames(media, job, settings, deviceName);
     }
 
     private static MediaSelection? SelectMediaFromNames(
         IReadOnlyList<string> media,
         PlotJob job,
-        AppSettings settings)
+        AppSettings settings,
+        string deviceName)
     {
         if (media.Count == 0)
         {
@@ -973,24 +974,79 @@ public static class PlotterService
         if (job.RequireExactPaperSize)
             return null;
 
-        if (!settings.AllowStandardPaperNameFallback)
+        if (settings.AllowStandardPaperNameFallback)
+        {
+            var paperName = job.PaperName ?? "";
+            var basePaper = paperName.Replace("+", "");
+            if (paperName.EndsWith("+", StringComparison.OrdinalIgnoreCase))
+            {
+                var longNamed = media.FirstOrDefault(x => x.IndexOf(paperName, StringComparison.OrdinalIgnoreCase) >= 0)
+                    ?? media.FirstOrDefault(x => x.IndexOf(basePaper, StringComparison.OrdinalIgnoreCase) >= 0
+                        && x.IndexOf("加长", StringComparison.OrdinalIgnoreCase) >= 0);
+                if (longNamed != null)
+                {
+                    return new MediaSelection { Name = longNamed, NeedsRotation = false };
+                }
+            }
+            else
+            {
+                var named = media.FirstOrDefault(x => x.IndexOf(basePaper, StringComparison.OrdinalIgnoreCase) >= 0)
+                    ?? media.FirstOrDefault(x => x.IndexOf(basePaper.Replace("A", "ISO_A"), StringComparison.OrdinalIgnoreCase) >= 0);
+                if (named != null)
+                {
+                    return new MediaSelection { Name = named, NeedsRotation = false };
+                }
+            }
+
+        }
+
+        return IsRasterPlotDevice(deviceName)
+            ? FindRasterMediaByAspectRatio(media, job.PaperWidthMm, job.PaperHeightMm)
+            : null;
+    }
+
+    private static MediaSelection? FindRasterMediaByAspectRatio(
+        IEnumerable<string> mediaNames,
+        double targetWidth,
+        double targetHeight)
+    {
+        if (targetWidth <= 0d || targetHeight <= 0d)
         {
             return null;
         }
 
-        var paperName = job.PaperName ?? "";
-        var basePaper = paperName.Replace("+", "");
-        if (paperName.EndsWith("+", StringComparison.OrdinalIgnoreCase))
-        {
-            var longNamed = media.FirstOrDefault(x => x.IndexOf(paperName, StringComparison.OrdinalIgnoreCase) >= 0)
-                ?? media.FirstOrDefault(x => x.IndexOf(basePaper, StringComparison.OrdinalIgnoreCase) >= 0
-                    && x.IndexOf("加长", StringComparison.OrdinalIgnoreCase) >= 0);
-            return longNamed == null ? null : new MediaSelection { Name = longNamed, NeedsRotation = false };
-        }
+        var targetAspect = Math.Max(targetWidth, targetHeight) / Math.Min(targetWidth, targetHeight);
+        // 原生 PNG/JPG 绘图器的介质通常以像素命名，并不等于 A 系列毫米纸张。
+        // 按长宽比选择最接近且分辨率最大的介质，再由 ScaleToFit 保证图框完整输出。
+        return mediaNames
+            .Select(name => new { Name = name, Size = TryParseMediaSize(name) })
+            .Where(item => item.Size != null
+                           && item.Size.Value.Width > 0d
+                           && item.Size.Value.Height > 0d)
+            .Select(item => new
+            {
+                item.Name,
+                Width = item.Size!.Value.Width,
+                Height = item.Size.Value.Height,
+                AspectError = Math.Abs(Math.Log(
+                    (Math.Max(item.Size.Value.Width, item.Size.Value.Height)
+                     / Math.Min(item.Size.Value.Width, item.Size.Value.Height)) / targetAspect))
+            })
+            .OrderBy(item => item.AspectError)
+            .ThenByDescending(item => item.Width * item.Height)
+            .Select(item => new MediaSelection
+            {
+                Name = item.Name,
+                NeedsRotation = (item.Width >= item.Height) != (targetWidth >= targetHeight)
+            })
+            .FirstOrDefault();
+    }
 
-        var named = media.FirstOrDefault(x => x.IndexOf(basePaper, StringComparison.OrdinalIgnoreCase) >= 0)
-            ?? media.FirstOrDefault(x => x.IndexOf(basePaper.Replace("A", "ISO_A"), StringComparison.OrdinalIgnoreCase) >= 0);
-        return named == null ? null : new MediaSelection { Name = named, NeedsRotation = false };
+    private static bool IsRasterPlotDevice(string deviceName)
+    {
+        return deviceName.IndexOf("PNG", StringComparison.OrdinalIgnoreCase) >= 0
+               || deviceName.IndexOf("JPG", StringComparison.OrdinalIgnoreCase) >= 0
+               || deviceName.IndexOf("JPEG", StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
     private static MediaSelection? TrySelectExactSingleMediaWithoutRefresh(
@@ -1008,7 +1064,7 @@ public static class PlotterService
         validator.SetPlotConfigurationName(plotSettings, deviceName, null);
         TrySetPlotPaperUnits(validator, plotSettings, PlotPaperUnit.Millimeters);
         var names = validator.GetCanonicalMediaNameList(plotSettings).Cast<string>().ToList();
-        var media = SelectMediaFromNames(names, job, settings);
+        var media = SelectMediaFromNames(names, job, settings, deviceName);
         if (media != null)
             SetCachedMediaNames(deviceName, modelType, names);
 
@@ -1066,7 +1122,10 @@ public static class PlotterService
             : Path.Combine(plottersDirectory, deviceName);
         var pmpPath = string.IsNullOrWhiteSpace(plottersDirectory)
             ? ""
-            : Path.Combine(plottersDirectory, "PMP Files", "LA_pdf.pmp");
+            : Path.Combine(
+                plottersDirectory,
+                "PMP Files",
+                Path.GetFileNameWithoutExtension(deviceName) + ".pmp");
         return string.Join("|", deviceName, modelType ? "M" : "P", GetFileFingerprint(devicePath), GetFileFingerprint(pmpPath));
     }
 

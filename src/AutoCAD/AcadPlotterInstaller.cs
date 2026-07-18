@@ -155,49 +155,29 @@ public static class AcadPlotterInstaller
 
     public static string InstallPngPlotter()
     {
-        try
-        {
-            var targetRoot = GetAutoCadPlotterDirectory();
-            if (string.IsNullOrWhiteSpace(targetRoot))
-            {
-                return "";
-            }
-
-            var targetPc3 = Path.Combine(targetRoot, PreferredPngPlotter);
-            var targetPmpDir = Path.Combine(targetRoot, "PMP Files");
-            var targetPmp = Path.Combine(targetPmpDir, PreferredPngPmp);
-            Directory.CreateDirectory(targetRoot);
-            Directory.CreateDirectory(targetPmpDir);
-
-            var sourcePc3 = Directory.GetFiles(targetRoot, "*.pc3")
-                .Where(path => !string.Equals(Path.GetFileName(path), PreferredPngPlotter, StringComparison.OrdinalIgnoreCase))
-                .OrderBy(path => string.Equals(Path.GetFileName(path), "PublishToWeb PNG.pc3", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
-                .FirstOrDefault(path => Path.GetFileName(path).IndexOf("PNG", StringComparison.OrdinalIgnoreCase) >= 0
-                                        && Path.GetFileName(path).IndexOf("Transparent", StringComparison.OrdinalIgnoreCase) < 0);
-            if (string.IsNullOrWhiteSpace(sourcePc3))
-            {
-                return File.Exists(targetPc3) ? PreferredPngPlotter : "";
-            }
-
-            var raw = File.ReadAllText(sourcePc3);
-            if (TryReadPia3Json(raw, out var pia3Root))
-            {
-                InstallPia3FromCurrentDwgToPdf(pia3Root, targetPc3, targetPmp);
-            }
-            else
-            {
-                InstallPia2FromSource(sourcePc3, targetPc3, targetPmp, "");
-            }
-
-            return File.Exists(targetPc3) && File.Exists(targetPmp) ? PreferredPngPlotter : "";
-        }
-        catch
-        {
-            return "";
-        }
+        return InstallRasterPlotter(
+            PreferredPngPlotter,
+            PreferredPngPmp,
+            new[] { "PublishToWeb PNG.pc3" },
+            name => name.IndexOf("PNG", StringComparison.OrdinalIgnoreCase) >= 0
+                    && name.IndexOf("Transparent", StringComparison.OrdinalIgnoreCase) < 0);
     }
 
     public static string InstallJpgPlotter()
+    {
+        return InstallRasterPlotter(
+            PreferredJpgPlotter,
+            PreferredJpgPmp,
+            new[] { "PublishToWeb JPG.pc3" },
+            name => name.IndexOf("JPG", StringComparison.OrdinalIgnoreCase) >= 0
+                    || name.IndexOf("JPEG", StringComparison.OrdinalIgnoreCase) >= 0);
+    }
+
+    private static string InstallRasterPlotter(
+        string targetPlotterName,
+        string targetPmpName,
+        IEnumerable<string> preferredNames,
+        Func<string, bool> fallbackPredicate)
     {
         try
         {
@@ -207,37 +187,101 @@ public static class AcadPlotterInstaller
                 return "";
             }
 
-            var targetPc3 = Path.Combine(targetRoot, PreferredJpgPlotter);
-            var targetPmpDir = Path.Combine(targetRoot, "PMP Files");
-            var targetPmp = Path.Combine(targetPmpDir, PreferredJpgPmp);
+            var targetPmpDirectory = Path.Combine(targetRoot, "PMP Files");
             Directory.CreateDirectory(targetRoot);
-            Directory.CreateDirectory(targetPmpDir);
+            Directory.CreateDirectory(targetPmpDirectory);
+            var targetPc3 = Path.Combine(targetRoot, targetPlotterName);
+            var targetPmp = Path.Combine(targetPmpDirectory, targetPmpName);
 
-            var sourcePc3 = Directory.GetFiles(targetRoot, "*.pc3")
-                .Where(path => !string.Equals(Path.GetFileName(path), PreferredJpgPlotter, StringComparison.OrdinalIgnoreCase))
-                .OrderBy(path => string.Equals(Path.GetFileName(path), "PublishToWeb JPG.pc3", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
-                .FirstOrDefault(path => Path.GetFileName(path).IndexOf("JPG", StringComparison.OrdinalIgnoreCase) >= 0
-                                        || Path.GetFileName(path).IndexOf("JPEG", StringComparison.OrdinalIgnoreCase) >= 0);
-            if (string.IsNullOrWhiteSpace(sourcePc3))
+            var sources = Directory.EnumerateFiles(targetRoot, "*.pc3", SearchOption.AllDirectories)
+                .Where(path => !string.Equals(
+                    Path.GetFileName(path),
+                    targetPlotterName,
+                    StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            foreach (var preferredName in preferredNames)
             {
-                return File.Exists(targetPc3) ? PreferredJpgPlotter : "";
+                var preferredSource = sources.FirstOrDefault(path =>
+                    string.Equals(Path.GetFileName(path), preferredName, StringComparison.OrdinalIgnoreCase));
+                if (!string.IsNullOrWhiteSpace(preferredSource))
+                {
+                    return GenerateRasterPlotter(preferredSource, targetPc3, targetPmp, targetPlotterName);
+                }
             }
 
-            var raw = File.ReadAllText(sourcePc3);
-            if (TryReadPia3Json(raw, out var pia3Root))
-            {
-                InstallPia3FromCurrentDwgToPdf(pia3Root, targetPc3, targetPmp);
-            }
-            else
-            {
-                InstallPia2FromSource(sourcePc3, targetPc3, targetPmp, "");
-            }
-
-            return File.Exists(targetPc3) && File.Exists(targetPmp) ? PreferredJpgPlotter : "";
+            var fallbackSource = sources.FirstOrDefault(path => fallbackPredicate(Path.GetFileName(path)));
+            return string.IsNullOrWhiteSpace(fallbackSource)
+                ? ""
+                : GenerateRasterPlotter(fallbackSource, targetPc3, targetPmp, targetPlotterName);
         }
         catch
         {
             return "";
+        }
+    }
+
+    private static string GenerateRasterPlotter(
+        string sourcePc3,
+        string targetPc3,
+        string targetPmp,
+        string targetPlotterName)
+    {
+        // 栅格 PC3 必须继承 PNG/JPG 自身的驱动与图像参数；仅将软件纸张写入独立 PMP。
+        // 目标仅为本插件的 LA_png/LA_jpg，不读取或改写用户其他绘图器设置。
+        var raw = File.ReadAllText(sourcePc3);
+        if (TryReadPia3Json(raw, out var pia3Root))
+        {
+            InstallPia3RasterFromSource(pia3Root, targetPc3, targetPmp);
+        }
+        else
+        {
+            InstallPia2RasterFromSource(sourcePc3, targetPc3, targetPmp, ReadDriverPath(sourcePc3));
+        }
+
+        return IsValidPlotterFile(targetPc3) && IsValidPlotterFile(targetPmp)
+            ? targetPlotterName
+            : "";
+    }
+
+    public static void RefreshPlotterDevices()
+    {
+        try
+        {
+            // 新用户首次安装时 PC3 在 CAD 启动后才生成，必须刷新全局设备列表才能在当前会话使用。
+            Autodesk.AutoCAD.PlottingServices.PlotConfigManager.RefreshList(
+                Autodesk.AutoCAD.PlottingServices.RefreshCode.RefreshPC3DevicesList);
+        }
+        catch
+        {
+            // 调用方随后会按当前枚举结果校验；刷新失败时不得回退到 CAD 自带设备。
+        }
+    }
+
+    public static (double X, double Y) GetRasterDpi(string deviceName)
+    {
+        try
+        {
+            var plottersDirectory = GetAutoCadPlotterDirectory();
+            var pc3Path = string.IsNullOrWhiteSpace(plottersDirectory)
+                ? ""
+                : Path.Combine(plottersDirectory, Path.GetFileName(deviceName));
+            if (!File.Exists(pc3Path))
+            {
+                return (100d, 100d);
+            }
+
+            var raw = File.ReadAllText(pc3Path);
+            if (TryReadPia3Json(raw, out var pia3Root))
+            {
+                return ReadPia3RasterDpi(pia3Root);
+            }
+
+            return ReadPia2RasterDpi(new PlotterConfiguration(pc3Path));
+        }
+        catch
+        {
+            // AutoCAD 自带的 PublishToWeb 默认为 100 DPI；读取失败时仅用于单位换算，不修改任何 PC3。
+            return (100d, 100d);
         }
     }
 
@@ -553,6 +597,64 @@ public static class AcadPlotterInstaller
         pmp.Saves(targetPmp);
     }
 
+    private static void InstallPia2RasterFromSource(string sourcePc3, string targetPc3, string targetPmp, string driverPath)
+    {
+        var pc3 = new PlotterConfiguration(sourcePc3)
+        {
+            ModelPath = targetPmp,
+            ModelBase = Path.GetFileNameWithoutExtension(targetPmp),
+            TruetypeAsText = true
+        };
+        if (!string.IsNullOrWhiteSpace(driverPath))
+        {
+            pc3.DriverPath = driverPath;
+        }
+
+        var dpi = ReadPia2RasterDpi(pc3);
+        pc3.Saves(targetPc3);
+
+        var pmp = new PlotterConfiguration(sourcePc3)
+        {
+            ModelPath = targetPmp,
+            ModelBase = Path.GetFileNameWithoutExtension(targetPmp),
+            TruetypeAsText = true
+        };
+        if (!string.IsNullOrWhiteSpace(driverPath))
+        {
+            pmp.DriverPath = driverPath;
+        }
+
+        pmp.Remove("media");
+        pmp.Remove("io");
+        pmp.Remove("res_color_mem");
+        pmp.Remove("custom");
+        pmp.Remove("mod");
+        pmp.Remove("del");
+        pmp.Remove("udm");
+        pmp.Remove("hidden");
+        // AutoCAD 的 PNG/JPG 驱动不接受 PDF 型毫米介质，必须按源 PC3 的 DPI 生成像素型 PMP。
+        AddPia2RasterMediaContainers(pmp, dpi.X, dpi.Y);
+        pmp.Saves(targetPmp);
+    }
+
+    private static void InstallPia3RasterFromSource(JObject sourceRoot, string targetPc3, string targetPmp)
+    {
+        var pc3Root = (JObject)sourceRoot.DeepClone();
+        NormalizePia3RootMeta(pc3Root, targetPmp);
+        var dpi = ReadPia3RasterDpi(pc3Root);
+        File.WriteAllText(targetPc3, "PIAFILEVERSION_3.0,json\n" + pc3Root.ToString(Formatting.Indented));
+
+        var pmpRoot = (JObject)sourceRoot.DeepClone();
+        var data = EnsureObject(pmpRoot, "data");
+        data.Remove("media");
+        data.Remove("io");
+        data.Remove("res_color_mem");
+        data.Remove("custom");
+        NormalizePia3RootMeta(pmpRoot, targetPmp);
+        AddPia3RasterUserMedia(data, dpi.X, dpi.Y);
+        File.WriteAllText(targetPmp, "PIAFILEVERSION_3.0,json\n" + pmpRoot.ToString(Formatting.Indented));
+    }
+
     private static void NormalizePia3RootMeta(JObject root, string pmpPath)
     {
         var meta = EnsureObject(EnsureObject(root, "data"), "meta");
@@ -624,6 +726,13 @@ public static class AcadPlotterInstaller
         public double Height { get; set; }
     }
 
+    private sealed class RasterPaperSpec
+    {
+        public string Name { get; set; } = "";
+        public int WidthPixels { get; set; }
+        public int HeightPixels { get; set; }
+    }
+
     private static IEnumerable<PaperSpec> StandardUserPapers()
     {
         var basePapers = new[]
@@ -651,6 +760,90 @@ public static class AcadPlotterInstaller
                 };
             }
         }
+    }
+
+    private static IEnumerable<RasterPaperSpec> RasterUserPapers(double dpiX, double dpiY)
+    {
+        foreach (var paper in StandardUserPapers())
+        {
+            var landscape = CreateRasterPaper(paper.Name, paper.Width, paper.Height, dpiX, dpiY);
+            yield return landscape;
+
+            // 树格驱动的 PMP 以像素画布记录方向，横竖两个介质都写入可避免旋转后再次匹配失败。
+            var portrait = CreateRasterPaper(paper.Name, paper.Height, paper.Width, dpiX, dpiY);
+            if (portrait.WidthPixels != landscape.WidthPixels || portrait.HeightPixels != landscape.HeightPixels)
+            {
+                yield return portrait;
+            }
+        }
+    }
+
+    private static RasterPaperSpec CreateRasterPaper(
+        string name,
+        double widthMm,
+        double heightMm,
+        double dpiX,
+        double dpiY)
+    {
+        return new RasterPaperSpec
+        {
+            Name = name,
+            WidthPixels = Math.Max(1, (int)Math.Round(widthMm / 25.4d * dpiX, MidpointRounding.AwayFromZero)),
+            HeightPixels = Math.Max(1, (int)Math.Round(heightMm / 25.4d * dpiY, MidpointRounding.AwayFromZero))
+        };
+    }
+
+    private static (double X, double Y) ReadPia2RasterDpi(PlotterConfiguration config)
+    {
+        var resolution = config["res_color_mem"]?["resolution"];
+        return (
+            ReadPositiveNumber(resolution?.NodeMap, "effective_resolution_x", "addr_resolution_x", "phys_resolution_x"),
+            ReadPositiveNumber(resolution?.NodeMap, "effective_resolution_y", "addr_resolution_y", "phys_resolution_y"));
+    }
+
+    private static (double X, double Y) ReadPia3RasterDpi(JObject root)
+    {
+        var resolution = root["data"]?["res_color_mem"]?["resolution"] as JObject;
+        return (
+            ReadPositiveNumber(resolution, "effective_resolution_x", "addr_resolution_x", "phys_resolution_x"),
+            ReadPositiveNumber(resolution, "effective_resolution_y", "addr_resolution_y", "phys_resolution_y"));
+    }
+
+    private static double ReadPositiveNumber(
+        IReadOnlyDictionary<string, string>? values,
+        params string[] keys)
+    {
+        if (values != null)
+        {
+            foreach (var key in keys)
+            {
+                if (values.TryGetValue(key, out var raw)
+                    && double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var value)
+                    && value > 0d)
+                {
+                    return value;
+                }
+            }
+        }
+
+        return 100d;
+    }
+
+    private static double ReadPositiveNumber(JObject? values, params string[] keys)
+    {
+        if (values != null)
+        {
+            foreach (var key in keys)
+            {
+                var value = values.Value<double?>(key);
+                if (value > 0d)
+                {
+                    return value.Value;
+                }
+            }
+        }
+
+        return 100d;
     }
 
     private static JObject CreatePia3Description(PaperSpec paper)
@@ -715,6 +908,141 @@ public static class AcadPlotterInstaller
         config.Add("hidden", "").Add("media", caps);
     }
 
+    private static void AddPia2RasterMediaContainers(PlotterConfiguration config, double dpiX, double dpiY)
+    {
+        const string caps = "{\n"
+            + "abilities=\"500505500500505555000005550000000550000500000500555\n"
+            + "caps_state=\"000000000000000000000000000000000000000000000000000\n"
+            + "ui_owner=\"11111111111111111111110\n"
+            + "size_max_x=320000.0\n"
+            + "size_max_y=320000.0\n"
+            + "max_roll_height=320000.0\n}";
+
+        config.Add("mod", "").Add("media", caps);
+        config.Add("del", "").Add("media", caps);
+        var udm = config.Add("udm", "");
+        udm.Add("calibration", "{\n_x=1.0\n_y=1.0\n}");
+        var media = udm.Add("media", caps);
+        var size = media.Add("size");
+        var description = media.Add("description");
+        var index = 0;
+        foreach (var paper in RasterUserPapers(dpiX, dpiY))
+        {
+            var id = index.ToString(CultureInfo.InvariantCulture);
+            size.Add(id, CreatePia2RasterSizeText(id, paper));
+            description.Add(id, CreatePia2RasterDescriptionText(id, paper));
+            index++;
+        }
+
+        config.Add("hidden", "").Add("media", caps);
+    }
+
+    private static string CreatePia2RasterSizeText(string id, RasterPaperSpec paper)
+    {
+        var width = paper.WidthPixels;
+        var height = paper.HeightPixels;
+        return id + "{\n"
+            + "caps_type=2\n"
+            + $"name=\"UserDefinedRaster ({FormatPixels(width)} x {FormatPixels(height)}Pixels)\n"
+            + $"localized_name=\"{paper.Name} ({FormatPixels(width)} x {FormatPixels(height)} Pixels)\n"
+            + $"media_description_name=\"{RasterMediaDescriptionName(paper)}\n"
+            + "media_group=16\n"
+            + $"landscape_mode={(width >= height ? "TRUE" : "FALSE")}\n}}";
+    }
+
+    private static string CreatePia2RasterDescriptionText(string id, RasterPaperSpec paper)
+    {
+        var printableWidth = Math.Max(0, paper.WidthPixels - 1);
+        var printableHeight = Math.Max(0, paper.HeightPixels - 1);
+        return id + "{\n"
+            + "caps_type=2\n"
+            + $"name=\"{RasterMediaDescriptionName(paper)}\n"
+            + $"media_bounds_urx={FormatNumber(paper.WidthPixels)}\n"
+            + $"media_bounds_ury={FormatNumber(paper.HeightPixels)}\n"
+            + "printable_bounds_llx=0.0\n"
+            + "printable_bounds_lly=0.0\n"
+            + $"printable_bounds_urx={FormatNumber(printableWidth)}\n"
+            + $"printable_bounds_ury={FormatNumber(printableHeight)}\n"
+            + $"printable_area={FormatNumber((double)printableWidth * printableHeight)}\n"
+            + "dimensional=FALSE\n}";
+    }
+
+    private static void AddPia3RasterUserMedia(JObject data, double dpiX, double dpiY)
+    {
+        var mediaCaps = CreateRasterMediaCaps();
+        data["mod"] = new JObject { ["media"] = mediaCaps.DeepClone() };
+        data["del"] = new JObject { ["media"] = mediaCaps.DeepClone() };
+        data["hidden"] = new JObject { ["media"] = mediaCaps.DeepClone() };
+
+        var descriptions = new JObject();
+        var sizes = new JObject();
+        var index = 0;
+        foreach (var paper in RasterUserPapers(dpiX, dpiY))
+        {
+            var id = index.ToString(CultureInfo.InvariantCulture);
+            descriptions[id] = CreatePia3RasterDescription(paper);
+            sizes[id] = CreatePia3RasterSize(paper);
+            index++;
+        }
+
+        var udmMedia = (JObject)mediaCaps.DeepClone();
+        udmMedia["description"] = descriptions;
+        udmMedia["size"] = sizes;
+        data["udm"] = new JObject
+        {
+            ["calibration"] = new JObject { ["_x"] = 1.0, ["_y"] = 1.0 },
+            ["media"] = udmMedia
+        };
+    }
+
+    private static JObject CreateRasterMediaCaps() => new()
+    {
+        ["abilities"] = "500505500500505555000005550000000550000500000500555",
+        ["caps_state"] = "000000000000000000000000000000000000000000000000000",
+        ["ui_owner"] = "11111111111111111111110",
+        ["size_max_x"] = 320000.0,
+        ["size_max_y"] = 320000.0,
+        ["max_roll_height"] = 320000.0
+    };
+
+    private static JObject CreatePia3RasterSize(RasterPaperSpec paper) => new()
+    {
+        ["caps_type"] = 2,
+        ["name"] = $"UserDefinedRaster ({FormatPixels(paper.WidthPixels)} x {FormatPixels(paper.HeightPixels)}Pixels)",
+        ["localized_name"] = $"{paper.Name} ({FormatPixels(paper.WidthPixels)} x {FormatPixels(paper.HeightPixels)} Pixels)",
+        ["media_description_name"] = RasterMediaDescriptionName(paper),
+        ["media_group"] = 16,
+        ["landscape_mode"] = paper.WidthPixels >= paper.HeightPixels
+    };
+
+    private static JObject CreatePia3RasterDescription(RasterPaperSpec paper)
+    {
+        var printableWidth = Math.Max(0, paper.WidthPixels - 1);
+        var printableHeight = Math.Max(0, paper.HeightPixels - 1);
+        return new JObject
+        {
+            ["caps_type"] = 2,
+            ["name"] = RasterMediaDescriptionName(paper),
+            ["media_bounds_urx"] = paper.WidthPixels,
+            ["media_bounds_ury"] = paper.HeightPixels,
+            ["printable_bounds_llx"] = 0.0,
+            ["printable_bounds_lly"] = 0.0,
+            ["printable_bounds_urx"] = printableWidth,
+            ["printable_bounds_ury"] = printableHeight,
+            ["printable_area"] = (double)printableWidth * printableHeight,
+            ["dimensional"] = false
+        };
+    }
+
+    private static string RasterMediaDescriptionName(RasterPaperSpec paper)
+    {
+        var width = paper.WidthPixels;
+        var height = paper.HeightPixels;
+        var orientation = width >= height ? "Landscape" : "Portrait";
+        return $"UserDefinedRaster {orientation} {FormatPixels(width)}W x {FormatPixels(height)}H - "
+            + $"(0, 0) x ({Math.Max(0, width - 1)}, {Math.Max(0, height - 1)}) ={(long)width * height} Pixels";
+    }
+
     private static string CreatePia2SizeText(string id, PaperSpec paper)
     {
         return id + "{\n"
@@ -742,6 +1070,8 @@ public static class AcadPlotterInstaller
     }
 
     private static string FormatMm(double value) => value.ToString("0.00", CultureInfo.InvariantCulture);
+
+    private static string FormatPixels(int value) => value.ToString("0.00", CultureInfo.InvariantCulture);
 
     private static string FormatPlain(double value) => value.ToString("0.##", CultureInfo.InvariantCulture);
 

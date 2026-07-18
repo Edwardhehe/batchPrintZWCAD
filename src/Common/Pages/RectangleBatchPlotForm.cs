@@ -1109,6 +1109,7 @@ public sealed class RectangleBatchPlotForm : Form
                 return;
             }
 
+            // 预览与正式输出使用同一绘图器，避免不同格式之间出现纸张或旋转差异。
             var device = SelectedDevice();
             if (string.IsNullOrWhiteSpace(device))
             {
@@ -1405,6 +1406,7 @@ public sealed class RectangleBatchPlotForm : Form
         var installedPngPlotter = AcadPlotterInstaller.InstallPngPlotter();
         var installedJpgPlotter = AcadPlotterInstaller.InstallJpgPlotter();
         var installedDwfPlotter = AcadPlotterInstaller.InstallDwfPlotter();
+        AcadPlotterInstaller.RefreshPlotterDevices();
         var validator = PlotSettingsValidator.Current;
         var devices = validator.GetPlotDeviceList()
             .Cast<object>()
@@ -1414,23 +1416,13 @@ public sealed class RectangleBatchPlotForm : Form
         _pngPlotDevice = FindPlotDevice(
             devices,
             installedPngPlotter,
-            value => value.IndexOf("PNG", StringComparison.OrdinalIgnoreCase) >= 0
-                     && value.IndexOf("Transparent", StringComparison.OrdinalIgnoreCase) < 0,
-            AcadPlotterInstaller.PreferredPngPlotter,
-            "PublishToWeb PNG.pc3",
-            "ZWCAD Virtual PNG Plotter.pc5",
-            "ZWPLOT_PNG.pc5",
-            "M_PNG.pc5");
+            _ => false,
+            AcadPlotterInstaller.PreferredPngPlotter);
         _jpgPlotDevice = FindPlotDevice(
             devices,
             installedJpgPlotter,
-            value => value.IndexOf("JPG", StringComparison.OrdinalIgnoreCase) >= 0
-                     || value.IndexOf("JPEG", StringComparison.OrdinalIgnoreCase) >= 0,
-            AcadPlotterInstaller.PreferredJpgPlotter,
-            "PublishToWeb JPG.pc3",
-            "ZWCAD Virtual JPEG Plotter.pc5",
-            "ZWPLOT_JPG.pc5",
-            "M_JPG.pc5");
+            _ => false,
+            AcadPlotterInstaller.PreferredJpgPlotter);
         _dwfPlotDevice = FindPlotDevice(
             devices,
             installedDwfPlotter,
@@ -1469,7 +1461,8 @@ public sealed class RectangleBatchPlotForm : Form
             }
         }
 
-        return devices.FirstOrDefault(fallbackPredicate) ?? installedPlotter;
+        // 只能返回 CAD 当前会话已经枚举到的设备；磁盘上刚生成但未刷新到会话的名称不可直接用于 PlotSettings。
+        return devices.FirstOrDefault(fallbackPredicate) ?? "";
     }
 
     private static void SelectOption(ComboBox combo, params string[] preferred)

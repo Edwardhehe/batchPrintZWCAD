@@ -40,6 +40,10 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
         }
 
         AcadPlotterInstaller.InstallBundledPlotter();
+        // 新用户首次加载时生成软件自有的栅格绘图器，并立即刷新当前 CAD 会话的设备缓存。
+        AcadPlotterInstaller.InstallPngPlotter();
+        AcadPlotterInstaller.InstallJpgPlotter();
+        AcadPlotterInstaller.RefreshPlotterDevices();
         CadMenuInstaller.Install(force: true);
     }
 

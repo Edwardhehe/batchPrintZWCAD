@@ -416,7 +416,11 @@ public static class PlotterService
         }
 
         validator.RefreshLists(settings);
-        validator.SetPlotPaperUnits(settings, PlotPaperUnit.Millimeters);
+        var paperUnit = IsRasterPlotDevice(deviceName)
+            ? PlotPaperUnit.Pixels
+            : PlotPaperUnit.Millimeters;
+        // AutoCAD 的 PNG/JPG 栅格设备只接受 Pixels；强制设为 Millimeters 会直接抛出 eInvalidInput。
+        validator.SetPlotPaperUnits(settings, paperUnit);
         if (media.UseClosestBySize)
         {
             validator.SetClosestMediaName(settings, media.WidthMm, media.HeightMm, PlotPaperUnit.Millimeters, false);
@@ -426,10 +430,10 @@ public static class PlotterService
             validator.SetCanonicalMediaName(settings, media.Name);
         }
 
-        EnsureRequiredMediaSize(settings, media);
+        EnsureRequiredMediaSize(settings, media, deviceName);
         validator.SetPlotWindowArea(settings, window);
         validator.SetPlotType(settings, Autodesk.AutoCAD.DatabaseServices.PlotType.Window);
-        ConfigurePlotScale(validator, settings, window, job);
+        ConfigurePlotScale(validator, settings, window, job, deviceName);
         validator.SetPlotCentered(settings, true);
         validator.SetPlotRotation(settings, rotation);
 
@@ -443,13 +447,14 @@ public static class PlotterService
         PlotSettingsValidator validator,
         PlotSettings settings,
         Extents2d window,
-        PlotJob job)
+        PlotJob job,
+        string deviceName)
     {
         if (!job.LeavePaperMargin)
         {
             if (job.UseExactWindowScale)
             {
-                SetExactWindowScale(validator, settings, window);
+                SetExactWindowScale(validator, settings, window, deviceName);
                 return;
             }
 
@@ -461,7 +466,7 @@ public static class PlotterService
         var marginMm = job.PaperMarginMm > 0d ? job.PaperMarginMm : 1d;
         var windowWidth = Math.Abs(window.MaxPoint.X - window.MinPoint.X);
         var windowHeight = Math.Abs(window.MaxPoint.Y - window.MinPoint.Y);
-        var paperSize = settings.PlotPaperSize;
+        var paperSize = GetPlotPaperSizeMm(settings, deviceName);
         var paperShortSide = Math.Min(paperSize.X, paperSize.Y);
         var windowShortSide = Math.Min(windowWidth, windowHeight);
         var usableShortSide = paperShortSide - marginMm * 2d;
@@ -480,9 +485,10 @@ public static class PlotterService
     private static void SetExactWindowScale(
         PlotSettingsValidator validator,
         PlotSettings settings,
-        Extents2d window)
+        Extents2d window,
+        string deviceName)
     {
-        var paper = settings.PlotPaperSize;
+        var paper = GetPlotPaperSizeMm(settings, deviceName);
         var windowWidth = Math.Abs(window.MaxPoint.X - window.MinPoint.X);
         var windowHeight = Math.Abs(window.MaxPoint.Y - window.MinPoint.Y);
         var paperLong = Math.Max(paper.X, paper.Y);
@@ -571,6 +577,12 @@ public static class PlotterService
             return exact;
         }
 
+        if (IsRasterPlotDevice(deviceName))
+        {
+            return BestRasterMedia(choices, targetWidth, targetHeight)
+                   ?? throw new InvalidOperationException($"栅格输出设备没有可用像素介质: {deviceName}");
+        }
+
         if (IsLongPaperName(job.PaperName ?? "") && targetWidth > 0 && targetHeight > 0)
         {
             return new MediaChoice
@@ -652,22 +664,28 @@ public static class PlotterService
 
         validator.SetPlotConfigurationName(settings, deviceName, null);
         validator.RefreshLists(settings);
-        validator.SetPlotPaperUnits(settings, PlotPaperUnit.Millimeters);
+        var isRaster = IsRasterPlotDevice(deviceName);
+        var paperUnit = isRaster ? PlotPaperUnit.Pixels : PlotPaperUnit.Millimeters;
+        var dpi = isRaster ? AcadPlotterInstaller.GetRasterDpi(deviceName) : (X: 100d, Y: 100d);
+        validator.SetPlotPaperUnits(settings, paperUnit);
 
         var catalog = new List<MediaCatalogItem>();
         foreach (var name in validator.GetCanonicalMediaNameList(settings).Cast<string>())
         {
-            var size = GetMediaSize(validator, settings, name);
+            var size = GetMediaSize(validator, settings, name, paperUnit);
             if (size == null)
             {
                 continue;
             }
 
+            var widthMm = isRaster ? PixelsToMillimeters(size.Value.Width, dpi.X) : size.Value.Width;
+            var heightMm = isRaster ? PixelsToMillimeters(size.Value.Height, dpi.Y) : size.Value.Height;
+
             catalog.Add(new MediaCatalogItem
             {
                 Name = name,
-                WidthMm = size.Value.Width,
-                HeightMm = size.Value.Height,
+                WidthMm = widthMm,
+                HeightMm = heightMm,
                 IsFullBleed = IsFullBleedMedia(name)
             });
         }
@@ -689,7 +707,10 @@ public static class PlotterService
             : Path.Combine(plottersDirectory, deviceName);
         var pmpPath = string.IsNullOrWhiteSpace(plottersDirectory)
             ? ""
-            : Path.Combine(plottersDirectory, "PMP Files", "LA_pdf.pmp");
+            : Path.Combine(
+                plottersDirectory,
+                "PMP Files",
+                Path.GetFileNameWithoutExtension(deviceName) + ".pmp");
         return string.Join("|", deviceName, modelType ? "M" : "P", GetFileFingerprint(devicePath), GetFileFingerprint(pmpPath));
     }
 
@@ -730,14 +751,50 @@ public static class PlotterService
             .FirstOrDefault();
     }
 
-    private static void EnsureRequiredMediaSize(PlotSettings settings, MediaChoice media)
+    private static MediaChoice? BestRasterMedia(
+        IEnumerable<MediaChoice> choices,
+        double targetWidth,
+        double targetHeight)
+    {
+        if (targetWidth <= 0d || targetHeight <= 0d)
+        {
+            return null;
+        }
+
+        var targetAspect = Math.Max(targetWidth, targetHeight) / Math.Min(targetWidth, targetHeight);
+        // PublishToWeb PNG/JPG 的纸张本质是像素画布，毫米尺寸不会与 A 系列图幅相等。
+        // 优先匹配长宽比，再选较大画布，避免用毫米绝对差错误地选到低质量或畸变介质。
+        return choices
+            .Where(choice => choice.WidthMm > 0d && choice.HeightMm > 0d)
+            .OrderBy(choice => Math.Abs(Math.Log(
+                (Math.Max(choice.WidthMm, choice.HeightMm)
+                 / Math.Min(choice.WidthMm, choice.HeightMm)) / targetAspect)))
+            .ThenByDescending(choice => choice.WidthMm * choice.HeightMm)
+            .Select(choice =>
+            {
+                choice.PreferredRotation = (choice.WidthMm >= choice.HeightMm) != (targetWidth >= targetHeight)
+                    ? PlotRotation.Degrees090
+                    : PlotRotation.Degrees000;
+                return choice;
+            })
+            .FirstOrDefault();
+    }
+
+    private static bool IsRasterPlotDevice(string deviceName)
+    {
+        return deviceName.IndexOf("PNG", StringComparison.OrdinalIgnoreCase) >= 0
+               || deviceName.IndexOf("JPG", StringComparison.OrdinalIgnoreCase) >= 0
+               || deviceName.IndexOf("JPEG", StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    private static void EnsureRequiredMediaSize(PlotSettings settings, MediaChoice media, string deviceName)
     {
         if (!media.RequiresExactSize)
         {
             return;
         }
 
-        var size = settings.PlotPaperSize;
+        var size = GetPlotPaperSizeMm(settings, deviceName);
         if (size.X <= 0 || size.Y <= 0)
         {
             return;
@@ -830,12 +887,16 @@ public static class PlotterService
         }
     }
 
-    private static (double Width, double Height)? GetMediaSize(PlotSettingsValidator validator, PlotSettings settings, string mediaName)
+    private static (double Width, double Height)? GetMediaSize(
+        PlotSettingsValidator validator,
+        PlotSettings settings,
+        string mediaName,
+        PlotPaperUnit paperUnit)
     {
         try
         {
             validator.SetCanonicalMediaName(settings, mediaName);
-            validator.SetPlotPaperUnits(settings, PlotPaperUnit.Millimeters);
+            validator.SetPlotPaperUnits(settings, paperUnit);
             var size = settings.PlotPaperSize;
             if (size.X > 0 && size.Y > 0)
             {
@@ -847,6 +908,25 @@ public static class PlotterService
         }
 
         return TryParseMediaSize(mediaName);
+    }
+
+    private static Point2d GetPlotPaperSizeMm(PlotSettings settings, string deviceName)
+    {
+        var size = settings.PlotPaperSize;
+        if (!IsRasterPlotDevice(deviceName))
+        {
+            return size;
+        }
+
+        var dpi = AcadPlotterInstaller.GetRasterDpi(deviceName);
+        return new Point2d(
+            PixelsToMillimeters(size.X, dpi.X),
+            PixelsToMillimeters(size.Y, dpi.Y));
+    }
+
+    private static double PixelsToMillimeters(double pixels, double dpi)
+    {
+        return pixels * 25.4d / (dpi > 0d ? dpi : 100d);
     }
 
     private static void RunPlot(PlotInfo info, string documentName, string outputPath, string sheetName)

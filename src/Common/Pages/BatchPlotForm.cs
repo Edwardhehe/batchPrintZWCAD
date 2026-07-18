@@ -403,6 +403,7 @@ public sealed class BatchPlotForm : Form
             var installedPngPlotter = AcadPlotterInstaller.InstallPngPlotter();
             var installedJpgPlotter = AcadPlotterInstaller.InstallJpgPlotter();
             var installedDwfPlotter = AcadPlotterInstaller.InstallDwfPlotter();
+            AcadPlotterInstaller.RefreshPlotterDevices();
             var validator = PlotSettingsValidator.Current;
             var devices = validator.GetPlotDeviceList()
                 .Cast<object>()
@@ -439,11 +440,7 @@ public sealed class BatchPlotForm : Form
         var preferred = new[]
         {
             installedPlotter,
-            AcadPlotterInstaller.PreferredPngPlotter,
-            "PublishToWeb PNG.pc3",
-            "ZWCAD Virtual PNG Plotter.pc5",
-            "ZWPLOT_PNG.pc5",
-            "M_PNG.pc5"
+            AcadPlotterInstaller.PreferredPngPlotter
         };
         foreach (var expected in preferred.Where(value => !string.IsNullOrWhiteSpace(value)))
         {
@@ -454,9 +451,7 @@ public sealed class BatchPlotForm : Form
             }
         }
 
-        return devices.FirstOrDefault(value => value.IndexOf("PNG", StringComparison.OrdinalIgnoreCase) >= 0
-                                               && value.IndexOf("Transparent", StringComparison.OrdinalIgnoreCase) < 0)
-               ?? installedPlotter;
+        return "";
     }
 
     private static string FindJpgPlotDevice(IReadOnlyList<string> devices, string installedPlotter)
@@ -464,11 +459,7 @@ public sealed class BatchPlotForm : Form
         var preferred = new[]
         {
             installedPlotter,
-            AcadPlotterInstaller.PreferredJpgPlotter,
-            "PublishToWeb JPG.pc3",
-            "ZWCAD Virtual JPEG Plotter.pc5",
-            "ZWPLOT_JPG.pc5",
-            "M_JPG.pc5"
+            AcadPlotterInstaller.PreferredJpgPlotter
         };
         foreach (var expected in preferred.Where(value => !string.IsNullOrWhiteSpace(value)))
         {
@@ -479,9 +470,7 @@ public sealed class BatchPlotForm : Form
             }
         }
 
-        return devices.FirstOrDefault(value => value.IndexOf("JPG", StringComparison.OrdinalIgnoreCase) >= 0
-                                               || value.IndexOf("JPEG", StringComparison.OrdinalIgnoreCase) >= 0)
-               ?? installedPlotter;
+        return "";
     }
 
     private static string FindDwfPlotDevice(IReadOnlyList<string> devices, string installedPlotter)
@@ -2039,6 +2028,7 @@ public sealed class BatchPlotForm : Form
 
     private void PreviewJob(PlotJob job)
     {
+        // 预览必须使用当前输出格式对应的绘图器，确保纸张、旋转和实际输出效果一致。
         var device = SelectedPlotDevice;
         var style = _styleCombo.SelectedItem?.ToString() ?? "";
         if (string.IsNullOrWhiteSpace(device))
