@@ -70,7 +70,6 @@ public sealed class BatchPlotForm : Form
         // 订阅红框删除事件：在 CAD 中 ERASE 红框即可同步删除表格中对应的打印任务
         _sequenceOverlay.FrameErased += SequenceOverlayFrameErased;
         _settings = AppSettingsStore.Load();
-        _settings.AutoScanCurrentDrawing = false;
         InitializeComponents();
         LoadPlotOptions();
         RefreshStatus();
@@ -226,12 +225,13 @@ public sealed class BatchPlotForm : Form
         // 用户手动切换 CTB 后立即保存，保证其它打印入口下次默认沿用上一次选择。
         _styleCombo.SelectionChangeCommitted += (_, _) => SaveCurrentSettings();
 
-        _mergePdfCheckBox.Text = "合并为单个 PDF";
+        _mergePdfCheckBox.Text = "合并 PDF";
         _mergePdfCheckBox.AutoSize = true;
+        // 首次使用默认为关闭；之后恢复用户上一次操作，避免每次重复勾选。
         _mergePdfCheckBox.Checked = _settings.MergePdf;
         _mergePdfCheckBox.TextAlign = ContentAlignment.MiddleLeft;
         _mergePdfCheckBox.Margin = new Padding(UiLayout.Scale(12), UiLayout.Scale(7), UiLayout.Scale(12), 0);
-        SetTip(_mergePdfCheckBox, "勾选后选择最终文件名；打印过程只使用临时单页，完成后仅保留一个合并 PDF。");
+        SetTip(_mergePdfCheckBox, "勾选后合并临时单页；可在批量打印设置中启用文件名书签或按纸张大小分别合并。");
 
         _leaveMarginCheckBox.Text = "周边留白";
         _leaveMarginCheckBox.AutoSize = true;
@@ -1521,11 +1521,13 @@ public sealed class BatchPlotForm : Form
     private void ReloadSettings()
     {
         var updated = AppSettingsStore.Load();
-        _settings.AutoScanCurrentDrawing = updated.AutoScanCurrentDrawing;
         _settings.PaperMatchToleranceMm = updated.PaperMatchToleranceMm;
-        _settings.AllowStandardPaperNameFallback = updated.AllowStandardPaperNameFallback;
-        _settings.ShowPlotProgress = updated.ShowPlotProgress;
         _settings.AddSequenceWhenPdfExists = updated.AddSequenceWhenPdfExists;
+        _settings.MergePdf = updated.MergePdf;
+        _settings.UseFileNameAsPdfBookmark = updated.UseFileNameAsPdfBookmark;
+        _settings.MergePdfByPaperSize = updated.MergePdfByPaperSize;
+        _settings.OpenOutputDirectoryAfterBatchPrint = updated.OpenOutputDirectoryAfterBatchPrint;
+        _settings.OpenMergedPdfAfterMerge = updated.OpenMergedPdfAfterMerge;
         _settings.PdfFileNamePattern = updated.PdfFileNamePattern;
         _settings.PdfFileNameSeparator = updated.PdfFileNameSeparator;
         _settings.PdfFileNameFields = updated.PdfFileNameFields.ToList();
@@ -1548,6 +1550,7 @@ public sealed class BatchPlotForm : Form
         _settings.DirectoryDrawHeader = updated.DirectoryDrawHeader;
         _settings.DirectoryDrawGridLines = updated.DirectoryDrawGridLines;
         _settings.DirectoryColumns = updated.DirectoryColumns.Select(x => x.Clone()).ToList();
+        _mergePdfCheckBox.Checked = updated.MergePdf;
     }
 
     private void ImportLibrary()
@@ -1806,6 +1809,7 @@ public sealed class BatchPlotForm : Form
         var originalOutputPaths = selected.ToDictionary(job => job, job => job.OutputPath);
         string? temporaryDirectory = null;
         var mergedSuccessfully = false;
+        var mergedOutputPaths = new List<string>();
         var completed = 0;
 
         ShowSequenceOverlayForPrint(selected);
@@ -1881,9 +1885,26 @@ public sealed class BatchPlotForm : Form
                 {
                     _statusLabel.Text = "正在合并 PDF...";
                     System.Windows.Forms.Application.DoEvents();
-                    PdfDocumentService.Merge(selected.Select(job => job.OutputPath).ToList(), _mergedOutputPath);
+                    var mergeInputs = selected.Select(job => new PdfMergeInput(
+                        job.OutputPath,
+                        Path.GetFileNameWithoutExtension(originalOutputPaths[job]),
+                        job.PaperName,
+                        job.PaperWidthMm,
+                        job.PaperHeightMm)).ToList();
+                    var mergePlans = PdfDocumentService.PlanMerges(
+                        mergeInputs,
+                        _mergedOutputPath,
+                        _settings.MergePdfByPaperSize);
+                    foreach (var mergePlan in mergePlans)
+                    {
+                        PdfDocumentService.Merge(
+                            mergePlan.Inputs,
+                            mergePlan.OutputPath,
+                            _settings.UseFileNameAsPdfBookmark);
+                        mergedOutputPaths.Add(mergePlan.OutputPath);
+                        AppendLog("INFO", $"合并 PDF 成功 {mergePlan.OutputPath}");
+                    }
                     mergedSuccessfully = true;
-                    AppendLog("INFO", $"合并 PDF 成功 {_mergedOutputPath}");
                 }
                 catch (Exception ex)
                 {
@@ -1895,10 +1916,11 @@ public sealed class BatchPlotForm : Form
 
             _lastLogPath = BatchPlotLogger.SaveRunLog(_logLines);
             _statusLabel.Text = $"完成，共 {printed} 张";
+            var mergedFilesText = string.Join("\n", mergedOutputPaths);
             var summary = mergePdf
                 ? mergedSuccessfully
-                    ? $"打印并合并完成: 共 {printed} 张。\n合并文件: {_mergedOutputPath}\n日志: {_lastLogPath}"
-                    : $"打印或合并失败，未生成新的合并 PDF。\n成功打印 {printed} 张，失败 {failed.Count} 项。\n日志: {_lastLogPath}"
+                    ? $"打印并合并完成: 共 {printed} 张，生成 {mergedOutputPaths.Count} 个 PDF。\n合并文件:\n{mergedFilesText}\n日志: {_lastLogPath}"
+                    : $"打印完成，但 PDF 合并未全部完成。\n成功打印 {printed} 张，失败 {failed.Count} 项，已生成 {mergedOutputPaths.Count} 个合并 PDF。\n日志: {_lastLogPath}"
                 : $"打印完成: 成功 {printed} 张，失败 {failed.Count} 张。\n日志: {_lastLogPath}";
             if (failed.Count > 0)
             {
@@ -1907,9 +1929,13 @@ public sealed class BatchPlotForm : Form
 
             MessageBox.Show(summary, "批量打印", MessageBoxButtons.OK, failed.Count > 0 ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
 
-            if ((!mergePdf && printed > 0) || mergedSuccessfully)
+            if (!mergePdf && printed > 0 && _settings.OpenOutputDirectoryAfterBatchPrint)
             {
-                OpenOutputDirectoryAfterPrint(mergePdf ? _mergedOutputPath : null);
+                OpenOutputDirectoryAfterPrint();
+            }
+            else if (mergePdf && mergedSuccessfully && _settings.OpenMergedPdfAfterMerge)
+            {
+                OpenMergedPdfFiles(mergedOutputPaths);
             }
         }
         catch (OperationCanceledException)
@@ -1986,6 +2012,26 @@ public sealed class BatchPlotForm : Form
         catch (Exception ex)
         {
             AppendLog("WARN", "打开输出目录失败: " + ex.Message);
+        }
+    }
+
+    private void OpenMergedPdfFiles(IEnumerable<string> outputFiles)
+    {
+        foreach (var outputFile in outputFiles.Where(File.Exists))
+        {
+            try
+            {
+                // 按纸张尺寸分组时可能生成多个合并文件；每个文件都交给系统默认 PDF 阅读器打开。
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = Path.GetFullPath(outputFile),
+                    UseShellExecute = true
+                });
+            }
+            catch (Exception ex)
+            {
+                AppendLog("WARN", "打开合并 PDF 失败: " + ex.Message);
+            }
         }
     }
 
@@ -2230,7 +2276,6 @@ public sealed class BatchPlotForm : Form
     {
         _settings.LastPlotDevice = AcadPlotterInstaller.PreferredPdfPlotter;
         _settings.LastStyleSheet = _styleCombo.SelectedItem?.ToString() ?? "";
-        _settings.AutoScanCurrentDrawing = false;
         _settings.MergePdf = _mergePdfCheckBox.Checked;
         _settings.LeavePaperMargin = _leaveMarginCheckBox.Checked;
         _settings.PaperMarginMm = (double)_marginInput.Value;

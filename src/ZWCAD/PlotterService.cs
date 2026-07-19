@@ -974,30 +974,27 @@ public static class PlotterService
         if (job.RequireExactPaperSize)
             return null;
 
-        if (settings.AllowStandardPaperNameFallback)
+        // 名称兜底是标准纸张的固定兼容策略，不再作为用户设置；精确任意纸张已在上方直接返回，仍禁止兜底。
+        var paperName = job.PaperName ?? "";
+        var basePaper = paperName.Replace("+", "");
+        if (paperName.EndsWith("+", StringComparison.OrdinalIgnoreCase))
         {
-            var paperName = job.PaperName ?? "";
-            var basePaper = paperName.Replace("+", "");
-            if (paperName.EndsWith("+", StringComparison.OrdinalIgnoreCase))
+            var longNamed = media.FirstOrDefault(x => x.IndexOf(paperName, StringComparison.OrdinalIgnoreCase) >= 0)
+                ?? media.FirstOrDefault(x => x.IndexOf(basePaper, StringComparison.OrdinalIgnoreCase) >= 0
+                    && x.IndexOf("加长", StringComparison.OrdinalIgnoreCase) >= 0);
+            if (longNamed != null)
             {
-                var longNamed = media.FirstOrDefault(x => x.IndexOf(paperName, StringComparison.OrdinalIgnoreCase) >= 0)
-                    ?? media.FirstOrDefault(x => x.IndexOf(basePaper, StringComparison.OrdinalIgnoreCase) >= 0
-                        && x.IndexOf("加长", StringComparison.OrdinalIgnoreCase) >= 0);
-                if (longNamed != null)
-                {
-                    return new MediaSelection { Name = longNamed, NeedsRotation = false };
-                }
+                return new MediaSelection { Name = longNamed, NeedsRotation = false };
             }
-            else
+        }
+        else
+        {
+            var named = media.FirstOrDefault(x => x.IndexOf(basePaper, StringComparison.OrdinalIgnoreCase) >= 0)
+                ?? media.FirstOrDefault(x => x.IndexOf(basePaper.Replace("A", "ISO_A"), StringComparison.OrdinalIgnoreCase) >= 0);
+            if (named != null)
             {
-                var named = media.FirstOrDefault(x => x.IndexOf(basePaper, StringComparison.OrdinalIgnoreCase) >= 0)
-                    ?? media.FirstOrDefault(x => x.IndexOf(basePaper.Replace("A", "ISO_A"), StringComparison.OrdinalIgnoreCase) >= 0);
-                if (named != null)
-                {
-                    return new MediaSelection { Name = named, NeedsRotation = false };
-                }
+                return new MediaSelection { Name = named, NeedsRotation = false };
             }
-
         }
 
         return IsRasterPlotDevice(deviceName)

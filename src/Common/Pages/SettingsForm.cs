@@ -20,12 +20,13 @@ public sealed class SettingsForm : Form
     private const string DefaultTextStyleDisplay = "(默认)";
 
     private readonly Document? _document;
-    private readonly CheckBox _autoScan = new();
     private readonly NumericUpDown _paperTolerance = new();
-    private readonly CheckBox _allowPaperNameFallback = new();
-    private readonly CheckBox _showProgress = new();
     private readonly CheckBox _addSequenceWhenPdfExists = new();
     private readonly CheckBox _openExternalDwgForPlot = new();
+    private readonly CheckBox _useFileNameAsPdfBookmark = new();
+    private readonly CheckBox _mergePdfByPaperSize = new();
+    private readonly CheckBox _openOutputDirectoryAfterBatchPrint = new();
+    private readonly CheckBox _openMergedPdfAfterMerge = new();
     private readonly ComboBox _directoryColorIndex = new();
     private readonly NumericUpDown _directoryTextHeight = new();
     private readonly NumericUpDown _directoryTextWidthFactor = new();
@@ -127,23 +128,23 @@ public sealed class SettingsForm : Form
 
     private TabPage BuildGeneralTab()
     {
-        var page = new TabPage("常规");
-        var table = CreateSettingsTable(6);
-
-        _autoScan.Text = "打开窗口不自动扫描，点击扫描才扫描";
-        _autoScan.AutoSize = true;
-        _autoScan.Dock = DockStyle.Fill;
-        _autoScan.Enabled = false;
+        var page = new TabPage("常规")
+        {
+            Padding = new Padding(UiLayout.Scale(10)),
+            AutoScroll = true
+        };
+        var categories = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            ColumnCount = 1,
+            RowCount = 5,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty
+        };
+        categories.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
         ConfigureNumber(_paperTolerance, 0.5M, 20M, 0.5M, 1);
-
-        _allowPaperNameFallback.Text = "尺寸匹配失败时允许按 A0/A1/A2/A3 名称兜底";
-        _allowPaperNameFallback.AutoSize = true;
-        _allowPaperNameFallback.Dock = DockStyle.Fill;
-
-        _showProgress.Text = "打印时显示 CAD 打印进度窗口";
-        _showProgress.AutoSize = true;
-        _showProgress.Dock = DockStyle.Fill;
 
         _addSequenceWhenPdfExists.Text = "PDF 已存在时自动加序号";
         _addSequenceWhenPdfExists.AutoSize = true;
@@ -153,14 +154,71 @@ public sealed class SettingsForm : Form
         _openExternalDwgForPlot.AutoSize = true;
         _openExternalDwgForPlot.Dock = DockStyle.Fill;
 
-        UiLayout.AddRow(table, 0, "", _autoScan);
-        UiLayout.AddRow(table, 1, "纸张匹配容差(mm)", _paperTolerance);
-        UiLayout.AddRow(table, 2, "", _allowPaperNameFallback);
-        UiLayout.AddRow(table, 3, "", _showProgress);
-        UiLayout.AddRow(table, 4, "", _addSequenceWhenPdfExists);
-        UiLayout.AddRow(table, 5, "", _openExternalDwgForPlot);
-        page.Controls.Add(table);
+        var paperTable = CreateSettingsTable(1);
+        UiLayout.AddRow(paperTable, 0, "纸张匹配容差(mm)", _paperTolerance);
+
+        var plotTable = CreateSettingsTable(1);
+        UiLayout.AddRow(plotTable, 0, "", _openExternalDwgForPlot);
+
+        var outputTable = CreateSettingsTable(1);
+        UiLayout.AddRow(outputTable, 0, "", _addSequenceWhenPdfExists);
+
+        _useFileNameAsPdfBookmark.Text = "文件名作为书签";
+        _useFileNameAsPdfBookmark.AutoSize = true;
+        _useFileNameAsPdfBookmark.Dock = DockStyle.Fill;
+
+        _mergePdfByPaperSize.Text = "按纸张大小合并";
+        _mergePdfByPaperSize.AutoSize = true;
+        _mergePdfByPaperSize.Dock = DockStyle.Fill;
+
+        var mergeExplanation = new Label
+        {
+            AutoSize = true,
+            Dock = DockStyle.Fill,
+            ForeColor = Color.DimGray,
+            Text = "同一纸张尺寸合并到一个 PDF；一批图纸包含多种尺寸时，按尺寸分别生成多个 PDF。"
+        };
+        var mergeTable = CreateSettingsTable(3);
+        UiLayout.AddRow(mergeTable, 0, "", _useFileNameAsPdfBookmark);
+        UiLayout.AddRow(mergeTable, 1, "", _mergePdfByPaperSize);
+        UiLayout.AddRow(mergeTable, 2, "", mergeExplanation);
+
+        _openOutputDirectoryAfterBatchPrint.Text = "批量打印单张后，打开所在文件夹";
+        _openOutputDirectoryAfterBatchPrint.AutoSize = true;
+        _openOutputDirectoryAfterBatchPrint.Dock = DockStyle.Fill;
+
+        _openMergedPdfAfterMerge.Text = "PDF 合并完成后，打开该文件";
+        _openMergedPdfAfterMerge.AutoSize = true;
+        _openMergedPdfAfterMerge.Dock = DockStyle.Fill;
+
+        var completedActionTable = CreateSettingsTable(2);
+        UiLayout.AddRow(completedActionTable, 0, "", _openOutputDirectoryAfterBatchPrint);
+        UiLayout.AddRow(completedActionTable, 1, "", _openMergedPdfAfterMerge);
+
+        categories.Controls.Add(CreateSettingsGroup("纸张匹配", paperTable), 0, 0);
+        categories.Controls.Add(CreateSettingsGroup("打印行为", plotTable), 0, 1);
+        categories.Controls.Add(CreateSettingsGroup("输出文件", outputTable), 0, 2);
+        categories.Controls.Add(CreateSettingsGroup("PDF 合并", mergeTable), 0, 3);
+        categories.Controls.Add(CreateSettingsGroup("完成后操作", completedActionTable), 0, 4);
+        page.Controls.Add(categories);
         return page;
+    }
+
+    private static GroupBox CreateSettingsGroup(string title, Control content)
+    {
+        var group = new GroupBox
+        {
+            Text = title,
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Padding = new Padding(UiLayout.Scale(6)),
+            Margin = new Padding(0, 0, 0, UiLayout.Scale(8))
+        };
+        content.Dock = DockStyle.Top;
+        content.AutoSize = true;
+        group.Controls.Add(content);
+        return group;
     }
 
     private TabPage BuildFileNameTab()
@@ -832,11 +890,12 @@ public sealed class SettingsForm : Form
 
     private void Apply(AppSettings settings)
     {
-        _autoScan.Checked = false;
         _paperTolerance.Value = UiLayout.Clamp(_paperTolerance, settings.PaperMatchToleranceMm);
-        _allowPaperNameFallback.Checked = settings.AllowStandardPaperNameFallback;
-        _showProgress.Checked = settings.ShowPlotProgress;
         _addSequenceWhenPdfExists.Checked = settings.AddSequenceWhenPdfExists;
+        _useFileNameAsPdfBookmark.Checked = settings.UseFileNameAsPdfBookmark;
+        _mergePdfByPaperSize.Checked = settings.MergePdfByPaperSize;
+        _openOutputDirectoryAfterBatchPrint.Checked = settings.OpenOutputDirectoryAfterBatchPrint;
+        _openMergedPdfAfterMerge.Checked = settings.OpenMergedPdfAfterMerge;
         _fileNamePattern.Text = settings.PdfFileNamePattern;
         _fileNameSequenceStart.Value = Math.Max(
             _fileNameSequenceStart.Minimum,
@@ -879,11 +938,12 @@ public sealed class SettingsForm : Form
             return false;
         }
 
-        current.AutoScanCurrentDrawing = false;
         current.PaperMatchToleranceMm = (double)_paperTolerance.Value;
-        current.AllowStandardPaperNameFallback = _allowPaperNameFallback.Checked;
-        current.ShowPlotProgress = _showProgress.Checked;
         current.AddSequenceWhenPdfExists = _addSequenceWhenPdfExists.Checked;
+        current.UseFileNameAsPdfBookmark = _useFileNameAsPdfBookmark.Checked;
+        current.MergePdfByPaperSize = _mergePdfByPaperSize.Checked;
+        current.OpenOutputDirectoryAfterBatchPrint = _openOutputDirectoryAfterBatchPrint.Checked;
+        current.OpenMergedPdfAfterMerge = _openMergedPdfAfterMerge.Checked;
         if (string.IsNullOrWhiteSpace(_fileNamePattern.Text))
         {
             MessageBox.Show("请输入文件命名规则。", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);

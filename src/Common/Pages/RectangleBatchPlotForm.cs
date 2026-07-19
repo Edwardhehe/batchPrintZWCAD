@@ -190,7 +190,8 @@ public sealed class RectangleBatchPlotForm : Form
         _sortOrder.SelectedIndexChanged += (_, _) => SortRows();
         options.Controls.Add(_sortOrder);
 
-        _mergePdf.Text = "合并为一个 PDF";
+        _mergePdf.Text = "合并 PDF";
+        // 与图框块批打印共用上一次合并状态；首次使用时 AppSettings 默认值为 false。
         _mergePdf.Checked = _settings.MergePdf;
         _mergePdf.AutoSize = true;
         _mergePdf.Anchor = AnchorStyles.Left | AnchorStyles.Top;
@@ -244,7 +245,7 @@ public sealed class RectangleBatchPlotForm : Form
         _printButton.Click += (_, _) => PrintOrStop();
         outputRow.Controls.Add(_printButton, 7, 0);
         tips.SetToolTip(_sortOrder, "改变列表、红框编号和最终输出文件的顺序。");
-        tips.SetToolTip(_mergePdf, "仅 PDF 可用；勾选后只保留一个合并 PDF。");
+        tips.SetToolTip(_mergePdf, "仅 PDF 可用；书签和按纸张大小分组合并可在批量打印设置中配置。");
         tips.SetToolTip(marginPanel, "勾选后按设定距离在纸张短边两侧留白，居中等比例缩小打印。");
 
         top.Controls.Add(actions, 0, 0);
@@ -1217,6 +1218,7 @@ public sealed class RectangleBatchPlotForm : Form
         string? temporaryDirectory = null;
         var mergedOutput = Path.Combine(directory, SourceStem() + ".pdf");
         var mergePdf = IsPdfOutput && _mergePdf.Checked;
+        var mergedOutputPaths = new List<string>();
         var completed = 0;
         try
         {
@@ -1262,14 +1264,38 @@ public sealed class RectangleBatchPlotForm : Form
             {
                 _status.Text = "正在合并 PDF...";
                 System.Windows.Forms.Application.DoEvents();
-                PdfDocumentService.Merge(selected.Select(job => job.OutputPath).ToList(), mergedOutput);
+                var mergeInputs = selected.Select(job => new PdfMergeInput(
+                    job.OutputPath,
+                    Path.GetFileNameWithoutExtension(originalPaths[job]),
+                    job.PaperName,
+                    job.PaperWidthMm,
+                    job.PaperHeightMm)).ToList();
+                var mergePlans = PdfDocumentService.PlanMerges(
+                    mergeInputs,
+                    mergedOutput,
+                    _settings.MergePdfByPaperSize);
+                foreach (var mergePlan in mergePlans)
+                {
+                    PdfDocumentService.Merge(
+                        mergePlan.Inputs,
+                        mergePlan.OutputPath,
+                        _settings.UseFileNameAsPdfBookmark);
+                    mergedOutputPaths.Add(mergePlan.OutputPath);
+                }
             }
 
-            RevealOutput(mergePdf ? mergedOutput : null, directory);
+            if (mergePdf && _settings.OpenMergedPdfAfterMerge)
+            {
+                OpenMergedPdfFiles(mergedOutputPaths);
+            }
+            else if (!mergePdf && _settings.OpenOutputDirectoryAfterBatchPrint)
+            {
+                RevealOutput(null, directory);
+            }
             _status.Text = $"完成，共 {selected.Count} 张";
             MessageBox.Show(
                 mergePdf
-                    ? $"打印并合并完成，共 {selected.Count} 张。\n{mergedOutput}"
+                    ? $"打印并合并完成，共 {selected.Count} 张，生成 {mergedOutputPaths.Count} 个 PDF。\n{string.Join("\n", mergedOutputPaths)}"
                     : $"打印完成，共 {selected.Count} 张。\n{directory}",
                 Text,
                 MessageBoxButtons.OK,
@@ -1687,6 +1713,25 @@ public sealed class RectangleBatchPlotForm : Form
         }
         catch
         {
+        }
+    }
+
+    private static void OpenMergedPdfFiles(IEnumerable<string> outputFiles)
+    {
+        foreach (var outputFile in outputFiles.Where(File.Exists))
+        {
+            try
+            {
+                // 分组后的每个合并 PDF 都直接打开，行为与单一合并文件保持一致。
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = Path.GetFullPath(outputFile),
+                    UseShellExecute = true
+                });
+            }
+            catch
+            {
+            }
         }
     }
 

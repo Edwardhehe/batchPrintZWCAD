@@ -31,12 +31,18 @@ public sealed class AppSettings
 {
     public string LastPlotDevice { get; set; } = "";
     public string LastStyleSheet { get; set; } = "";
-    public bool AutoScanCurrentDrawing { get; set; }
     public double PaperMatchToleranceMm { get; set; } = 3;
-    public bool AllowStandardPaperNameFallback { get; set; } = true;
-    public bool ShowPlotProgress { get; set; } = true;
     public bool AddSequenceWhenPdfExists { get; set; } = false;
+    /// <summary>记录批打印窗口上一次“合并 PDF”的勾选状态；首次使用默认为不勾选。</summary>
     public bool MergePdf { get; set; }
+    /// <summary>合并 PDF 时，是否用每张图纸原始输出文件名创建一级书签。</summary>
+    public bool UseFileNameAsPdfBookmark { get; set; }
+    /// <summary>合并 PDF 时，是否按纸张物理尺寸分组；一批多种尺寸会输出多个 PDF。</summary>
+    public bool MergePdfByPaperSize { get; set; }
+    /// <summary>批量输出单张文件完成后，是否打开输出文件夹。</summary>
+    public bool OpenOutputDirectoryAfterBatchPrint { get; set; } = true;
+    /// <summary>PDF 合并成功后，是否用系统默认阅读器打开生成的合并文件。</summary>
+    public bool OpenMergedPdfAfterMerge { get; set; } = true;
     public bool AddFileNameSequence { get; set; }
     public bool LeavePaperMargin { get; set; }
     public double PaperMarginMm { get; set; } = 1;
