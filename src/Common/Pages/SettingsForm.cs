@@ -480,6 +480,11 @@ public sealed class SettingsForm : Form
         _directoryTextWidthFactor.ValueChanged += (_, _) => UpdateDirectoryPreview();
         _directoryRowHeight.ValueChanged += (_, _) => UpdateDirectoryPreview();
         _directoryTextStyle.DropDownStyle = ComboBoxStyle.DropDownList;
+        // 与“颜色索引”一致使用 OwnerDrawFixed：普通 ComboBox 高度由字体决定且不可改，
+        // 同行的文本框/数字框又是另一套默认高度，导致一排输入框高矮不一。
+        _directoryTextStyle.DrawMode = DrawMode.OwnerDrawFixed;
+        _directoryTextStyle.ItemHeight = UiLayout.Scale(18);
+        _directoryTextStyle.DrawItem += DrawDirectoryTextStyle;
         _directoryTextStyle.Dock = DockStyle.Fill;
         _directoryTextStyle.SelectedIndexChanged += (_, _) => UpdateDirectoryPreview();
         LoadTextStyles();
@@ -562,6 +567,8 @@ public sealed class SettingsForm : Form
 
     private static Control BuildDirectoryParameter(string label, Control input)
     {
+        // 关闭 AutoSize，让文本框/数字框随 Dock 填满整行，与下拉框保持同一高度。
+        input.AutoSize = false;
         input.Dock = DockStyle.Fill;
         input.Margin = new Padding(0, UiLayout.Scale(2), UiLayout.Scale(4), 0);
         var panel = new TableLayoutPanel
@@ -585,6 +592,7 @@ public sealed class SettingsForm : Form
 
     private Control BuildDirectoryRowHeightParameter()
     {
+        _directoryRowHeight.AutoSize = false;
         _directoryRowHeight.Dock = DockStyle.Fill;
         _directoryRowHeight.Margin = new Padding(0, UiLayout.Scale(2), UiLayout.Scale(4), 0);
         var pickHeight = UiLayout.CreateButton("图中交互", 68);
@@ -617,7 +625,7 @@ public sealed class SettingsForm : Form
     {
         _directoryColorIndex.DropDownStyle = ComboBoxStyle.DropDownList;
         _directoryColorIndex.DrawMode = DrawMode.OwnerDrawFixed;
-        _directoryColorIndex.ItemHeight = UiLayout.Scale(20);
+        _directoryColorIndex.ItemHeight = UiLayout.Scale(18);
         _directoryColorIndex.MaxDropDownItems = 14;
         _directoryColorIndex.IntegralHeight = false;
         _directoryColorIndex.DropDownHeight = UiLayout.Scale(282);
@@ -664,6 +672,30 @@ public sealed class SettingsForm : Form
             e.Font ?? Font,
             new Point(swatch.Right + UiLayout.Scale(5), e.Bounds.Top + (e.Bounds.Height - Font.Height) / 2),
             textColor);
+        e.DrawFocusRectangle();
+    }
+
+    private void DrawDirectoryTextStyle(object? sender, DrawItemEventArgs e)
+    {
+        e.DrawBackground();
+        if (e.Index >= 0 && e.Index < _directoryTextStyle.Items.Count)
+        {
+            var textColor = (e.State & DrawItemState.Selected) != 0
+                && (e.State & DrawItemState.ComboBoxEdit) == 0
+                ? SystemColors.HighlightText
+                : SystemColors.ControlText;
+            TextRenderer.DrawText(
+                e.Graphics,
+                _directoryTextStyle.Items[e.Index]?.ToString() ?? string.Empty,
+                e.Font ?? Font,
+                new Rectangle(
+                    e.Bounds.Left + UiLayout.Scale(3),
+                    e.Bounds.Top,
+                    Math.Max(0, e.Bounds.Width - UiLayout.Scale(3)),
+                    e.Bounds.Height),
+                textColor,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+        }
         e.DrawFocusRectangle();
     }
 
