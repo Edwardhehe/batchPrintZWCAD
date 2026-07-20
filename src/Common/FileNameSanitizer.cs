@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace ZwcadBatchPlot;
 
@@ -74,6 +75,27 @@ public static class FileNameSanitizer
             Math.Max(1, LegacyMaxPathLength - Path.GetFullPath(directory).Length - extension.Length - 1));
     }
 
+    /// <summary>把加长图幅名中的分数后缀改为小数，如 A1+1/4 → A1+0.25、A1+17/8 → A1+2.125。</summary>
+    public static string NormalizeLongPaperFraction(string paperName)
+    {
+        return LongPaperFractionPattern.Replace(paperName ?? "", match =>
+        {
+            var numerator = int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);
+            var denominator = int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture);
+            if (denominator == 0)
+            {
+                return match.Value;
+            }
+
+            // 加长步进为 1/8，八分之几需要 3 位小数才能精确表达，不能用 0.## 截断。
+            var extension = numerator / (double)denominator;
+            return "+" + extension.ToString("0.###", CultureInfo.InvariantCulture);
+        });
+    }
+
+    private static readonly Regex LongPaperFractionPattern =
+        new Regex(@"\+(\d+)/(\d+)$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
     /// <summary>
     /// 按用户输入的规则生成文件名。占位符区分大小写：
     /// A=图号，B=版次，C=图名，D=日期，E=信息1，F=信息2，G=设计阶段，T=图幅，N=序号。
@@ -105,7 +127,7 @@ public static class FileNameSanitizer
                 'E' => job.Info1,
                 'F' => job.Info2,
                 'G' => job.Phase,
-                'T' => job.PaperName,
+                'T' => NormalizeLongPaperFraction(job.PaperName),
                 'N' => sequenceNumber.HasValue ? FormatSequenceNumber(sequenceNumber.Value, sequenceDigits) : "",
                 _ => null
             };
@@ -176,7 +198,7 @@ public static class FileNameSanitizer
                 "Phase" => job.Phase,
                 "Info1" => job.Info1,
                 "Info2" => job.Info2,
-                "PaperName" => job.PaperName,
+                "PaperName" => NormalizeLongPaperFraction(job.PaperName),
                 "Sequence" => sequenceNumber > 0 ? sequenceNumber.ToString($"D{Math.Max(1, Math.Min(10, sequenceDigits))}") : "",
                 _ => ""
             };

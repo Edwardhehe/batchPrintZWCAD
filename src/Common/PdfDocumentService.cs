@@ -187,11 +187,17 @@ public static class PdfDocumentService
 
     private static string BuildPaperSizeSuffix(PdfMergeInput input, PaperSizeKey size)
     {
-        var paperName = SanitizeFileNamePart(input.PaperName);
-        var sizeText = size.IsKnown
+        // 先做加长图幅分数规范化（A3+1/4 → A3+0.25），再做文件名清洗，否则 / 会被过滤掉。
+        var paperName = SanitizeFileNamePart(FileNameSanitizer.NormalizeLongPaperFraction(input.PaperName));
+        if (!string.IsNullOrWhiteSpace(paperName))
+        {
+            // 文件名只保留图幅名（如 A2、A1+0.25），不附带具体尺寸数值。
+            return paperName;
+        }
+
+        return size.IsKnown
             ? $"{size.LongSideMm:0.0}x{size.ShortSideMm:0.0}mm"
             : "未知尺寸";
-        return string.IsNullOrWhiteSpace(paperName) ? sizeText : paperName + "_" + sizeText;
     }
 
     private static string AppendFileNameSuffix(string path, string suffix)
