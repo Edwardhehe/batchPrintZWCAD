@@ -6,51 +6,70 @@ using System.Windows.Forms.Integration;
 namespace ZwcadBatchPlot;
 
 /// <summary>
-/// 图号重排对话框 — 输入前缀/后缀、起始图号、排序方向，预览重排效果。
-/// WinForms 壳 + ElementHost 承载 WPF 用户控件，API 保持不变。
+/// 图号重排对话框 — WinForms 壳 + ElementHost 承载 WPF 用户控件。
 /// </summary>
 public sealed class DrawingNumberReorderDialog : Form
 {
-    private readonly DrawingNumberReorderControl _wpfControl;
+    private readonly DrawingNumberReorderControl? _wpfControl;
 
-    public string Prefix => _wpfControl.Prefix;
-    public string Suffix => _wpfControl.Suffix;
-    public int StartNumber => _wpfControl.StartNumber;
+    public string Prefix => _wpfControl?.Prefix ?? "";
+    public string Suffix => _wpfControl?.Suffix ?? "";
+    public int StartNumber => _wpfControl?.StartNumber ?? 1;
+    public bool HorizontalFirst => _wpfControl?.HorizontalFirst ?? false;
 
-    /// <summary>排序方向：先水平再垂直（从左到右，从上到下）</summary>
-    public bool HorizontalFirst => _wpfControl.HorizontalFirst;
-
-    /// <summary>用户点击"预览顺序"时触发，供父窗口临时更新编号和叠加层。</summary>
+    /// <summary>用户点击"预览顺序"时触发。</summary>
     public event Action? PreviewRequested;
+
+    // 整个进程只需初始化一次 WPF Application。
+    private static bool _wpfInitialized;
+
+    private static void EnsureWpfInitialized()
+    {
+        if (_wpfInitialized) return;
+        _wpfInitialized = true;
+        if (System.Windows.Application.Current == null)
+        {
+            new System.Windows.Application();
+        }
+    }
 
     public DrawingNumberReorderDialog(int jobCount, string detectedPrefix = "")
     {
-        Text = "图号重排";
-        FormBorderStyle = FormBorderStyle.FixedDialog;
-        ShowInTaskbar = false;
-        StartPosition = FormStartPosition.CenterParent;
-        UiLayout.ConfigureForm(this, 390, 290, 370, 270);
-        ClientSize = new Size(UiLayout.Scale(390), UiLayout.Scale(270));
+        try
+        {
+            EnsureWpfInitialized();
 
-        _wpfControl = new DrawingNumberReorderControl(jobCount, detectedPrefix);
-        _wpfControl.OkRequested += () =>
-        {
-            DialogResult = DialogResult.OK;
-            Close();
-        };
-        _wpfControl.CancelRequested += () =>
-        {
-            DialogResult = DialogResult.Cancel;
-            Close();
-        };
-        _wpfControl.PreviewRequested += () => PreviewRequested?.Invoke();
+            Text = "图号重排";
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            ShowInTaskbar = false;
+            StartPosition = FormStartPosition.CenterParent;
+            UiLayout.ConfigureForm(this, 390, 290, 370, 270);
+            ClientSize = new Size(UiLayout.Scale(390), UiLayout.Scale(270));
 
-        var host = new ElementHost
+            _wpfControl = new DrawingNumberReorderControl(jobCount, detectedPrefix);
+            _wpfControl.OkRequested += () =>
+            {
+                DialogResult = DialogResult.OK;
+                Close();
+            };
+            _wpfControl.CancelRequested += () =>
+            {
+                DialogResult = DialogResult.Cancel;
+                Close();
+            };
+            _wpfControl.PreviewRequested += () => PreviewRequested?.Invoke();
+
+            var host = new ElementHost
+            {
+                Dock = DockStyle.Fill,
+                Child = _wpfControl
+            };
+            Controls.Add(host);
+        }
+        catch (Exception ex)
         {
-            Dock = DockStyle.Fill,
-            Child = _wpfControl
-        };
-        Controls.Add(host);
+            MessageBox.Show($"图号重排对话框初始化失败:\n{ex}", "错误",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
     }
-
 }

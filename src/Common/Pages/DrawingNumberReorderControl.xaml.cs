@@ -41,6 +41,10 @@ public sealed partial class DrawingNumberReorderControl : UserControl
 
     private void UpdatePreview()
     {
+        // XAML 解析期间 TextChanged 可能先于其他控件创建触发，此时跳过更新。
+        if (PrefixBox == null || SuffixBox == null || StartNumberBox == null || PreviewLabel == null)
+            return;
+
         var prefix = Prefix;
         var suffix = Suffix;
         var start = StartNumber;

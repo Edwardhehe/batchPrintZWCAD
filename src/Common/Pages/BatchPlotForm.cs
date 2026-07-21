@@ -1200,15 +1200,9 @@ public sealed class BatchPlotForm : Form
         SortAndRefreshOutputPaths();
         ShowSequenceOverlayForCurrentJobs();
 
-        // 反写 CAD 文件中的图号
-        var updated = 0;
-        foreach (var job in finalSorted)
-        {
-            if (CadTextUpdater.TryUpdateOpenDocument(job, null, job.DrawingNumber, _currentDocument, out _))
-            {
-                updated++;
-            }
-        }
+        // 反写 CAD 文件中的图号（批量：共享一次文档锁定/事务/图框库加载，逐张写在图多时会明显变慢）
+        var updated = CadTextUpdater.UpdateDrawingNumbers(finalSorted, _currentDocument,
+            failure => AppendLog("WARN", failure));
 
         AppendLog("INFO", $"图号重排完成，{finalSorted.Count} 张图框按" + (dialog.HorizontalFirst ? "从左到右、从上到下" : "从上到下、从左到右") + $"排序，已反写 CAD {updated} 处。");
         dialog.Dispose();

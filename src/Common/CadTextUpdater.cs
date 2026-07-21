@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 #if ZWCAD
@@ -34,8 +35,90 @@ public static class CadTextUpdater
 
         using (doc.LockDocument())
         {
-            return TryUpdate(doc.Database, job, newTitle, newNumber, out message);
+            try
+            {
+                return TryUpdate(doc.Database, job, newTitle, newNumber, out message);
+            }
+            catch (Exception ex)
+            {
+                // Try 前缀约定不抛异常；如图层锁定外的意外错误也转为失败信息，避免崩溃整个批量操作。
+                message = "反写 CAD 失败: " + ex.Message;
+                return false;
+            }
         }
+    }
+
+    /// <summary>
+    /// 批量反写图号（图号重排用）。逐张调用 TryUpdateOpenDocument 时，每张图框都要重复
+    /// 锁文档、开事务、读图框库文件、遍历图层表解锁/恢复、全空间扫描找块，图多时会明显变慢；
+    /// 这里把这些可共享的开销合并为一次。
+    /// </summary>
+    public static int UpdateDrawingNumbers(IReadOnlyList<PlotJob> jobs, Document currentDocument, Action<string>? reportFailure = null)
+    {
+        var updated = 0;
+        TitleBlockLibrary? library = null;
+        foreach (var group in jobs.GroupBy(j => FindTargetDocument(j, currentDocument)))
+        {
+            var doc = group.Key;
+            if (doc == null)
+            {
+                foreach (var job in group)
+                {
+                    reportFailure?.Invoke($"图号反写失败（{job.DrawingNumber}）: 对应 DWG 未打开，已只修改表格，未反写 CAD。");
+                }
+                continue;
+            }
+
+            try
+            {
+                using (doc.LockDocument())
+                {
+                    library ??= TitleBlockLibraryStore.Load();
+                    var db = doc.Database;
+                    using var tr = db.TransactionManager.StartTransaction();
+                    var layerStates = UnlockLayers(tr, db);
+                    foreach (var job in group)
+                    {
+                        var definition = library.Blocks.FirstOrDefault(x =>
+                            string.Equals(x.BlockName, job.BlockName, StringComparison.OrdinalIgnoreCase));
+                        if (definition == null)
+                        {
+                            reportFailure?.Invoke($"图号反写失败（{job.DrawingNumber}）: 图框库中找不到对应块定义。");
+                            continue;
+                        }
+
+                        try
+                        {
+                            if (TryUpdateInTransaction(tr, db, definition, job, null, job.DrawingNumber, out var message))
+                            {
+                                updated++;
+                            }
+                            else
+                            {
+                                reportFailure?.Invoke($"图号反写失败（{job.DrawingNumber}）: {message}");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            reportFailure?.Invoke($"图号反写失败（{job.DrawingNumber}）: {ex.Message}");
+                        }
+                    }
+
+                    // 先恢复原锁定状态再提交；若中途出错，事务回滚会连同解锁一起撤销。
+                    RestoreLayerLocks(tr, layerStates);
+                    tr.Commit();
+                }
+            }
+            catch (Exception ex)
+            {
+                foreach (var job in group)
+                {
+                    reportFailure?.Invoke($"图号反写失败（{job.DrawingNumber}）: {ex.Message}");
+                }
+            }
+        }
+
+        return updated;
     }
 
     private static bool TryUpdate(Database db, PlotJob job, string? newTitle, string? newNumber, out string message)
@@ -50,6 +133,23 @@ public static class CadTextUpdater
         }
 
         using var tr = db.TransactionManager.StartTransaction();
+        // 文字或图框属性可能在锁定图层上，直接 OpenMode.ForWrite 会抛 eOnLockedLayer；
+        // 参照 DwgSplitService 的做法：临时解锁全部图层，提交前恢复原锁定状态。
+        // 若中途出错，事务回滚会连同解锁一起撤销，不会在图纸上残留任何改动。
+        var layerStates = UnlockLayers(tr, db);
+        if (!TryUpdateInTransaction(tr, db, definition, job, newTitle, newNumber, out message))
+        {
+            return false;
+        }
+
+        RestoreLayerLocks(tr, layerStates);
+        tr.Commit();
+        return true;
+    }
+
+    private static bool TryUpdateInTransaction(Transaction tr, Database db, TitleBlockDefinition definition, PlotJob job, string? newTitle, string? newNumber, out string message)
+    {
+        message = "";
         var blockTable = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
         var owner = FindOwnerRecord(tr, blockTable, job.SpaceName);
         if (owner == null)
@@ -58,7 +158,7 @@ public static class CadTextUpdater
             return false;
         }
 
-        var blockRef = FindBlockReference(tr, owner, job, definition);
+        var blockRef = FindBlockReference(tr, db, owner, job, definition);
         if (blockRef == null)
         {
             message = "找不到对应图框块。";
@@ -87,9 +187,72 @@ public static class CadTextUpdater
             return false;
         }
 
-        tr.Commit();
         message = $"已反写 CAD 文字 {changed} 处。";
         return true;
+    }
+
+    private static List<(ObjectId LayerId, bool WasLocked)> UnlockLayers(Transaction tr, Database db)
+    {
+        var states = new List<(ObjectId LayerId, bool WasLocked)>();
+        var layerTable = (LayerTable)tr.GetObject(db.LayerTableId, OpenMode.ForRead);
+        foreach (ObjectId layerId in layerTable)
+        {
+            var layer = (LayerTableRecord)tr.GetObject(layerId, OpenMode.ForRead);
+            states.Add((layerId, layer.IsLocked));
+            if (!layer.IsLocked)
+            {
+                continue;
+            }
+
+            layer.UpgradeOpen();
+            layer.IsLocked = false;
+        }
+
+        return states;
+    }
+
+    private static void RestoreLayerLocks(Transaction tr, List<(ObjectId LayerId, bool WasLocked)> states)
+    {
+        foreach (var state in states)
+        {
+            if (!state.WasLocked || state.LayerId.IsErased)
+            {
+                continue;
+            }
+
+            if (tr.GetObject(state.LayerId, OpenMode.ForWrite, false) is LayerTableRecord layer)
+            {
+                layer.IsLocked = true;
+            }
+        }
+    }
+
+    private static BlockReference? FindBlockReferenceByHandle(Transaction tr, Database db, PlotJob job)
+    {
+        if (string.IsNullOrWhiteSpace(job.BlockHandle))
+        {
+            return null;
+        }
+
+        try
+        {
+            var handle = new Handle(Convert.ToInt64(job.BlockHandle, 16));
+            var id = db.GetObjectId(false, handle, 0);
+            if (!id.IsValid || id.IsNull || id.IsErased)
+            {
+                return null;
+            }
+
+            return tr.GetObject(id, OpenMode.ForRead, false) is BlockReference blockRef
+                && string.Equals(CadTextExtractor.GetBlockName(blockRef, tr), job.BlockName, StringComparison.OrdinalIgnoreCase)
+                ? blockRef
+                : null;
+        }
+        catch
+        {
+            // 图被编辑过导致句柄失效时，回退到全空间扫描。
+            return null;
+        }
     }
 
     private static BlockTableRecord? FindOwnerRecord(Transaction tr, BlockTable blockTable, string spaceName)
@@ -113,8 +276,15 @@ public static class CadTextUpdater
         return null;
     }
 
-    private static BlockReference? FindBlockReference(Transaction tr, BlockTableRecord owner, PlotJob job, TitleBlockDefinition definition)
+    private static BlockReference? FindBlockReference(Transaction tr, Database db, BlockTableRecord owner, PlotJob job, TitleBlockDefinition definition)
     {
+        // 优先按扫描时记录的句柄直接定位，避免每张图框都把整个空间实体扫描一遍。
+        var byHandleId = FindBlockReferenceByHandle(tr, db, job);
+        if (byHandleId != null)
+        {
+            return byHandleId;
+        }
+
         var matches = owner
             .Cast<ObjectId>()
             .Select(id => tr.GetObject(id, OpenMode.ForRead, false))
