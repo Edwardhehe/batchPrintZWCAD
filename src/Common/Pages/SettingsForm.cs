@@ -483,12 +483,10 @@ public sealed class SettingsForm : Form
         // 与“颜色索引”一致使用 OwnerDrawFixed：普通 ComboBox 高度由字体决定且不可改，
         // 同行的文本框/数字框又是另一套默认高度，导致一排输入框高矮不一。
         _directoryTextStyle.DrawMode = DrawMode.OwnerDrawFixed;
-        _directoryTextStyle.ItemHeight = UiLayout.Scale(18);
+        _directoryTextStyle.ItemHeight = UiLayout.Scale(13);
         _directoryTextStyle.DrawItem += DrawDirectoryTextStyle;
-        _directoryTextStyle.Dock = DockStyle.Fill;
         _directoryTextStyle.SelectedIndexChanged += (_, _) => UpdateDirectoryPreview();
         LoadTextStyles();
-        _directoryLayerName.Dock = DockStyle.Fill;
 
         var parameterGroup = new GroupBox
         {
@@ -567,19 +565,24 @@ public sealed class SettingsForm : Form
 
     private static Control BuildDirectoryParameter(string label, Control input)
     {
-        // 关闭 AutoSize，让文本框/数字框随 Dock 填满整行，与下拉框保持同一高度。
-        input.AutoSize = false;
-        input.Dock = DockStyle.Fill;
+        // 输入框统一使用固有高度（约 19px）：NumericUpDown 和普通 ComboBox 的高度由字体锁定，
+        // 无法拉伸，因此两个下拉框用 OwnerDrawFixed + ItemHeight 压到同一高度。
+        // 不能简单地 AutoSize=false + Dock=Fill：TableLayoutPanel 会把多余高度全部分配给
+        // 最后一行，文本框会被撑到整行剩余高度。
+        input.Dock = DockStyle.None;
+        input.Anchor = AnchorStyles.Left | AnchorStyles.Right;
         input.Margin = new Padding(0, UiLayout.Scale(2), UiLayout.Scale(4), 0);
         var panel = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 2,
+            RowCount = 3,
             Margin = Padding.Empty
         };
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(20)));
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(26)));
+        // 余量行吸收多余空间，避免输入行被 WinForms 拉高。
+        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         panel.Controls.Add(new Label
         {
             Text = label,
@@ -592,8 +595,8 @@ public sealed class SettingsForm : Form
 
     private Control BuildDirectoryRowHeightParameter()
     {
-        _directoryRowHeight.AutoSize = false;
-        _directoryRowHeight.Dock = DockStyle.Fill;
+        _directoryRowHeight.Dock = DockStyle.None;
+        _directoryRowHeight.Anchor = AnchorStyles.Left | AnchorStyles.Right;
         _directoryRowHeight.Margin = new Padding(0, UiLayout.Scale(2), UiLayout.Scale(4), 0);
         var pickHeight = UiLayout.CreateButton("图中交互", 68);
         pickHeight.Margin = new Padding(0, UiLayout.Scale(2), 0, 0);
@@ -604,12 +607,13 @@ public sealed class SettingsForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 3,
+            RowCount = 4,
             Margin = Padding.Empty
         };
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(20)));
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(26)));
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(27)));
+        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         panel.Controls.Add(new Label
         {
             Text = "目录行高",
@@ -625,7 +629,7 @@ public sealed class SettingsForm : Form
     {
         _directoryColorIndex.DropDownStyle = ComboBoxStyle.DropDownList;
         _directoryColorIndex.DrawMode = DrawMode.OwnerDrawFixed;
-        _directoryColorIndex.ItemHeight = UiLayout.Scale(18);
+        _directoryColorIndex.ItemHeight = UiLayout.Scale(13);
         _directoryColorIndex.MaxDropDownItems = 14;
         _directoryColorIndex.IntegralHeight = false;
         _directoryColorIndex.DropDownHeight = UiLayout.Scale(282);
@@ -681,7 +685,6 @@ public sealed class SettingsForm : Form
         if (e.Index >= 0 && e.Index < _directoryTextStyle.Items.Count)
         {
             var textColor = (e.State & DrawItemState.Selected) != 0
-                && (e.State & DrawItemState.ComboBoxEdit) == 0
                 ? SystemColors.HighlightText
                 : SystemColors.ControlText;
             TextRenderer.DrawText(
