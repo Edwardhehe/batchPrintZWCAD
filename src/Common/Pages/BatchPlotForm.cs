@@ -1223,40 +1223,11 @@ public sealed class BatchPlotForm : Form
         }
     }
 
+    /// <summary>空间排序，与矩形框批量打印共用 SpatialSorter 统一算法。</summary>
     private static List<PlotJob> SortSpatially(IReadOnlyList<PlotJob> jobs, bool horizontalFirst)
     {
-        if (jobs.Count <= 1) return jobs.ToList();
-
-        var centers = horizontalFirst
-            ? jobs.Select(CenterX).Distinct().OrderBy(x => x).ToList()
-            : jobs.Select(CenterY).Distinct().OrderBy(y => y).ToList();
-        var gaps = centers.Zip(centers.Skip(1), (a, b) => Math.Abs(b - a))
-            .Where(g => g > 1e-6).OrderBy(g => g).ToList();
-        var medianGap = gaps.Count > 0 ? gaps[gaps.Count / 2] : 1.0;
-        var bandTolerance = Math.Max(medianGap * 0.5, 1e-6);
-
-        var remaining = horizontalFirst
-            ? jobs.OrderBy(CenterX).ToList()
-            : jobs.OrderByDescending(CenterY).ToList();
-        var result = new List<PlotJob>();
-
-        while (remaining.Count > 0)
-        {
-            var anchor = horizontalFirst ? CenterX(remaining[0]) : CenterY(remaining[0]);
-            var band = remaining
-                .Where(j => Math.Abs((horizontalFirst ? CenterX(j) : CenterY(j)) - anchor) <= bandTolerance)
-                .ToList();
-            foreach (var j in band) remaining.Remove(j);
-            result.AddRange(horizontalFirst
-                ? band.OrderByDescending(CenterY)
-                : band.OrderBy(CenterX));
-        }
-
-        return result;
+        return SpatialSorter.Sort(jobs, horizontalFirst);
     }
-
-    private static double CenterX(PlotJob job) => (job.MinX + job.MaxX) / 2d;
-    private static double CenterY(PlotJob job) => (job.MinY + job.MaxY) / 2d;
 
     private void ClearJobs()
     {

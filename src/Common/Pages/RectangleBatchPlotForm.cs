@@ -591,6 +591,7 @@ public sealed class RectangleBatchPlotForm : Form
         UpdateVisuals();
     }
 
+    /// <summary>空间排序，与图号重排共用 SpatialSorter 统一算法。</summary>
     private static List<Row> SortSpatially(IReadOnlyList<Row> rows, bool horizontalFirst)
     {
         if (rows.Count <= 1)
@@ -598,67 +599,12 @@ public sealed class RectangleBatchPlotForm : Form
             return rows.ToList();
         }
 
-        // 用矩形边沿重叠判断行列分组，替代旧的中心点+中位数间隙法
-        // 同一行/列内图幅大小不同时也能正确分组（中心点法会把大图框和小图框分成两行）
-        // 重叠 ≥ 较小矩形边长的 30% → 视为同一行/列
-
-        // ── 并查集分组 ──
-        var parent = Enumerable.Range(0, rows.Count).ToArray();
-        int Find(int x) => parent[x] == x ? x : parent[x] = Find(parent[x]);
-        void Union(int a, int b) { parent[Find(a)] = Find(b); }
-
-        for (var i = 0; i < rows.Count; i++)
-        {
-            for (var j = i + 1; j < rows.Count; j++)
-            {
-                var ri = rows[i].Job;
-                var rj = rows[j].Job;
-                if (horizontalFirst)
-                {
-                    // 列分组：X 区间重叠
-                    var overlapX = Math.Min(ri.MaxX, rj.MaxX) - Math.Max(ri.MinX, rj.MinX);
-                    var minW = Math.Min(ri.MaxX - ri.MinX, rj.MaxX - rj.MinX);
-                    if (overlapX >= minW * 0.3) Union(i, j);
-                }
-                else
-                {
-                    // 行分组：Y 区间重叠
-                    var overlapY = Math.Min(ri.MaxY, rj.MaxY) - Math.Max(ri.MinY, rj.MinY);
-                    var minH = Math.Min(ri.MaxY - ri.MinY, rj.MaxY - rj.MinY);
-                    if (overlapY >= minH * 0.3) Union(i, j);
-                }
-            }
-        }
-
-        // ── 按分组整理 ──
-        var groups = rows.Select((r, i) => (Row: r, Group: Find(i)))
-            .GroupBy(x => x.Group)
-            .Select(g => g.Select(x => x.Row).ToList())
-            .ToList();
-
-        // ── 组内排序 ──
-        foreach (var group in groups)
-        {
-            if (horizontalFirst)
-                group.Sort((a, b) => CenterY(b.Job).CompareTo(CenterY(a.Job))); // 列内 Y 降序
-            else
-                group.Sort((a, b) => CenterX(a.Job).CompareTo(CenterX(b.Job))); // 行内 X 升序
-        }
-
-        // ── 组间排序 ──
-        if (horizontalFirst)
-            groups = groups.OrderBy(g => g.Average(r => CenterX(r.Job))).ToList();  // 列 X 升序
-        else
-            groups = groups.OrderByDescending(g => g.Average(r => CenterY(r.Job))).ToList(); // 行 Y 降序
-
-        // ── 展平 ──
-        var result = new List<Row>();
-        foreach (var group in groups) result.AddRange(group);
-        return result;
+        // Row → PlotJob 映射
+        var jobToRow = rows.ToDictionary(r => r.Job, r => r);
+        var jobs = rows.Select(r => r.Job).ToList();
+        var sortedJobs = SpatialSorter.Sort(jobs, horizontalFirst);
+        return sortedJobs.Select(j => jobToRow[j]).ToList();
     }
-
-    private static double CenterX(PlotJob job) => (job.MinX + job.MaxX) / 2d;
-    private static double CenterY(PlotJob job) => (job.MinY + job.MaxY) / 2d;
 
     private void RefreshDisplayRows()
     {
