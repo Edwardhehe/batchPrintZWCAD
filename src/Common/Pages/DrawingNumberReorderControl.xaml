@@ -1,0 +1,83 @@
+<UserControl x:Class="ZwcadBatchPlot.DrawingNumberReorderControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             FontFamily="Microsoft YaHei" FontSize="12">
+    <Grid Margin="12,10,12,8">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="32"/>
+            <RowDefinition Height="32"/>
+            <RowDefinition Height="32"/>
+            <RowDefinition Height="32"/>
+            <RowDefinition Height="32"/>
+            <RowDefinition Height="32"/>
+        </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="82"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <!-- 前缀 -->
+        <Label Grid.Row="0" Grid.Column="0" Content="前缀" VerticalAlignment="Center" Padding="0"/>
+        <TextBox Grid.Row="0" Grid.Column="1" x:Name="PrefixBox" Text=""
+                 Width="160" Height="23" HorizontalAlignment="Left"
+                 TextChanged="OnTextChanged"/>
+
+        <!-- 后缀 -->
+        <Label Grid.Row="1" Grid.Column="0" Content="后缀" VerticalAlignment="Center" Padding="0"/>
+        <TextBox Grid.Row="1" Grid.Column="1" x:Name="SuffixBox" Text=""
+                 Width="160" Height="23" HorizontalAlignment="Left"
+                 TextChanged="OnTextChanged"/>
+
+        <!-- 起始图号 -->
+        <Label Grid.Row="2" Grid.Column="0" Content="起始图号" VerticalAlignment="Center" Padding="0"/>
+        <Border Grid.Row="2" Grid.Column="1" HorizontalAlignment="Left"
+                BorderBrush="#FFABADB3" BorderThickness="1" Background="White"
+                Width="100" Height="23">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="16"/>
+                </Grid.ColumnDefinitions>
+                <TextBox x:Name="StartNumberBox" Text="1"
+                         Grid.Column="0" BorderThickness="0"
+                         VerticalContentAlignment="Center"
+                         PreviewTextInput="OnStartNumberPreviewTextInput"
+                         TextChanged="OnTextChanged"/>
+                <Grid Grid.Column="1">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <RepeatButton Grid.Row="0" Content="▲" FontSize="6"
+                                  BorderThickness="0" Background="#FFF0F0F0"
+                                  Click="OnStartNumberUp"/>
+                    <RepeatButton Grid.Row="1" Content="▼" FontSize="6"
+                                  BorderThickness="0" Background="#FFF0F0F0"
+                                  Click="OnStartNumberDown"/>
+                </Grid>
+            </Grid>
+        </Border>
+
+        <!-- 排序方向 -->
+        <Label Grid.Row="3" Grid.Column="0" Content="排序方向" VerticalAlignment="Center" Padding="0"/>
+        <ComboBox Grid.Row="3" Grid.Column="1" x:Name="SortOrderCombo"
+                  Width="220" Height="23" HorizontalAlignment="Left"
+                  SelectedIndex="0" SelectionChanged="OnTextChanged">
+            <ComboBoxItem Content="从上到下，从左到右"/>
+            <ComboBoxItem Content="从左到右，从上到下"/>
+        </ComboBox>
+
+        <!-- 预览 -->
+        <Label Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="2" x:Name="PreviewLabel"
+               Content="" VerticalAlignment="Center" Padding="0"
+               Foreground="DimGray" FontSize="11"/>
+
+        <!-- 按钮 -->
+        <StackPanel Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="2"
+                    HorizontalAlignment="Right" Orientation="Horizontal" Margin="0,8,0,0">
+            <Button Content="确定" Width="76" Height="26" Click="OnOkClick" Margin="4,0,0,0"/>
+            <Button Content="预览顺序" Width="88" Height="26" Click="OnPreviewClick" Margin="4,0,0,0"/>
+            <Button Content="取消" Width="76" Height="26" Click="OnCancelClick" Margin="4,0,0,0"/>
+        </StackPanel>
+    </Grid>
+</UserControl>
