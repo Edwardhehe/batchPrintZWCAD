@@ -1145,7 +1145,8 @@ public sealed class BatchPlotForm : Form
         // 保存原始图号，非模态窗口取消/关闭时恢复。
         _renumberCurrentJobs = currentJobs;
         _renumberOriginalNumbers = currentJobs.ToDictionary(j => j, j => j.DrawingNumber);
-        _renumberDialog = new DrawingNumberReorderDialog(currentJobs.Count);
+        var detectedPrefix = DetectCommonDrawingNumberPrefix(currentJobs);
+        _renumberDialog = new DrawingNumberReorderDialog(currentJobs.Count, detectedPrefix);
         _renumberDialog.PreviewRequested += PreviewRenumberDrawingNumbers;
         _renumberDialog.FormClosed += RenumberDialogClosed;
         _renumberDialog.Show(this);
@@ -1221,6 +1222,30 @@ public sealed class BatchPlotForm : Form
             sorted[i].DrawingNumber = prefix + (start + i).ToString($"D{digits}") + suffix;
             sorted[i].CadDrawingNumber = sorted[i].DrawingNumber;
         }
+    }
+
+    /// <summary>从现有图号中检测公共前缀：取最长公共前缀后去掉末尾数字。</summary>
+    private static string DetectCommonDrawingNumberPrefix(IReadOnlyList<PlotJob> jobs)
+    {
+        if (jobs.Count == 0) return "";
+        var numbers = jobs.Select(j => j.DrawingNumber).Where(n => !string.IsNullOrEmpty(n)).ToList();
+        if (numbers.Count == 0) return "";
+
+        // 最长公共前缀
+        var common = numbers[0];
+        for (var i = 1; i < numbers.Count && common.Length > 0; i++)
+        {
+            var len = Math.Min(common.Length, numbers[i].Length);
+            var j = 0;
+            while (j < len && common[j] == numbers[i][j]) j++;
+            common = common.Substring(0, j);
+        }
+
+        // 去掉末尾数字部分（如 JZ-0 → JZ-、JG0 → JG）
+        while (common.Length > 0 && char.IsDigit(common[common.Length - 1]))
+            common = common.Substring(0, common.Length - 1);
+
+        return common;
     }
 
     /// <summary>空间排序，与矩形框批量打印共用 SpatialSorter 统一算法。</summary>

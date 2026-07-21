@@ -26,7 +26,7 @@ public sealed class DrawingNumberReorderDialog : Form
     /// <summary>用户点击"预览顺序"时触发，供父窗口临时更新编号和叠加层。</summary>
     public event Action? PreviewRequested;
 
-    public DrawingNumberReorderDialog(int jobCount)
+    public DrawingNumberReorderDialog(int jobCount, string detectedPrefix = "")
     {
         _jobCount = jobCount;
 
@@ -46,8 +46,8 @@ public sealed class DrawingNumberReorderDialog : Form
         table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(82)));
         table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
-        // 前缀
-        _prefix.Text = "";
+        // 前缀（自动识别现有图号的公共前缀）
+        _prefix.Text = detectedPrefix;
         _prefix.Dock = DockStyle.Left;
         _prefix.Width = UiLayout.Scale(160);
         AddRow(table, 0, "前缀", _prefix);
