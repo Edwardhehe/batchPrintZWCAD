@@ -10,12 +10,14 @@ namespace ZwcadBatchPlot;
 public sealed class DrawingNumberReorderDialog : Form
 {
     private readonly TextBox _prefix = new();
+    private readonly TextBox _suffix = new();
     private readonly NumericUpDown _startNumber = new();
     private readonly ComboBox _sortOrder = new();
     private readonly Label _preview = new();
     private readonly int _jobCount;
 
     public string Prefix => _prefix.Text.Trim();
+    public string Suffix => _suffix.Text.Trim();
     public int StartNumber => (int)_startNumber.Value;
 
     /// <summary>排序方向：先水平再垂直（从左到右，从上到下）</summary>
@@ -32,8 +34,8 @@ public sealed class DrawingNumberReorderDialog : Form
         FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.CenterParent;
-        UiLayout.ConfigureForm(this, 390, 250, 370, 230);
-        ClientSize = new Size(UiLayout.Scale(390), UiLayout.Scale(230));
+        UiLayout.ConfigureForm(this, 390, 290, 370, 270);
+        ClientSize = new Size(UiLayout.Scale(390), UiLayout.Scale(270));
 
         var table = new TableLayoutPanel
         {
@@ -50,6 +52,12 @@ public sealed class DrawingNumberReorderDialog : Form
         _prefix.Width = UiLayout.Scale(160);
         AddRow(table, 0, "前缀", _prefix);
 
+        // 后缀
+        _suffix.Text = "";
+        _suffix.Dock = DockStyle.Left;
+        _suffix.Width = UiLayout.Scale(160);
+        AddRow(table, 1, "后缀", _suffix);
+
         // 起始图号
         _startNumber.DecimalPlaces = 0;
         _startNumber.Minimum = 1;
@@ -57,7 +65,7 @@ public sealed class DrawingNumberReorderDialog : Form
         _startNumber.Value = 1;
         _startNumber.Dock = DockStyle.Left;
         _startNumber.Width = UiLayout.Scale(100);
-        AddRow(table, 1, "起始图号", _startNumber);
+        AddRow(table, 2, "起始图号", _startNumber);
 
         // 排序方向
         _sortOrder.DropDownStyle = ComboBoxStyle.DropDownList;
@@ -66,7 +74,7 @@ public sealed class DrawingNumberReorderDialog : Form
         _sortOrder.Items.AddRange(new object[] { "从上到下，从左到右", "从左到右，从上到下" });
         _sortOrder.SelectedIndex = 0;
         _sortOrder.SelectedIndexChanged += (_, _) => UpdatePreview();
-        AddRow(table, 2, "排序方向", _sortOrder);
+        AddRow(table, 3, "排序方向", _sortOrder);
 
         // 预览
         _preview.Dock = DockStyle.Fill;
@@ -74,7 +82,7 @@ public sealed class DrawingNumberReorderDialog : Form
         _preview.ForeColor = Color.DimGray;
         _preview.Font = new Font(Font.FontFamily, Math.Max(Font.Size - 1, 7));
         table.SetColumnSpan(_preview, 2);
-        table.Controls.Add(_preview, 0, 3);
+        table.Controls.Add(_preview, 0, 4);
 
         // 按钮
         var buttons = new FlowLayoutPanel
@@ -93,15 +101,16 @@ public sealed class DrawingNumberReorderDialog : Form
         buttons.Controls.Add(skip);
         buttons.Controls.Add(cancel);
         table.SetColumnSpan(buttons, 2);
-        table.Controls.Add(buttons, 0, 4);
+        table.Controls.Add(buttons, 0, 5);
 
-        table.RowCount = 5;
-        for (var i = 0; i < 4; i++)
+        table.RowCount = 6;
+        for (var i = 0; i < 5; i++)
             table.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(32)));
         table.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(32)));
 
         Controls.Add(table);
         _prefix.TextChanged += (_, _) => UpdatePreview();
+        _suffix.TextChanged += (_, _) => UpdatePreview();
         _startNumber.ValueChanged += (_, _) => UpdatePreview();
         UpdatePreview();
     }
@@ -109,17 +118,18 @@ public sealed class DrawingNumberReorderDialog : Form
     private void UpdatePreview()
     {
         var prefix = Prefix;
+        var suffix = Suffix;
         var start = StartNumber;
         var digits = Math.Max(2, (_jobCount + start - 1).ToString().Length);
         var samples = Math.Min(5, _jobCount);
         var items = new string[samples];
         for (var i = 0; i < samples; i++)
         {
-            items[i] = prefix + (start + i).ToString($"D{digits}");
+            items[i] = prefix + (start + i).ToString($"D{digits}") + suffix;
         }
 
-        var suffix = _jobCount > samples ? " ..." : "";
-        _preview.Text = $"示例: {string.Join(", ", items)}{suffix}  (共{_jobCount}张)";
+        var tail = _jobCount > samples ? " ..." : "";
+        _preview.Text = $"示例: {string.Join(", ", items)}{tail}  (共{_jobCount}张)";
     }
 
     private static void AddRow(TableLayoutPanel table, int row, string labelText, Control control)

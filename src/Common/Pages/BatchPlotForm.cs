@@ -1160,7 +1160,7 @@ public sealed class BatchPlotForm : Form
         }
 
         var sorted = SortSpatially(_renumberCurrentJobs, _renumberDialog.HorizontalFirst);
-        ApplyRenumbering(sorted, _renumberDialog.Prefix, _renumberDialog.StartNumber);
+        ApplyRenumbering(sorted, _renumberDialog.Prefix, _renumberDialog.Suffix, _renumberDialog.StartNumber);
         _grid.Refresh();
         ShowRenumberPreviewOverlay(sorted);
     }
@@ -1189,7 +1189,7 @@ public sealed class BatchPlotForm : Form
         }
 
         var finalSorted = SortSpatially(currentJobs, dialog.HorizontalFirst);
-        ApplyRenumbering(finalSorted, dialog.Prefix, dialog.StartNumber);
+        ApplyRenumbering(finalSorted, dialog.Prefix, dialog.Suffix, dialog.StartNumber);
         foreach (var job in currentJobs)
         {
             // 图号重排后，打印顺序应重新按新图号计算，清掉右键“移到第一个”的手动优先级。
@@ -1213,12 +1213,12 @@ public sealed class BatchPlotForm : Form
         dialog.Dispose();
     }
 
-    private static void ApplyRenumbering(IReadOnlyList<PlotJob> sorted, string prefix, int start)
+    private static void ApplyRenumbering(IReadOnlyList<PlotJob> sorted, string prefix, string suffix, int start)
     {
         var digits = Math.Max(2, (sorted.Count + start - 1).ToString().Length);
         for (var i = 0; i < sorted.Count; i++)
         {
-            sorted[i].DrawingNumber = prefix + (start + i).ToString($"D{digits}");
+            sorted[i].DrawingNumber = prefix + (start + i).ToString($"D{digits}") + suffix;
             sorted[i].CadDrawingNumber = sorted[i].DrawingNumber;
         }
     }
