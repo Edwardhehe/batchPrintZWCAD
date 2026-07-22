@@ -6,6 +6,8 @@ using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.EditorInput;
 using Autodesk.AutoCAD.Geometry;
 using Autodesk.AutoCAD.GraphicsInterface;
+// AutoCAD 中 DatabaseServices 和 GraphicsInterface 同样存在 Polyline，必须明确使用数据库实体类型。
+using Polyline = Autodesk.AutoCAD.DatabaseServices.Polyline;
 #else
 using ZwSoft.ZwCAD.Colors;
 using ZwSoft.ZwCAD.DatabaseServices;

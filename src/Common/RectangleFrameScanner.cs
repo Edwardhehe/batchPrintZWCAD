@@ -423,7 +423,9 @@ public static class RectangleFrameScanner
 
         // ── 分支 1：Polyline → 矩形检测 ──
         if (entity is Polyline polyline
-            && IsEntityLayerScannable(tr, entity)
+            // 图框 PL 可能专门放在 Defpoints 或其他“不打印”辅助层；
+            // 它只提供打印边界，不代表该层图素会进入打印内容，因此这里只要求图层开启且未冻结。
+            && IsFramePolylineLayerScannable(tr, entity)
             && TryGetRectangle(polyline, transform, out var rectangle))
         {
             // 先全部收集，不去重——不同实例的同一定义各自独立，去重放在后续 FilterRectangles
@@ -480,7 +482,9 @@ public static class RectangleFrameScanner
                     continue;
                 }
 
-                if (!IsEntityLayerScannable(tr, nested))
+                // 递归阶段不能按“是否打印”提前截断，否则块内不可打印层上的图框 PL
+                // 永远到不了下面的矩形检测分支。普通 Line 是否可拼框仍由严格规则单独控制。
+                if (!IsEntityLayerVisibleForScanning(tr, nested))
                 {
                     continue;
                 }
@@ -836,6 +840,38 @@ public static class RectangleFrameScanner
                 && layer.IsPlottable;      // 图层可打印
             LayerScannableCache[entity.LayerId] = result;
             return result;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 图框 PL 的图层过滤规则：图层必须开启且未冻结，但允许设置为“不打印”。
+    /// 不打印属性只决定图素是否输出，不应阻止该 PL 作为矩形框批打的边界。
+    /// </summary>
+    private static bool IsFramePolylineLayerScannable(Transaction tr, Entity entity)
+    {
+        return IsEntityLayerVisibleForScanning(tr, entity);
+    }
+
+    /// <summary>
+    /// 判断图层在当前图形中是否可见，仅检查关闭/冻结状态，不检查 IsPlottable。
+    /// 此规则只用于查找图框 PL 和递归进入块定义；内容过滤仍调用严格的
+    /// <see cref="IsEntityLayerScannable"/>，不会把不打印层误当成有效图纸内容。
+    /// </summary>
+    private static bool IsEntityLayerVisibleForScanning(Transaction tr, Entity entity)
+    {
+        try
+        {
+            if (entity.LayerId.IsNull
+                || tr.GetObject(entity.LayerId, OpenMode.ForRead, false) is not LayerTableRecord layer)
+            {
+                return false;
+            }
+
+            return !layer.IsOff && !layer.IsFrozen;
         }
         catch
         {
