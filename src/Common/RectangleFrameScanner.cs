@@ -37,6 +37,10 @@ public static class RectangleFrameScanner
     /// 静态级缓存，同一次 CAD 会话内跨扫描复用。</summary>
     private static readonly Dictionary<ObjectId, bool> LayerScannableCache = new();
 
+    /// <summary>块定义内容缓存：key=块定义 ObjectId，value=该块定义内的最大矩形（局部坐标）。
+    /// 同一次扫描内同一块定义只遍历一次，后续实例直接变换缓存结果。</summary>
+    private static readonly Dictionary<ObjectId, List<LocalRectangle>> BlockDefinitionCache = new();
+
     /// <summary>由 Line 或开放 Polyline 提取的线段，用于识别 4 线段拼合矩形。</summary>
     private struct LineSegment
     {
@@ -66,6 +70,7 @@ public static class RectangleFrameScanner
     public static List<Result> ScanWindow(Document document, Extents3d scanWindow)
     {
         LayerScannableCache.Clear();
+        BlockDefinitionCache.Clear();
         var sourceFile = string.IsNullOrWhiteSpace(document.Database.Filename)
             ? document.Name
             : document.Database.Filename;
@@ -116,6 +121,7 @@ public static class RectangleFrameScanner
     public static List<Result> ScanScope(Document document, TitleBlockScanScope scope)
     {
         LayerScannableCache.Clear();
+        BlockDefinitionCache.Clear();
         var sourceFile = string.IsNullOrWhiteSpace(document.Database.Filename)
             ? document.Name
             : document.Database.Filename;
@@ -424,7 +430,7 @@ public static class RectangleFrameScanner
             rectangles.Add(rectangle);
         }
 
-        // ── 分支 2：BlockReference → 递归进入 ──
+        // ── 分支 2：BlockReference → 缓存 + 递归进入 ──
         if (entity is not BlockReference blockReference || depth >= 12)
         {
             return;
@@ -437,6 +443,18 @@ public static class RectangleFrameScanner
         }
 
         var definitionId = blockReference.BlockTableRecord;
+        var instanceXform = blockReference.BlockTransform * transform;
+
+        // 块定义缓存：同一块定义只遍历一次，后续实例直接变换缓存的局部坐标结果。
+        if (BlockDefinitionCache.TryGetValue(definitionId, out var cachedRects))
+        {
+            if (cachedRects.Count > 0)
+            {
+                rectangles.Add(TransformCachedRect(cachedRects[0], instanceXform));
+            }
+            return;
+        }
+
         // 防循环：同一个块定义在一条递归路径上只进入一次
         if (!visitedDefinitions.Add(definitionId))
         {
@@ -446,30 +464,15 @@ public static class RectangleFrameScanner
         try
         {
             var definition = (BlockTableRecord)tr.GetObject(definitionId, OpenMode.ForRead);
-            // 累积变换矩阵：子实体坐标 × blockRef 的变换 = 子实体的 WCS 坐标
-            var nestedTransform = blockReference.BlockTransform * transform;
 
-            // 预检查：块内 Line+开放PL 数量 > 200 则跳过线段拼合（避免复杂块扫描极慢）
-            var shouldCollectSegments = depth < 3;
-            if (shouldCollectSegments)
-            {
-                var lineCount = 0;
-                foreach (ObjectId id in definition)
-                {
-                    if (tr.GetObject(id, OpenMode.ForRead, false) is Entity child
-                        && IsEntityLayerScannable(tr, child) && IsEntityVisible(child)
-                        && (child is Line || (child is Polyline pl && !pl.Closed && pl.NumberOfVertices == 2)))
-                    {
-                        if (++lineCount > 200) { shouldCollectSegments = false; break; }
-                    }
-                }
-            }
-
-            // 同一块定义内只保留最大的矩形框（每个 BlockRef 实例独立遍历，互不影响）
-            // 例如块定义内含一大一小两个嵌套矩形，只取大的
-            // 四线段拼合在块内独立处理，不跨块混合；深度 ≤ 3 层（depth 从 0 起算）
+            // 用单位矩阵遍历获取块局部坐标，存入缓存供其他实例复用。
+            // 同一块定义内只保留最大的矩形框。
+            // 四线段拼合在块内独立处理；深度 ≤ 3 层。
+            // 合并预扫和主循环为单次遍历：边数线段边收集矩形。
             var localRects = new List<LocalRectangle>();
-            var blockSegments = shouldCollectSegments ? new List<LineSegment>() : null;
+            var lineCount = 0;
+            var limitSegments = depth >= 3;
+            var blockSegments = limitSegments ? null : new List<LineSegment>();
             foreach (ObjectId id in definition)
             {
                 if (tr.GetObject(id, OpenMode.ForRead, false) is not Entity nested)
@@ -477,35 +480,50 @@ public static class RectangleFrameScanner
                     continue;
                 }
 
-                // 图层过滤：跳过关闭/冻结/不打印图层的实体
                 if (!IsEntityLayerScannable(tr, nested))
                 {
                     continue;
                 }
 
-                // 可见性过滤：用 CAD 引擎原生 entity.Visible 判断
-                // 动态块切换可见性状态时 CAD 自动更新此属性，无需猜名字或图层
                 if (!IsEntityVisible(nested))
                 {
                     continue;
                 }
 
-                // 递归：矩形先收到 localRects，块内线段收到 blockSegments
-                CollectEntityRectangles(tr, nested, nestedTransform, localRects, blockSegments, visitedDefinitions, depth + 1);
+                // 线段计数（与收集合并）：超过 200 条则停止收集线段
+                if (!limitSegments && (nested is Line || (nested is Polyline pl && !pl.Closed && pl.NumberOfVertices == 2)))
+                {
+                    if (++lineCount > 200)
+                    {
+                        limitSegments = true;
+                        blockSegments = null;
+                    }
+                }
+
+                // 用单位矩阵递归 → 子实体结果均在当前块定义局部坐标下
+                CollectEntityRectangles(tr, nested, Matrix3d.Identity, localRects, blockSegments, visitedDefinitions, depth + 1);
             }
 
-            // 从本块内收集的线段中拼合矩形（4 条 Line / 4 条 PL）
             if (blockSegments != null && blockSegments.Count >= 4)
             {
                 var segRects = FindRectanglesFromSegments(blockSegments);
                 localRects.AddRange(segRects);
             }
 
-            // 该块定义内只保留面积最大的矩形，加到父级列表
+            // 缓存局部坐标下的最大矩形，并变换到当前实例的世界坐标
+            List<LocalRectangle> cacheEntry;
             if (localRects.Count > 0)
             {
-                rectangles.Add(localRects.OrderByDescending(Area).First());
+                var largest = localRects.OrderByDescending(Area).First();
+                cacheEntry = new List<LocalRectangle> { largest };
+                rectangles.Add(TransformCachedRect(largest, instanceXform));
             }
+            else
+            {
+                cacheEntry = new List<LocalRectangle>();
+            }
+
+            BlockDefinitionCache[definitionId] = cacheEntry;
         }
         catch
         {
@@ -1158,6 +1176,40 @@ public static class RectangleFrameScanner
             * Math.Max(0, rectangle.MaxY - rectangle.MinY);
     }
 
+    /// <summary>
+    /// 将缓存的局部坐标矩形通过变换矩阵转到世界坐标。
+    /// 根据四角点重新计算包围盒，保持 ActualWidth/ActualHeight 不变。
+    /// </summary>
+    private static LocalRectangle TransformCachedRect(LocalRectangle localRect, Matrix3d xform)
+    {
+        if (localRect.CornerPoints == null)
+        {
+            // 无角点的退化情况：直接变换 Min/Max 角点取包围盒
+            var pMin = new Point3d(localRect.MinX, localRect.MinY, 0).TransformBy(xform);
+            var pMax = new Point3d(localRect.MaxX, localRect.MaxY, 0).TransformBy(xform);
+            return LocalRectangle.FromPoints(
+                Math.Min(pMin.X, pMax.X), Math.Min(pMin.Y, pMax.Y),
+                Math.Max(pMin.X, pMax.X), Math.Max(pMin.Y, pMax.Y));
+        }
+
+        var cp = localRect.CornerPoints;
+        var p0 = new Point3d(cp[0], cp[1], 0).TransformBy(xform);
+        var p1 = new Point3d(cp[2], cp[3], 0).TransformBy(xform);
+        var p2 = new Point3d(cp[4], cp[5], 0).TransformBy(xform);
+        var p3 = new Point3d(cp[6], cp[7], 0).TransformBy(xform);
+
+        var minX = Math.Min(Math.Min(p0.X, p1.X), Math.Min(p2.X, p3.X));
+        var minY = Math.Min(Math.Min(p0.Y, p1.Y), Math.Min(p2.Y, p3.Y));
+        var maxX = Math.Max(Math.Max(p0.X, p1.X), Math.Max(p2.X, p3.X));
+        var maxY = Math.Max(Math.Max(p0.Y, p1.Y), Math.Max(p2.Y, p3.Y));
+
+        var result = LocalRectangle.FromPoints(minX, minY, maxX, maxY);
+        result.ActualWidth = localRect.ActualWidth;
+        result.ActualHeight = localRect.ActualHeight;
+        result.CornerPoints = new[] { p0.X, p0.Y, p1.X, p1.Y, p2.X, p2.Y, p3.X, p3.Y };
+        return result;
+    }
+
     /// <summary>两个轴对齐矩形是否相交。</summary>
     private static bool Intersects(LocalRectangle rectangle, LocalRectangle window)
     {
@@ -1181,151 +1233,135 @@ public static class RectangleFrameScanner
     /// <param name="ownerId">布局 BlockTableRecord 的 ObjectId</param>
     /// <param name="candidates">待检查的候选矩形列表</param>
     /// <returns>包含实际图素的矩形列表</returns>
-    private static List<LocalRectangle> FilterEmptyRectangles(
-        Document document, ObjectId ownerId, List<LocalRectangle> candidates)
-    {
-        using var tr = document.Database.TransactionManager.StartTransaction();
-        var owner = (BlockTableRecord)tr.GetObject(ownerId, OpenMode.ForRead);
-        var result = new List<LocalRectangle>();
-        foreach (var rect in candidates)
-        {
-            if (HasDrawingContent(tr, owner, rect))
-            {
-                result.Add(rect);
-            }
-        }
+	    /// <summary>
+	    /// 空框过滤：先预扫描一次收集所有实体的世界坐标外包盒（含嵌套块），
+	    /// 再对每个候选矩形做内存级包围盒相交判断。
+	    /// 避免对每个矩形都遍历 CAD 数据库——O(R×E) → O(E + R×B)。
+	    /// </summary>
+	    private static List<LocalRectangle> FilterEmptyRectangles(
+	        Document document, ObjectId ownerId, List<LocalRectangle> candidates)
+	    {
+	        using var tr = document.Database.TransactionManager.StartTransaction();
+	        var owner = (BlockTableRecord)tr.GetObject(ownerId, OpenMode.ForRead);
 
-        return result;
-    }
+	        // 预扫描：一次性收集所有实体的世界坐标外包盒（含嵌套块）
+	        var entityBoxes = new List<LocalRectangle>();
+	        CollectEntityBoxesForContentCheck(tr, owner, Matrix3d.Identity, entityBoxes,
+	            new HashSet<ObjectId>(), 0);
 
-    /// <summary>
-    /// 检查一个矩形范围内是否存在任何可见、可打印的绘图实体（图素）。
-    ///
-    /// 递归遍历布局内所有实体，包括块参照内的子实体。
-    /// 矩形框多段线自身不计为"内容"——通过比较 GeomExtents 与矩形
-    /// 包围盒的相似度来排除。
-    /// </summary>
-    private static bool HasDrawingContent(Transaction tr, BlockTableRecord owner, LocalRectangle targetRect)
-    {
-        foreach (ObjectId id in owner)
-        {
-            if (tr.GetObject(id, OpenMode.ForRead, false) is not Entity entity)
-            {
-                continue;
-            }
+	        // 内存级矩形相交判断，不再访问 CAD 数据库
+	        var result = new List<LocalRectangle>();
+	        foreach (var rect in candidates)
+	        {
+	            if (AnyIntersects(entityBoxes, rect))
+	            {
+	                result.Add(rect);
+	            }
+	        }
 
-            if (CheckEntityContent(tr, entity, Matrix3d.Identity, targetRect, new HashSet<ObjectId>(), 0))
-            {
-                return true; // 找到一个就行，短路退出
-            }
-        }
+	        return result;
+	    }
 
-        return false;
-    }
+	    /// <summary>
+	    /// 递归收集空间内所有实体的世界坐标外包盒，过滤规则与旧 CheckEntityContent 一致：
+	    /// 跳过临时标注图层、不可打印图层、不可见实体；块参照递归进入（防循环、防过深）。
+	    /// visitedDefinitions 的 Add/Remove 模式允许同一块定义从不同父路径重新进入。
+	    /// </summary>
+	    private static void CollectEntityBoxesForContentCheck(
+	        Transaction tr,
+	        BlockTableRecord owner,
+	        Matrix3d transform,
+	        List<LocalRectangle> boxes,
+	        HashSet<ObjectId> visitedDefinitions,
+	        int depth)
+	    {
+	        foreach (ObjectId id in owner)
+	        {
+	            if (tr.GetObject(id, OpenMode.ForRead, false) is not Entity entity)
+	            {
+	                continue;
+	            }
 
-    /// <summary>
-    /// 递归检查单个实体（及其嵌套块）是否落入目标矩形范围内。
-    ///
-    /// 与 CollectEntityRectangles 的遍历路径一致：
-    ///   - 跳过临时标注图层
-    ///   - 跳过不可打印图层的实体
-    ///   - 跳过不可见实体（动态块隐藏状态）
-    ///   - 块参照递归进入，防循环、防过深
-    ///
-    /// "有内容"的判定：实体的 GeometricExtents（变换到 WCS）与目标矩形相交，
-    ///   且不是矩形框多段线自身（包围盒与目标矩形重合的实体被跳过）。
-    /// </summary>
-    private static bool CheckEntityContent(
-        Transaction tr,
-        Entity entity,
-        Matrix3d transform,
-        LocalRectangle targetRect,
-        ISet<ObjectId> visitedDefinitions,
-        int depth)
-    {
-        // 跳过临时标注图层
-        if (string.Equals(entity.Layer, TemporaryOverlayLayer, StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
+	            // 跳过临时标注图层
+	            if (string.Equals(entity.Layer, TemporaryOverlayLayer, StringComparison.OrdinalIgnoreCase))
+	            {
+	                continue;
+	            }
 
-        // 跳过不可打印图层的实体
-        if (!IsEntityLayerScannable(tr, entity))
-        {
-            return false;
-        }
+	            // 跳过不可打印图层的实体
+	            if (!IsEntityLayerScannable(tr, entity))
+	            {
+	                continue;
+	            }
 
-        // 跳过不可见实体
-        if (!IsEntityVisible(entity))
-        {
-            return false;
-        }
+	            // 跳过不可见实体
+	            if (!IsEntityVisible(entity))
+	            {
+	                continue;
+	            }
 
-        // ── 检查当前实体是否落入目标矩形 ──
-        try
-        {
-            var ext = entity.GeometricExtents;
-            var extMin = ext.MinPoint.TransformBy(transform);
-            var extMax = ext.MaxPoint.TransformBy(transform);
-            var entityRect = LocalRectangle.FromPoints(
-                Math.Min(extMin.X, extMax.X), Math.Min(extMin.Y, extMax.Y),
-                Math.Max(extMin.X, extMax.X), Math.Max(extMin.Y, extMax.Y));
+	            // 收集当前实体的世界坐标外包盒
+	            try
+	            {
+	                var ext = entity.GeometricExtents;
+	                var extMin = ext.MinPoint.TransformBy(transform);
+	                var extMax = ext.MaxPoint.TransformBy(transform);
+	                boxes.Add(LocalRectangle.FromPoints(
+	                    Math.Min(extMin.X, extMax.X), Math.Min(extMin.Y, extMax.Y),
+	                    Math.Max(extMin.X, extMax.X), Math.Max(extMin.Y, extMax.Y)));
+	            }
+	            catch
+	            {
+	                // 部分实体（如空块参照）可能抛出异常，忽略
+	            }
 
-            if (Intersects(entityRect, targetRect))
-            {
-                return true;
-            }
-        }
-        catch
-        {
-            // 部分实体（如空块参照）可能抛出异常，忽略继续
-        }
+	            // ── 递归进入块参照 ──
+	            if (entity is not BlockReference blockRef || depth >= 5)
+	            {
+	                continue;
+	            }
 
-        // ── 递归进入块参照 ──
-        if (entity is not BlockReference blockRef || depth >= 5)
-        {
-            return false;
-        }
+	            if (IsBlockClipped(tr, blockRef))
+	            {
+	                continue;
+	            }
 
-        // XCLIP 裁切过的块不参与扫描
-        if (IsBlockClipped(tr, blockRef))
-        {
-            return false;
-        }
+	            var definitionId = blockRef.BlockTableRecord;
+	            if (!visitedDefinitions.Add(definitionId))
+	            {
+	                continue;
+	            }
 
-        var definitionId = blockRef.BlockTableRecord;
-        if (!visitedDefinitions.Add(definitionId))
-        {
-            return false;
-        }
+	            try
+	            {
+	                var definition = (BlockTableRecord)tr.GetObject(definitionId, OpenMode.ForRead);
+	                var nestedTransform = blockRef.BlockTransform * transform;
+	                CollectEntityBoxesForContentCheck(tr, definition, nestedTransform, boxes,
+	                    visitedDefinitions, depth + 1);
+	            }
+	            catch
+	            {
+	                // 损坏的块定义无法读取，跳过
+	            }
 
-        try
-        {
-            var definition = (BlockTableRecord)tr.GetObject(definitionId, OpenMode.ForRead);
-            var nestedTransform = blockRef.BlockTransform * transform;
+	            visitedDefinitions.Remove(definitionId);
+	        }
+	    }
 
-            foreach (ObjectId nestedId in definition)
-            {
-                if (tr.GetObject(nestedId, OpenMode.ForRead, false) is not Entity nested)
-                {
-                    continue;
-                }
+	    /// <summary>
+	    /// 检查预收集的实体外包盒列表中是否有任意一个与目标矩形相交。
+	    /// 纯内存操作，短路退出。
+	    /// </summary>
+	    private static bool AnyIntersects(List<LocalRectangle> boxes, LocalRectangle target)
+	    {
+	        foreach (var box in boxes)
+	        {
+	            if (Intersects(box, target))
+	            {
+	                return true;
+	            }
+	        }
 
-                if (CheckEntityContent(tr, nested, nestedTransform, targetRect, visitedDefinitions, depth + 1))
-                {
-                    return true;
-                }
-            }
-        }
-        catch
-        {
-            // 损坏的块定义无法读取，跳过
-        }
-        finally
-        {
-            visitedDefinitions.Remove(definitionId);
-        }
-
-        return false;
-    }
-}
+	        return false;
+	    }
+	}
