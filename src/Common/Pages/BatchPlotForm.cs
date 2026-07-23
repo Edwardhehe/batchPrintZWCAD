@@ -1366,7 +1366,8 @@ public sealed class BatchPlotForm : Form
             _settings.PdfFileNamePattern,
             job,
             sequenceNumber,
-            sequenceDigits);
+            sequenceDigits,
+            _settings.LongPaperNameFormat);
         return FileNameSanitizer.MakeUnique(
             GetOutputDirectory(job),
             baseName,
@@ -1658,6 +1659,7 @@ public sealed class BatchPlotForm : Form
         _settings.DirectoryDrawHeader = updated.DirectoryDrawHeader;
         _settings.DirectoryDrawGridLines = updated.DirectoryDrawGridLines;
         _settings.DirectoryColumns = updated.DirectoryColumns.Select(x => x.Clone()).ToList();
+        _settings.LongPaperNameFormat = updated.LongPaperNameFormat;
         _mergePdfCheckBox.Checked = updated.MergePdf;
     }
 

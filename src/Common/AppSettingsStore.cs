@@ -6,6 +6,19 @@ using Newtonsoft.Json;
 
 namespace ZwcadBatchPlot;
 
+/// <summary>加长图图名格式配置。共预留6种，当前实现配置1（分数）和配置2（小数）。</summary>
+public enum LongPaperNameFormat
+{
+    /// <summary>配置1（分数）：A3+1/8、A2+3/4，分母为8的约分分数。</summary>
+    Fraction = 0,
+    /// <summary>配置2（小数）：A3+0.125、A2+0.75，精确到3位小数。</summary>
+    Decimal = 1,
+    Reserved2 = 2,
+    Reserved3 = 3,
+    Reserved4 = 4,
+    Reserved5 = 5,
+}
+
 public sealed class DirectoryColumnSetting
 {
     public string Key { get; set; } = "";
@@ -48,6 +61,8 @@ public sealed class AppSettings
     public double PaperMarginMm { get; set; } = 1;
     /// <summary>图框库批量打印空间排序方向：true=从左到右从上到下，false=从上到下从左到右。</summary>
     public bool SortOrderHorizontalFirst { get; set; }
+    /// <summary>加长图图名命名格式：分数（配置1）或小数（配置2）等。</summary>
+    public LongPaperNameFormat LongPaperNameFormat { get; set; } = LongPaperNameFormat.Fraction;
     public string PdfFileNameSeparator { get; set; } = "_";
     public List<string> PdfFileNameFields { get; set; } = new() { "DrawingNumber", "Title" };
     /// <summary>

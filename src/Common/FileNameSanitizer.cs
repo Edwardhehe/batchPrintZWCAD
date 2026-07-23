@@ -75,21 +75,26 @@ public static class FileNameSanitizer
             Math.Max(1, LegacyMaxPathLength - Path.GetFullPath(directory).Length - extension.Length - 1));
     }
 
-    /// <summary>把加长图幅名中的分数后缀改为小数，如 A1+1/4 → A1+0.25、A1+17/8 → A1+2.125。</summary>
-    public static string NormalizeLongPaperFraction(string paperName)
+    /// <summary>
+    /// 把加长图幅名中的"/"处理为适合文件名的格式：
+    /// 配置1（分数）：将"/"替换为"∕"（U+2215 DIVISION SLASH），保留分数形式；
+    /// 配置2（小数）：将分数转为小数，如 A1+1/4 → A1+0.25。
+    /// 其他配置暂时与配置1相同。
+    /// </summary>
+    public static string NormalizeLongPaperFraction(string paperName, LongPaperNameFormat format = LongPaperNameFormat.Fraction)
     {
         return LongPaperFractionPattern.Replace(paperName ?? "", match =>
         {
-            var numerator = int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);
-            var denominator = int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture);
-            if (denominator == 0)
+            if (format == LongPaperNameFormat.Decimal)
             {
-                return match.Value;
+                var numerator = int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);
+                var denominator = int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture);
+                if (denominator == 0) return match.Value;
+                var extension = numerator / (double)denominator;
+                return "+" + extension.ToString("0.###", CultureInfo.InvariantCulture);
             }
-
-            // 加长步进为 1/8，八分之几需要 3 位小数才能精确表达，不能用 0.## 截断。
-            var extension = numerator / (double)denominator;
-            return "+" + extension.ToString("0.###", CultureInfo.InvariantCulture);
+            // 配置1（分数）及其他：将"/"替换为"∕"（U+2215），保留分数形式，文件名合法
+            return "+" + match.Groups[1].Value + "∕" + match.Groups[2].Value;
         });
     }
 
@@ -105,7 +110,8 @@ public static class FileNameSanitizer
         string? pattern,
         PlotJob job,
         int? sequenceNumber = null,
-        int sequenceDigits = 0)
+        int sequenceDigits = 0,
+        LongPaperNameFormat longPaperNameFormat = LongPaperNameFormat.Fraction)
     {
         var result = new StringBuilder();
         var value = pattern ?? "";
@@ -127,7 +133,7 @@ public static class FileNameSanitizer
                 'E' => job.Info1,
                 'F' => job.Info2,
                 'G' => job.Phase,
-                'T' => NormalizeLongPaperFraction(job.PaperName),
+                'T' => NormalizeLongPaperFraction(job.PaperName, longPaperNameFormat),
                 'N' => sequenceNumber.HasValue ? FormatSequenceNumber(sequenceNumber.Value, sequenceDigits) : "",
                 _ => null
             };
@@ -184,7 +190,7 @@ public static class FileNameSanitizer
     /// 空值自动跳过，确保最终文件名不含多余分隔符。
     /// sequenceNumber > 0 时 "Sequence" 键生效，按 sequenceDigits 补零。
     /// </summary>
-    public static List<string> GetFileNameParts(PlotJob job, List<string> fieldKeys, int sequenceNumber = 0, int sequenceDigits = 2)
+    public static List<string> GetFileNameParts(PlotJob job, List<string> fieldKeys, int sequenceNumber = 0, int sequenceDigits = 2, LongPaperNameFormat longPaperNameFormat = LongPaperNameFormat.Fraction)
     {
         var parts = new List<string>();
         foreach (var key in fieldKeys)
@@ -198,7 +204,7 @@ public static class FileNameSanitizer
                 "Phase" => job.Phase,
                 "Info1" => job.Info1,
                 "Info2" => job.Info2,
-                "PaperName" => NormalizeLongPaperFraction(job.PaperName),
+                "PaperName" => NormalizeLongPaperFraction(job.PaperName, longPaperNameFormat),
                 "Sequence" => sequenceNumber > 0 ? sequenceNumber.ToString($"D{Math.Max(1, Math.Min(10, sequenceDigits))}") : "",
                 _ => ""
             };

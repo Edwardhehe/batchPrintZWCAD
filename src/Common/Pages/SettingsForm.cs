@@ -21,6 +21,7 @@ public sealed class SettingsForm : Form
 
     private readonly Document? _document;
     private readonly NumericUpDown _paperTolerance = new();
+    private readonly ComboBox _longPaperNameFormat = new();
     private readonly CheckBox _addSequenceWhenPdfExists = new();
     private readonly CheckBox _openExternalDwgForPlot = new();
     private readonly CheckBox _useFileNameAsPdfBookmark = new();
@@ -231,12 +232,13 @@ public sealed class SettingsForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 2,
+            RowCount = 3,
             Margin = Padding.Empty,
             Padding = Padding.Empty
         };
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(178)));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(68)));
 
         var instructionPanel = new Panel
         {
@@ -414,6 +416,44 @@ public sealed class SettingsForm : Form
         _fileNamePreview.AutoSize = false;
         editor.Controls.Add(_fileNamePreview, 1, 3);
         root.Controls.Add(editor, 0, 1);
+
+        // ── 加长图图名设置 ──
+        var longPaperGroup = new GroupBox
+        {
+            Text = "加长图图名设置",
+            Dock = DockStyle.Fill,
+            Margin = new Padding(0, UiLayout.Scale(6), 0, 0),
+            Padding = new Padding(UiLayout.Scale(8), UiLayout.Scale(4), UiLayout.Scale(8), UiLayout.Scale(4))
+        };
+        var longPaperRow = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight,
+            WrapContents = false
+        };
+        longPaperRow.Controls.Add(new Label
+        {
+            Text = "加长图命名格式：",
+            AutoSize = true,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Margin = new Padding(0, UiLayout.Scale(4), UiLayout.Scale(6), 0)
+        });
+        _longPaperNameFormat.DropDownStyle = ComboBoxStyle.DropDownList;
+        _longPaperNameFormat.Width = UiLayout.Scale(240);
+        _longPaperNameFormat.Margin = new Padding(0, UiLayout.Scale(2), 0, 0);
+        _longPaperNameFormat.Items.AddRange(new object[]
+        {
+            "配置1（分数）：A3+1/8、A2+3/4（分数形式）",
+            "配置2（小数）：A3+0.125、A2+0.75（小数形式）",
+            "配置3（预留）",
+            "配置4（预留）",
+            "配置5（预留）",
+            "配置6（预留）",
+        });
+        _longPaperNameFormat.SelectedIndex = 0;
+        longPaperRow.Controls.Add(_longPaperNameFormat);
+        longPaperGroup.Controls.Add(longPaperRow);
+        root.Controls.Add(longPaperGroup, 0, 2);
 
         page.Controls.Add(root);
         return page;
@@ -951,6 +991,7 @@ public sealed class SettingsForm : Form
         _directoryDrawGridLines.Checked = settings.DirectoryDrawGridLines;
         SelectTextStyle(settings.DirectoryTextStyleName);
         LoadDirectoryColumns(settings.DirectoryColumns);
+        _longPaperNameFormat.SelectedIndex = Math.Max(0, Math.Min(5, (int)settings.LongPaperNameFormat));
     }
 
     private void SaveSettings()
@@ -1003,6 +1044,7 @@ public sealed class SettingsForm : Form
         current.DirectoryDrawHeader = _directoryDrawHeader.Checked;
         current.DirectoryDrawGridLines = _directoryDrawGridLines.Checked;
         current.DirectoryColumns = directoryColumns;
+        current.LongPaperNameFormat = (LongPaperNameFormat)Math.Max(0, Math.Min(5, _longPaperNameFormat.SelectedIndex));
         return true;
     }
 
