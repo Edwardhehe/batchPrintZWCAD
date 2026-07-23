@@ -38,7 +38,7 @@ public sealed class BatchPlotForm : Form
     private readonly ComboBox _styleCombo = new();
     private readonly CheckBox _mergePdfCheckBox = new();
     private readonly CheckBox _leaveMarginCheckBox = new();
-    private readonly NumericUpDown _marginInput = new();
+    private readonly ComboBox _marginInput = new();
     private readonly Button _printButton = new();
     private readonly List<Control> _plotOnlyControls = new();
     private CancellationTokenSource? _printCts;
@@ -238,13 +238,8 @@ public sealed class BatchPlotForm : Form
         _leaveMarginCheckBox.Checked = _settings.LeavePaperMargin;
         _leaveMarginCheckBox.TextAlign = ContentAlignment.MiddleLeft;
         _leaveMarginCheckBox.Margin = new Padding(UiLayout.Scale(12), UiLayout.Scale(7), UiLayout.Scale(12), 0);
-        SetTip(_leaveMarginCheckBox, "勾选后按设定距离在纸张短边两侧留白，居中等比例缩小打印。");
-        _marginInput.DecimalPlaces = 1;
-        _marginInput.Minimum = -10m;
-        _marginInput.Maximum = 10m;
-        _marginInput.Increment = 0.5m;
-        _marginInput.Value = _settings.PaperMarginMm != 0 ? (decimal)_settings.PaperMarginMm : 1m;
-        _marginInput.Width = UiLayout.Scale(68);
+        SetTip(_leaveMarginCheckBox, "勾选后按设定距离留白。正数=扩大纸张（比例不变）；负数=缩小比例。");
+        InitMarginCombo(_marginInput, UiLayout.Scale(68), _settings.PaperMarginMm);
         _marginInput.Enabled = _leaveMarginCheckBox.Checked;
         _marginInput.Margin = new Padding(0, UiLayout.Scale(4), 0, 0);
         _leaveMarginCheckBox.CheckedChanged += (_, _) => _marginInput.Enabled = _leaveMarginCheckBox.Checked;
@@ -2109,7 +2104,7 @@ public sealed class BatchPlotForm : Form
     private void ApplyLeaveMarginSelection(IEnumerable<PlotJob> jobs)
     {
         var leaveMargin = _leaveMarginCheckBox.Checked;
-        var marginMm = (double)_marginInput.Value;
+        var marginMm = ReadMarginValue(_marginInput);
         foreach (var job in jobs)
         {
             // 留白选项是本次打印设置，不改变图框识别数据，只在输出/预览时生效。
@@ -2145,7 +2140,7 @@ public sealed class BatchPlotForm : Form
         }
 
         job.LeavePaperMargin = _leaveMarginCheckBox.Checked;
-        job.PaperMarginMm = (double)_marginInput.Value;
+        job.PaperMarginMm = ReadMarginValue(_marginInput);
         var wasVisible = Visible;
         var selectedRows = _grid.SelectedRows.Cast<DataGridViewRow>().ToList();
         var currentCell = _grid.CurrentCell;
@@ -2454,7 +2449,31 @@ public sealed class BatchPlotForm : Form
         _settings.LastStyleSheet = _styleCombo.SelectedItem?.ToString() ?? "";
         _settings.MergePdf = _mergePdfCheckBox.Checked;
         _settings.LeavePaperMargin = _leaveMarginCheckBox.Checked;
-        _settings.PaperMarginMm = (double)_marginInput.Value;
+        _settings.PaperMarginMm = ReadMarginValue(_marginInput);
         AppSettingsStore.Save(_settings);
     }
+
+    /// <summary>初始化留白下拉列表，正值=扩大纸张，负值=缩比例。</summary>
+    internal static void InitMarginCombo(ComboBox combo, int width, double savedValue)
+    {
+        double[] options = { -10, -5, -3, -2, -1.5, -1, -0.5, 0.5, 1, 1.5, 2, 3, 5, 10 };
+        combo.DropDownStyle = ComboBoxStyle.DropDownList;
+        combo.Width = width;
+        combo.Items.Clear();
+        foreach (var v in options)
+            combo.Items.Add(v.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture));
+        var target = savedValue.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+        var idx = -1;
+        for (var i = 0; i < combo.Items.Count; i++)
+        {
+            if (combo.Items[i]?.ToString() == target) { idx = i; break; }
+        }
+        combo.SelectedIndex = idx >= 0 ? idx : Math.Max(0, combo.Items.IndexOf("1"));
+    }
+
+    /// <summary>读取留白下拉列表的选中值（毫米）。</summary>
+    internal static double ReadMarginValue(ComboBox combo)
+        => double.TryParse(combo.SelectedItem?.ToString(),
+            System.Globalization.NumberStyles.Any,
+            System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : 1.0;
 }

@@ -45,6 +45,7 @@
             <!-- 从上到下，从左到右 -->
             <StackPanel Grid.Column="0" Margin="0,0,8,0">
                 <RadioButton x:Name="TopToBottomRadio" IsChecked="True"
+                             GroupName="SortOrder"
                              Margin="0,0,0,8" VerticalContentAlignment="Center">
                     <TextBlock Text="从上到下，从左到右" TextWrapping="Wrap"/>
                 </RadioButton>
@@ -77,6 +78,7 @@
             <!-- 从左到右，从上到下 -->
             <StackPanel Grid.Column="1" Margin="8,0,0,0">
                 <RadioButton x:Name="LeftToRightRadio"
+                             GroupName="SortOrder"
                              Margin="0,0,0,8" VerticalContentAlignment="Center">
                     <TextBlock Text="从左到右，从上到下" TextWrapping="Wrap"/>
                 </RadioButton>

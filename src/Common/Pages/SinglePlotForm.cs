@@ -15,7 +15,7 @@ public sealed class SinglePlotForm : Form
     private readonly Label _areaLabel = new();
     private readonly Label _scaleLabel = new();
     private readonly CheckBox _leaveMargin = new();
-    private readonly NumericUpDown _marginInput = new();
+    private readonly ComboBox _marginInput = new();
 
     public PaperDetection SelectedPaper
     {
@@ -29,7 +29,7 @@ public sealed class SinglePlotForm : Form
 
     public string OutputPath => _outputPath.Text;
     public bool LeavePaperMargin => _leaveMargin.Checked;
-    public double PaperMarginMm => (double)_marginInput.Value;
+    public double PaperMarginMm => BatchPlotForm.ReadMarginValue(_marginInput);
 
     /// <summary>DialogResult.OK 时，此属性区分是"打印"还是"预览"。</summary>
     public bool IsPreview { get; private set; }
@@ -166,12 +166,7 @@ public sealed class SinglePlotForm : Form
         _leaveMargin.AutoSize = true;
         _leaveMargin.Checked = false;
         _leaveMargin.TextAlign = ContentAlignment.MiddleLeft;
-        _marginInput.DecimalPlaces = 1;
-        _marginInput.Minimum = -10m;
-        _marginInput.Maximum = 10m;
-        _marginInput.Increment = 0.5m;
-        _marginInput.Value = 1m;
-        _marginInput.Width = UiLayout.Scale(72);
+        BatchPlotForm.InitMarginCombo(_marginInput, UiLayout.Scale(72), 1.0);
         _marginInput.Enabled = false;
         _leaveMargin.CheckedChanged += (_, _) => _marginInput.Enabled = _leaveMargin.Checked;
         var marginRow = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };

@@ -48,7 +48,7 @@ public sealed class RectangleBatchPlotForm : Form
     private readonly ComboBox _style = new();
     private readonly CheckBox _mergePdf = new();
     private readonly CheckBox _leaveMargin = new();
-    private readonly NumericUpDown _marginInput = new();
+    private readonly ComboBox _marginInput = new();
     private readonly Label _status = new();
     private CancellationTokenSource? _printCts;
     private Button? _printButton;
@@ -203,12 +203,7 @@ public sealed class RectangleBatchPlotForm : Form
         _leaveMargin.AutoSize = true;
         _leaveMargin.Anchor = AnchorStyles.Left | AnchorStyles.Top;
         _leaveMargin.Margin = new Padding(UiLayout.Scale(4), UiLayout.Scale(7), 0, 0);
-        _marginInput.DecimalPlaces = 1;
-        _marginInput.Minimum = -10m;
-        _marginInput.Maximum = 10m;
-        _marginInput.Increment = 0.5m;
-        _marginInput.Value = _settings.PaperMarginMm != 0 ? (decimal)_settings.PaperMarginMm : 1m;
-        _marginInput.Width = UiLayout.Scale(58);
+        BatchPlotForm.InitMarginCombo(_marginInput, UiLayout.Scale(58), _settings.PaperMarginMm);
         _marginInput.Enabled = _leaveMargin.Checked;
         _leaveMargin.CheckedChanged += (_, _) => _marginInput.Enabled = _leaveMargin.Checked;
         _leaveMargin.Text = "留白";
@@ -1085,7 +1080,7 @@ public sealed class RectangleBatchPlotForm : Form
             {
                 SaveCurrentPlotOptions();
                 row.Job.LeavePaperMargin = _leaveMargin.Checked;
-                row.Job.PaperMarginMm = (double)_marginInput.Value;
+                row.Job.PaperMarginMm = BatchPlotForm.ReadMarginValue(_marginInput);
                 // 预览当前行时同时准备已勾选图纸的全部任意尺寸；当前行未勾选也不能漏掉。
                 var previewJobs = _rows
                     .Where(candidate => candidate.Selected || ReferenceEquals(candidate, row))
@@ -1379,7 +1374,7 @@ public sealed class RectangleBatchPlotForm : Form
     private void ApplyLeaveMarginSelection(IEnumerable<PlotJob> jobs)
     {
         var leaveMargin = _leaveMargin.Checked;
-        var marginMm = (double)_marginInput.Value;
+        var marginMm = BatchPlotForm.ReadMarginValue(_marginInput);
         foreach (var job in jobs)
         {
             // 留白是本次输出选项，预览和正式打印都写入同一个 PlotJob，保证效果一致。
@@ -1647,7 +1642,7 @@ public sealed class RectangleBatchPlotForm : Form
         _settings.LastStyleSheet = SelectedStyle();
         _settings.MergePdf = _mergePdf.Checked;
         _settings.LeavePaperMargin = _leaveMargin.Checked;
-        _settings.PaperMarginMm = (double)_marginInput.Value;
+        _settings.PaperMarginMm = BatchPlotForm.ReadMarginValue(_marginInput);
         AppSettingsStore.Save(_settings);
     }
 
