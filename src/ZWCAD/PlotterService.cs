@@ -976,8 +976,9 @@ public static class PlotterService
 
         // 名称兜底是标准纸张的固定兼容策略，不再作为用户设置；精确任意纸张已在上方直接返回，仍禁止兜底。
         var paperName = job.PaperName ?? "";
-        var basePaper = paperName.Replace("+", "");
-        if (paperName.EndsWith("+", StringComparison.OrdinalIgnoreCase))
+        var plusIndex = paperName.IndexOf('+');
+        var basePaper = plusIndex > 0 ? paperName.Substring(0, plusIndex) : paperName;
+        if (plusIndex > 0)
         {
             var longNamed = media.FirstOrDefault(x => x.IndexOf(paperName, StringComparison.OrdinalIgnoreCase) >= 0)
                 ?? media.FirstOrDefault(x => x.IndexOf(basePaper, StringComparison.OrdinalIgnoreCase) >= 0

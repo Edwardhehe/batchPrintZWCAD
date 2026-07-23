@@ -400,11 +400,17 @@ public sealed class RectangleBatchPlotForm : Form
             List<RectangleFrameScanner.Result> results;
             if (_lastScanScope.HasValue)
             {
-                results = RectangleFrameScanner.ScanScope(_document, _lastScanScope.Value);
+                results = RectangleFrameScanner.ScanScope(
+                    _document,
+                    _lastScanScope.Value,
+                    _settings.PaperMatchToleranceMm);
             }
             else if (_scanWindow.HasValue)
             {
-                results = RectangleFrameScanner.ScanWindow(_document, _scanWindow.Value);
+                results = RectangleFrameScanner.ScanWindow(
+                    _document,
+                    _scanWindow.Value,
+                    _settings.PaperMatchToleranceMm);
             }
             else
             {
@@ -438,7 +444,10 @@ public sealed class RectangleBatchPlotForm : Form
 
         try
         {
-            var results = RectangleFrameScanner.ScanScope(_document, scope.Value);
+            var results = RectangleFrameScanner.ScanScope(
+                _document,
+                scope.Value,
+                _settings.PaperMatchToleranceMm);
             if (results.Count == 0)
             {
                 MessageBox.Show("扫描范围内没有识别到符合常见纸张比例的矩形框。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -491,7 +500,10 @@ public sealed class RectangleBatchPlotForm : Form
                 new Point3d(wcsCorners.Min(p => p.X), wcsCorners.Min(p => p.Y), 0),
                 new Point3d(wcsCorners.Max(p => p.X), wcsCorners.Max(p => p.Y), 0));
 
-            var results = RectangleFrameScanner.ScanWindow(_document, window);
+            var results = RectangleFrameScanner.ScanWindow(
+                _document,
+                window,
+                _settings.PaperMatchToleranceMm);
             if (results.Count == 0)
             {
                 MessageBox.Show("框选范围内没有识别到符合常见纸张比例的矩形框。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -971,7 +983,8 @@ public sealed class RectangleBatchPlotForm : Form
             && Math.Abs(first.PaperWidthMm - second.PaperWidthMm) <= tolerance
             && Math.Abs(first.PaperHeightMm - second.PaperHeightMm) <= tolerance
             && Math.Abs(first.ScaleValue - second.ScaleValue) <= tolerance
-            && first.IsLong == second.IsLong;
+            && first.IsLong == second.IsLong
+            && first.RequiresCustomPaper == second.RequiresCustomPaper;
     }
 
     private void DeleteHighlighted()
@@ -1073,6 +1086,12 @@ public sealed class RectangleBatchPlotForm : Form
                 SaveCurrentPlotOptions();
                 row.Job.LeavePaperMargin = _leaveMargin.Checked;
                 row.Job.PaperMarginMm = (double)_marginInput.Value;
+                // 预览当前行时同时准备已勾选图纸的全部任意尺寸；当前行未勾选也不能漏掉。
+                var previewJobs = _rows
+                    .Where(candidate => candidate.Selected || ReferenceEquals(candidate, row))
+                    .Select(candidate => candidate.Job)
+                    .ToList();
+                CustomPaperBatchPreparer.Prepare(previewJobs, device);
                 PlotterService.Preview(row.Job, device, SelectedStyle(), _document);
             }
             catch (Exception ex)
@@ -1190,6 +1209,8 @@ public sealed class RectangleBatchPlotForm : Form
             _status.Text = $"打印中... 0 / {selected.Count}";
             System.Windows.Forms.Application.DoEvents();
 
+            // 汇总本批所有任意加长尺寸后只更新一次实际 PMP，再进入连续打印。
+            CustomPaperBatchPreparer.Prepare(selected, device);
             var results = PlotterService.PlotMany(
                 selected, device, SelectedStyle(), _document, _settings,
                 beforeJob: _ =>
@@ -1642,6 +1663,14 @@ public sealed class RectangleBatchPlotForm : Form
         job.PaperHeightMm = paper.PaperHeightMm;
         job.PaperSizeText = $"{paper.PaperWidthMm:0.##} x {paper.PaperHeightMm:0.##} mm";
         job.ScaleText = paper.ScaleText;
+        job.RequiresCustomPaperRegistration = paper.RequiresCustomPaper;
+        // 用户从任意纸切回标准/模数纸时，立即清除上一次预览留下的严格动态纸张状态。
+        if (!paper.RequiresCustomPaper)
+        {
+            job.RequireExactPaperSize = false;
+            job.UseExactWindowScale = false;
+            job.CustomPaperWasAdded = false;
+        }
     }
 
     private static void RevealOutput(string? file, string directory)

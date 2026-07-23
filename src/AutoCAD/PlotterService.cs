@@ -514,7 +514,8 @@ public static class PlotterService
             validator,
             layout,
             deviceName,
-            forceDeviceReload: job.RequireExactPaperSize,
+            // 批打已在开始前一次性写入全部纸张；仅首张新增纸触发设备重载，后续精确纸张复用缓存。
+            forceDeviceReload: job.CustomPaperWasAdded,
             out usedCachedCatalog);
         var names = catalog.Select(x => x.Name).ToList();
         if (names.Count == 0)
@@ -742,7 +743,7 @@ public static class PlotterService
     private static MediaChoice? BestNamedMedia(IEnumerable<MediaChoice> choices, PlotJob job)
     {
         var paper = job.PaperName ?? "";
-        var basePaper = paper.Replace("+", "");
+        var basePaper = GetBasePaperName(paper);
         return choices
             .Where(x => MediaNameMatchesPaper(x.Name, paper, basePaper))
             .OrderBy(x => x.Error)
@@ -816,7 +817,7 @@ public static class PlotterService
     private static string? BestMediaNameByText(IEnumerable<string> names, PlotJob job)
     {
         var paper = job.PaperName ?? "";
-        var basePaper = paper.Replace("+", "");
+        var basePaper = GetBasePaperName(paper);
         return names
             .Where(x => MediaNameMatchesPaper(x, paper, basePaper))
             .OrderBy(x => IsFullBleedMedia(x) ? 0 : 1)
@@ -848,7 +849,13 @@ public static class PlotterService
 
     private static bool IsLongPaperName(string paperName)
     {
-        return paperName.EndsWith("+", StringComparison.OrdinalIgnoreCase);
+        return paperName.IndexOf('+') > 0;
+    }
+
+    private static string GetBasePaperName(string paperName)
+    {
+        var plusIndex = paperName.IndexOf('+');
+        return plusIndex > 0 ? paperName.Substring(0, plusIndex) : paperName;
     }
 
     private static bool IsLongMediaName(string mediaName)

@@ -25,20 +25,20 @@ public static class TitleBlockScanner
         return Scan(doc.Database, library, sourceName, null, TitleBlockScanScope.AllSpaces, GetCurrentSpaceName(doc.Database));
     }
 
-    public static List<PlotJob> Scan(Document doc, TitleBlockLibrary library, TitleBlockScanScope scope)
+    public static List<PlotJob> Scan(Document doc, TitleBlockLibrary library, TitleBlockScanScope scope, double? paperMatchToleranceMm = null)
     {
         var sourceName = string.IsNullOrWhiteSpace(doc.Database.Filename)
             ? doc.Name
             : doc.Database.Filename;
-        return Scan(doc.Database, library, sourceName, null, scope, GetCurrentSpaceName(doc.Database));
+        return Scan(doc.Database, library, sourceName, null, scope, GetCurrentSpaceName(doc.Database), paperMatchToleranceMm);
     }
 
-    public static List<PlotJob> Scan(Document doc, TitleBlockLibrary library, Extents3d? scanWindow)
+    public static List<PlotJob> Scan(Document doc, TitleBlockLibrary library, Extents3d? scanWindow, double? paperMatchToleranceMm = null)
     {
         var sourceName = string.IsNullOrWhiteSpace(doc.Database.Filename)
             ? doc.Name
             : doc.Database.Filename;
-        return Scan(doc.Database, library, sourceName, scanWindow, TitleBlockScanScope.CurrentSpace, GetCurrentSpaceName(doc.Database));
+        return Scan(doc.Database, library, sourceName, scanWindow, TitleBlockScanScope.CurrentSpace, GetCurrentSpaceName(doc.Database), paperMatchToleranceMm);
     }
 
     public static List<PlotJob> Scan(Database db, TitleBlockLibrary library, string sourceName)
@@ -51,10 +51,18 @@ public static class TitleBlockScanner
         return Scan(db, library, sourceName, scanWindow, TitleBlockScanScope.AllSpaces, null);
     }
 
-    public static List<PlotJob> Scan(Database db, TitleBlockLibrary library, string sourceName, Extents3d? scanWindow, TitleBlockScanScope scope, string? currentSpaceName = null)
+    public static List<PlotJob> Scan(
+        Database db,
+        TitleBlockLibrary library,
+        string sourceName,
+        Extents3d? scanWindow,
+        TitleBlockScanScope scope,
+        string? currentSpaceName = null,
+        double? paperMatchToleranceMm = null)
     {
         var jobs = new List<PlotJob>();
         var warnings = new List<string>();
+        var effectivePaperToleranceMm = paperMatchToleranceMm ?? AppSettingsStore.Load().PaperMatchToleranceMm;
         if (string.IsNullOrWhiteSpace(sourceName))
         {
             sourceName = db.Filename;
@@ -208,7 +216,10 @@ public static class TitleBlockScanner
                 // 不取包围盒，和矩形框扫描的 CornerPoints 同理：4 角 × WCS→DCS 只取一次包围盒
                 var wcsCorners = ComputeWcsCorners(coordinateMode, referenceFrame, blockRef.BlockTransform);
 
-                var detectedPaper = PaperSizeDetector.Detect(width, height);
+                var detectedPaper = PaperSizeDetector.Detect(
+                    width,
+                    height,
+                    PaperSizeDetector.CreateTitleBlockBatchOptions(effectivePaperToleranceMm, !layout.ModelType));
                 var paper = ApplyFixedPaper(definition, detectedPaper);
                 string title;
                 string number;
@@ -303,6 +314,7 @@ public static class TitleBlockScanner
                     DetectionNote = $"{boundaryNote}; {paper.Note}",
                     PaperWidthMm = paper.PaperWidthMm,
                     PaperHeightMm = paper.PaperHeightMm,
+                    RequiresCustomPaperRegistration = paper.RequiresCustomPaper,
                     MinX = extents.MinPoint.X,
                     MinY = extents.MinPoint.Y,
                     MaxX = extents.MaxPoint.X,
@@ -663,6 +675,7 @@ public static class TitleBlockScanner
                 IsLong = detected.IsLong,
                 PaperWidthMm = detected.PaperWidthMm,
                 PaperHeightMm = detected.PaperHeightMm,
+                RequiresCustomPaper = detected.RequiresCustomPaper,
                 Note = $"图框边界识别为加长图，已优先使用自动图幅；图框库默认纸张 {name} 仅作为新增图框默认值。{detected.Note}"
             };
         }
@@ -686,6 +699,12 @@ public static class TitleBlockScanner
             return false;
         }
 
+        // 任意加长图必须保留实测物理尺寸；图框库中的固定模数纸张不能覆盖动态纸张。
+        if (detected.RequiresCustomPaper)
+        {
+            return true;
+        }
+
         if (!IsLongPaperName(libraryPaperName))
         {
             return true;
@@ -702,7 +721,7 @@ public static class TitleBlockScanner
 
     private static bool IsLongPaperName(string paperName)
     {
-        return paperName.EndsWith("+", StringComparison.OrdinalIgnoreCase);
+        return paperName.IndexOf('+') > 0;
     }
 
     private enum RegionCoordinateMode

@@ -122,6 +122,8 @@ public sealed class PlotJob
     public bool UseExactWindowScale { get; set; }
     /// <summary>本次命令是否向 PMP 新增了纸张，供 CAD 决定是否强制刷新介质列表。</summary>
     public bool CustomPaperWasAdded { get; set; }
+    /// <summary>图框库扫描得到任意加长尺寸，PDF 批打前必须按实测宽高注册到 PMP。</summary>
+    public bool RequiresCustomPaperRegistration { get; set; }
     /// <summary>打印区域 4 个实际 WCS 角点，格式 [x0,y0,x1,y1,x2,y2,x3,y3]。null 时用 Min/Max。</summary>
     public double[]? CornerPoints { get; set; }
 }
@@ -143,4 +145,6 @@ public sealed class PaperDetection
     public double PaperWidthMm { get; set; }
     public double PaperHeightMm { get; set; }
     public string Note { get; set; } = "";
+    /// <summary>纸张长边不按固定模数吸附，必须按实测物理尺寸动态注册。</summary>
+    public bool RequiresCustomPaper { get; set; }
 }

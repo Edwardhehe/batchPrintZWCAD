@@ -874,7 +874,7 @@ public sealed class AppSettings
     public double PaperMarginMm { get; set; } = 1;
 
     // 纸张匹配
-    public double PaperMatchToleranceMm { get; set; } = 3;
+    public double PaperMatchToleranceMm { get; set; } = 0.5;
     public bool AllowStandardPaperNameFallback { get; set; } = true;
 
     // 目录表格

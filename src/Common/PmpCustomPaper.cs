@@ -27,6 +27,14 @@ public static class PmpCustomPaper
     {
         public string PaperName { get; set; } = "";
         public bool WasAdded { get; set; }
+        public double WidthMm { get; set; }
+        public double HeightMm { get; set; }
+    }
+
+    public sealed class PaperRequest
+    {
+        public double WidthMm { get; set; }
+        public double HeightMm { get; set; }
     }
 
     /// <summary>
@@ -332,6 +340,87 @@ public static class PmpCustomPaper
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// 一次性注册一批任意纸张。所有尺寸先在同目录临时副本中完成格式适配和去重，
+    /// 全部成功后才整体替换正式 PMP；因此用户正在使用的 PMP 只修改一次，不会逐张图反复写入。
+    /// </summary>
+    public static IReadOnlyList<Registration>? RegisterCustomPapers(
+        string pmpPath,
+        IEnumerable<PaperRequest> requests)
+    {
+        if (!File.Exists(pmpPath)) return null;
+
+        var normalized = new List<PaperRequest>();
+        foreach (var request in requests ?? Enumerable.Empty<PaperRequest>())
+        {
+            if (request.WidthMm <= 0d || request.HeightMm <= 0d)
+                continue;
+
+            if (normalized.Any(existing => SameSize(
+                    existing.WidthMm,
+                    existing.HeightMm,
+                    request.WidthMm,
+                    request.HeightMm)))
+            {
+                continue;
+            }
+
+            normalized.Add(new PaperRequest
+            {
+                WidthMm = request.WidthMm,
+                HeightMm = request.HeightMm
+            });
+        }
+
+        if (normalized.Count == 0)
+            return new List<Registration>();
+
+        var directory = Path.GetDirectoryName(pmpPath) ?? "";
+        var stagedPath = Path.Combine(
+            directory,
+            Path.GetFileName(pmpPath) + ".batch-" + Guid.NewGuid().ToString("N") + ".tmp");
+        try
+        {
+            var originalBytes = File.ReadAllBytes(pmpPath);
+            File.Copy(pmpPath, stagedPath, true);
+            var registrations = new List<Registration>();
+            foreach (var request in normalized)
+            {
+                var registration = RegisterCustomPaper(stagedPath, request.WidthMm, request.HeightMm);
+                if (registration == null)
+                    return null;
+
+                registration.WidthMm = request.WidthMm;
+                registration.HeightMm = request.HeightMm;
+                registrations.Add(registration);
+            }
+
+            var stagedBytes = File.ReadAllBytes(stagedPath);
+            if (!originalBytes.SequenceEqual(stagedBytes))
+            {
+                // 正式 PMP 只在这里覆盖一次；随后由调用方统一刷新一次 PC3/PC5 介质目录。
+                File.Copy(stagedPath, pmpPath, true);
+            }
+
+            return registrations;
+        }
+        catch
+        {
+            return null;
+        }
+        finally
+        {
+            try
+            {
+                if (File.Exists(stagedPath)) File.Delete(stagedPath);
+            }
+            catch
+            {
+                // 临时副本清理失败不应掩盖正式 PMP 的注册结果。
+            }
+        }
     }
 
     private static string GetPia2StringValue(PiaNode node, string key)

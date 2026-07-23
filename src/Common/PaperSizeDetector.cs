@@ -9,7 +9,6 @@ public static class PaperSizeDetector
 {
     private const double StandardPaperTolerance = 0.04d;
     private const double DefaultLongPaperShortSideTolerance = 0.04d;
-    private const double RectangleLongPaperShortSideTolerance = 0.01d;
     private const double LongPaperSnapTolerance = 0.08d;
     private const int LongPaperIncrementDenominator = 8;
     private const int MinimumLongPaperUnits = LongPaperIncrementDenominator + 1;
@@ -17,14 +16,22 @@ public static class PaperSizeDetector
     public sealed class DetectionOptions
     {
         public double LongPaperShortSideTolerance { get; set; } = DefaultLongPaperShortSideTolerance;
+        /// <summary>任意加长图短边的绝对匹配容差（毫米）；设置后优先于相对容差。</summary>
+        public double? LongPaperShortSideToleranceMm { get; set; }
+        /// <summary>长边只要求超过标准长边，按实测尺寸返回，不再吸附到 1/8 模数。</summary>
+        public bool AllowArbitraryLongSide { get; set; }
+        /// <summary>同一几何尺寸存在多个比例候选时的首选比例；布局空间使用 1:1。</summary>
+        public double? PreferredScaleValue { get; set; }
+        /// <summary>多个优先比例，按数组顺序排序；矩形框批打用于优先 1:100 和 1:1。</summary>
+        public IReadOnlyList<double>? PreferredScaleValues { get; set; }
+        /// <summary>
+        /// 矩形框专用：只用短边匹配标准幅面；长边先按标准尺寸或 1/8 加长模数吸附，
+        /// 超过容差时保留实测长边并转为任意动态纸张。
+        /// </summary>
+        public bool UseRectangleShortSideMatching { get; set; }
     }
 
     public static readonly DetectionOptions DefaultDetectionOptions = new();
-
-    public static readonly DetectionOptions RectangleBatchDetectionOptions = new()
-    {
-        LongPaperShortSideTolerance = RectangleLongPaperShortSideTolerance
-    };
 
     private sealed class PaperCandidate
     {
@@ -35,6 +42,7 @@ public static class PaperSizeDetector
         public double PaperWidthMm { get; set; }
         public double PaperHeightMm { get; set; }
         public string Reason { get; set; } = "";
+        public bool RequiresCustomPaper { get; set; }
     }
 
     private sealed class StandardPaper
@@ -153,8 +161,10 @@ public static class PaperSizeDetector
             .Select(ToDetection)
             .ToList();
 
-        // 优先1:100：如果候选列表中有1:100，将其排到第一位
-        var indexOf1To100 = filtered.FindIndex(x => Math.Abs(x.ScaleValue - 100d) < 0.001);
+        // 兼容旧调用：没有指定空间相关优先级时仍沿用 1:100 优先；矩形框批打由专用参数控制 1:100/1:1 顺序。
+        var indexOf1To100 = options.PreferredScaleValues == null && !options.PreferredScaleValue.HasValue
+            ? filtered.FindIndex(x => Math.Abs(x.ScaleValue - 100d) < 0.001)
+            : -1;
         if (indexOf1To100 > 0)
         {
             var preferred = filtered[indexOf1To100];
@@ -163,6 +173,37 @@ public static class PaperSizeDetector
         }
 
         return filtered;
+    }
+
+    /// <summary>
+    /// 创建图框库批打专用识别参数。短边按设置中的毫米容差匹配；长边只要超过标准长边，
+    /// 就保留实测物理尺寸并标记为动态纸张。布局空间优先 1:1，模型空间沿用常用的 1:100 优先。
+    /// </summary>
+    public static DetectionOptions CreateTitleBlockBatchOptions(double paperMatchToleranceMm, bool isPaperSpace)
+    {
+        return new DetectionOptions
+        {
+            AllowArbitraryLongSide = true,
+            LongPaperShortSideToleranceMm = Math.Max(0.05d, paperMatchToleranceMm),
+            PreferredScaleValue = isPaperSpace ? 1d : 100d
+        };
+    }
+
+    /// <summary>
+    /// 创建矩形框批打专用识别参数。短边和 1/8 模数的误差都使用设置中的毫米容差；
+    /// 模型空间优先按 1:100 解释，布局空间优先按 1:1 解释，同时把另一常用比例排在其余比例之前。
+    /// </summary>
+    public static DetectionOptions CreateRectangleBatchOptions(double paperMatchToleranceMm, bool isPaperSpace)
+    {
+        var toleranceMm = Math.Max(0d, paperMatchToleranceMm);
+        return new DetectionOptions
+        {
+            UseRectangleShortSideMatching = true,
+            LongPaperShortSideToleranceMm = toleranceMm,
+            PreferredScaleValues = isPaperSpace
+                ? new[] { 1d, 100d }
+                : new[] { 100d, 1d }
+        };
     }
 
     private static List<PaperCandidate> GetCandidateDetails(double width, double height, DetectionOptions options)
@@ -179,7 +220,9 @@ public static class PaperSizeDetector
         }
 
         return candidates
-            .OrderBy(x => x.Score)
+            // 布局中的物理图框应优先按 1:1 解释，避免 297mm 短边被误判成 A1 的 2:1。
+            .OrderBy(x => GetScalePreferenceRank(x.Scale, options))
+            .ThenBy(x => x.Score)
             .ThenBy(x => x.IsLong ? 0 : 1)
             .ThenByDescending(x => x.Scale)
             .ThenBy(x => Array.IndexOf(Standards, x.Paper))
@@ -189,7 +232,9 @@ public static class PaperSizeDetector
     private static PaperDetection ToDetection(PaperCandidate best)
     {
         var paperName = best.IsLong
-            ? best.Paper.Name + "+" + LongPaperExtension(best.PaperWidthMm, best.PaperHeightMm, best.Paper)
+            ? best.Paper.Name + "+" + (best.RequiresCustomPaper
+                ? ContinuousLongPaperExtension(best.PaperWidthMm, best.PaperHeightMm, best.Paper)
+                : LongPaperExtension(best.PaperWidthMm, best.PaperHeightMm, best.Paper))
             : best.Paper.Name;
         var paperSizeText = $"{best.PaperWidthMm:0.##} x {best.PaperHeightMm:0.##} mm";
         return new PaperDetection
@@ -200,6 +245,7 @@ public static class PaperSizeDetector
             IsLong = best.IsLong,
             PaperWidthMm = best.PaperWidthMm,
             PaperHeightMm = best.PaperHeightMm,
+            RequiresCustomPaper = best.RequiresCustomPaper,
             Note = best.IsLong
                 ? $"{best.Paper.Name} 加长，{best.Reason}，输出纸张 {paperSizeText}"
                 : $"{best.Paper.Name} 标准图幅，{best.Reason}，输出纸张 {paperSizeText}"
@@ -208,14 +254,16 @@ public static class PaperSizeDetector
 
     public static (double Width, double Height) GetDefaultSize(string paperName, double currentWidth = 0, double currentHeight = 0)
     {
-        var standard = Standards.FirstOrDefault(x => string.Equals(x.Name, paperName.Replace("+", ""), StringComparison.OrdinalIgnoreCase));
+        var plusIndex = paperName.IndexOf('+');
+        var baseName = plusIndex >= 0 ? paperName.Substring(0, plusIndex) : paperName;
+        var standard = Standards.FirstOrDefault(x => string.Equals(x.Name, baseName, StringComparison.OrdinalIgnoreCase));
         if (standard == null)
         {
             return (Math.Max(currentWidth, 1), Math.Max(currentHeight, 1));
         }
 
         var landscape = currentWidth <= 0 || currentHeight <= 0 || currentWidth >= currentHeight;
-        if (!paperName.EndsWith("+", StringComparison.OrdinalIgnoreCase))
+        if (plusIndex < 0)
         {
             return landscape ? (standard.LongSide, standard.ShortSide) : (standard.ShortSide, standard.LongSide);
         }
@@ -248,6 +296,20 @@ public static class PaperSizeDetector
         double standardHeight,
         DetectionOptions options)
     {
+        if (options.UseRectangleShortSideMatching)
+        {
+            AddRectangleShortSideCandidate(
+                candidates,
+                paper,
+                scale,
+                widthMm,
+                heightMm,
+                actualWidth,
+                actualHeight,
+                options);
+            return;
+        }
+
         var widthError = RelativeError(widthMm, standardWidth);
         var heightError = RelativeError(heightMm, standardHeight);
         if (widthError <= StandardPaperTolerance && heightError <= StandardPaperTolerance)
@@ -270,6 +332,29 @@ public static class PaperSizeDetector
         var actualLong = Math.Max(widthMm, heightMm);
         var shortError = RelativeError(actualShort, expectedShort);
         var isLong = actualLong > expectedLong * 1.03;
+        if (options.AllowArbitraryLongSide)
+        {
+            var shortErrorMm = Math.Abs(actualShort - expectedShort);
+            var shortToleranceMm = options.LongPaperShortSideToleranceMm ?? 0d;
+            // 任意加长纸只锁定标准短边；长边无模数限制，并保留图框实测宽高以生成精确 PMP 纸张。
+            if (actualLong > expectedLong + 1e-6d && shortErrorMm <= shortToleranceMm)
+            {
+                candidates.Add(new PaperCandidate
+                {
+                    Paper = paper,
+                    Scale = scale,
+                    Score = shortError,
+                    IsLong = true,
+                    RequiresCustomPaper = true,
+                    PaperWidthMm = widthMm,
+                    PaperHeightMm = heightMm,
+                    Reason = $"短边与 {expectedShort:0.##}mm 的误差为 {shortErrorMm:0.###}mm（容差 {shortToleranceMm:0.###}mm），长边按实测 {actualLong:0.######}mm 动态生成"
+                });
+            }
+
+            return;
+        }
+
         if (!isLong || shortError > options.LongPaperShortSideTolerance)
         {
             return;
@@ -295,10 +380,110 @@ public static class PaperSizeDetector
         });
     }
 
+    /// <summary>
+    /// 矩形框只以物理短边确定 A0~A4 及比例。长边在标准长度容差内按标准纸，
+    /// 超过标准长度后先尝试 1/8 模数；只有模数误差超过设置容差时才生成任意动态纸张。
+    /// </summary>
+    private static void AddRectangleShortSideCandidate(
+        List<PaperCandidate> candidates,
+        StandardPaper paper,
+        double scale,
+        double widthMm,
+        double heightMm,
+        double actualWidth,
+        double actualHeight,
+        DetectionOptions options)
+    {
+        var actualShort = Math.Min(widthMm, heightMm);
+        var actualLong = Math.Max(widthMm, heightMm);
+        var toleranceMm = options.LongPaperShortSideToleranceMm ?? 0d;
+        var shortErrorMm = Math.Abs(actualShort - paper.ShortSide);
+        if (shortErrorMm > toleranceMm)
+        {
+            return;
+        }
+
+        var longErrorFromStandardMm = Math.Abs(actualLong - paper.LongSide);
+        var landscape = widthMm >= heightMm;
+        if (longErrorFromStandardMm <= toleranceMm)
+        {
+            candidates.Add(new PaperCandidate
+            {
+                Paper = paper,
+                Scale = scale,
+                Score = Math.Max(
+                    RelativeError(actualShort, paper.ShortSide),
+                    RelativeError(actualLong, paper.LongSide)),
+                IsLong = false,
+                PaperWidthMm = landscape ? paper.LongSide : paper.ShortSide,
+                PaperHeightMm = landscape ? paper.ShortSide : paper.LongSide,
+                Reason = $"短边误差 {shortErrorMm:0.###}mm、长边误差 {longErrorFromStandardMm:0.###}mm，均在设置容差 {toleranceMm:0.###}mm 内，CAD尺寸 {actualWidth:0.##} x {actualHeight:0.##}"
+            });
+            return;
+        }
+
+        // 长边小于标准幅面且差值超出容差时不是加长图，不能仅凭短边把普通窄矩形误识别为图框。
+        if (actualLong + toleranceMm < paper.LongSide)
+        {
+            return;
+        }
+
+        var snappedLong = SnapLongSide(actualLong, paper.LongSide);
+        var modularErrorMm = Math.Abs(actualLong - snappedLong);
+        if (modularErrorMm <= toleranceMm)
+        {
+            candidates.Add(new PaperCandidate
+            {
+                Paper = paper,
+                Scale = scale,
+                Score = RelativeError(actualShort, paper.ShortSide)
+                    + RelativeError(actualLong, snappedLong) * 0.35d,
+                IsLong = true,
+                PaperWidthMm = landscape ? snappedLong : paper.ShortSide,
+                PaperHeightMm = landscape ? paper.ShortSide : snappedLong,
+                Reason = $"短边误差 {shortErrorMm:0.###}mm，长边命中 1/8 模数 {snappedLong:0.###}mm，模数误差 {modularErrorMm:0.###}mm（设置容差 {toleranceMm:0.###}mm）"
+            });
+            return;
+        }
+
+        candidates.Add(new PaperCandidate
+        {
+            Paper = paper,
+            Scale = scale,
+            Score = RelativeError(actualShort, paper.ShortSide),
+            IsLong = true,
+            RequiresCustomPaper = true,
+            PaperWidthMm = widthMm,
+            PaperHeightMm = heightMm,
+            Reason = $"短边误差 {shortErrorMm:0.###}mm（设置容差 {toleranceMm:0.###}mm），长边偏离最近 1/8 模数 {modularErrorMm:0.###}mm，按实测 {actualLong:0.######}mm 动态生成"
+        });
+    }
+
     private static double SnapLongSide(double measuredLong, double standardLong)
     {
         var units = Math.Max(MinimumLongPaperUnits, (int)Math.Round(measuredLong / standardLong * LongPaperIncrementDenominator, MidpointRounding.AwayFromZero));
         return standardLong * units / (double)LongPaperIncrementDenominator;
+    }
+
+    private static int GetScalePreferenceRank(double scale, DetectionOptions options)
+    {
+        if (options.PreferredScaleValues != null)
+        {
+            for (var i = 0; i < options.PreferredScaleValues.Count; i++)
+            {
+                if (Math.Abs(scale - options.PreferredScaleValues[i]) < 0.001d)
+                {
+                    return i;
+                }
+            }
+
+            return options.PreferredScaleValues.Count;
+        }
+
+        return options.PreferredScaleValue.HasValue
+            && Math.Abs(scale - options.PreferredScaleValue.Value) < 0.001d
+            ? 0
+            : 1;
     }
 
     private static string LongPaperExtension(double paperWidthMm, double paperHeightMm, StandardPaper standard)
@@ -307,6 +492,12 @@ public static class PaperSizeDetector
         var units = (int)Math.Round(longSide / standard.LongSide * LongPaperIncrementDenominator, MidpointRounding.AwayFromZero);
         var ext = units - LongPaperIncrementDenominator;
         return ext <= 0 ? "" : FormatLongPaperExtension(ext);
+    }
+
+    private static string ContinuousLongPaperExtension(double paperWidthMm, double paperHeightMm, StandardPaper standard)
+    {
+        var extension = Math.Max(paperWidthMm, paperHeightMm) / standard.LongSide - 1d;
+        return Math.Max(0d, extension).ToString("0.###", CultureInfo.InvariantCulture);
     }
 
     private static string FormatLongPaperExtension(int extensionUnits)
