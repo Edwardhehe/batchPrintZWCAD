@@ -1202,7 +1202,7 @@ public sealed class BatchPlotForm : Form
             return;
         }
 
-        var sorted = SortSpatially(_renumberCurrentJobs, _renumberDialog.HorizontalFirst);
+        var sorted = SortSpatially(_renumberCurrentJobs, _settings.SortOrderHorizontalFirst);
         ApplyRenumbering(sorted, _renumberDialog.Prefix, _renumberDialog.Suffix, _renumberDialog.StartNumber);
         _grid.Refresh();
         ShowRenumberPreviewOverlay(sorted);
@@ -1231,7 +1231,7 @@ public sealed class BatchPlotForm : Form
             return;
         }
 
-        var finalSorted = SortSpatially(currentJobs, dialog.HorizontalFirst);
+        var finalSorted = SortSpatially(currentJobs, _settings.SortOrderHorizontalFirst);
         ApplyRenumbering(finalSorted, dialog.Prefix, dialog.Suffix, dialog.StartNumber);
         foreach (var job in currentJobs)
         {
@@ -1246,7 +1246,7 @@ public sealed class BatchPlotForm : Form
         var updated = CadTextUpdater.UpdateDrawingNumbers(finalSorted, _currentDocument,
             failure => AppendLog("WARN", failure));
 
-        AppendLog("INFO", $"图号重排完成，{finalSorted.Count} 张图框按" + (dialog.HorizontalFirst ? "从左到右、从上到下" : "从上到下、从左到右") + $"排序，已反写 CAD {updated} 处。");
+        AppendLog("INFO", $"图号重排完成，{finalSorted.Count} 张图框按" + (_settings.SortOrderHorizontalFirst ? "从左到右、从上到下" : "从上到下、从左到右") + $"排序，已反写 CAD {updated} 处。");
         dialog.Dispose();
     }
 
@@ -1541,7 +1541,7 @@ public sealed class BatchPlotForm : Form
         using var dialog = new SortOrderDialog(_settings.SortOrderHorizontalFirst);
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
 
-        _settings.SortOrderHorizontalFirst = dialog.HorizontalFirst;
+        _settings.SortOrderHorizontalFirst = _settings.SortOrderHorizontalFirst;
         AppSettingsStore.Save(_settings);
 
         // 按所选方向对当前清单做空间排序
@@ -1552,13 +1552,13 @@ public sealed class BatchPlotForm : Form
         foreach (var space in layoutOrder)
         {
             var group = allJobs.Where(j => string.Equals(j.SpaceName, space, StringComparison.Ordinal)).ToList();
-            sorted.AddRange(SpatialSorter.Sort(group, dialog.HorizontalFirst));
+            sorted.AddRange(SpatialSorter.Sort(group, _settings.SortOrderHorizontalFirst));
         }
 
         _jobs.Clear();
         foreach (var job in sorted) _jobs.Add(job);
         SortAndRefreshOutputPaths();
-        var orderName = dialog.HorizontalFirst ? "从左到右，从上到下" : "从上到下，从左到右";
+        var orderName = _settings.SortOrderHorizontalFirst ? "从左到右，从上到下" : "从上到下，从左到右";
         AppendLog("INFO", $"已按\"{orderName}\"重排图框顺序。");
     }
 

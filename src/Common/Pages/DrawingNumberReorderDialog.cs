@@ -15,7 +15,6 @@ public sealed class DrawingNumberReorderDialog : Form
     public string Prefix => _wpfControl?.Prefix ?? "";
     public string Suffix => _wpfControl?.Suffix ?? "";
     public int StartNumber => _wpfControl?.StartNumber ?? 1;
-    public bool HorizontalFirst => _wpfControl?.HorizontalFirst ?? false;
 
     /// <summary>用户点击"预览顺序"时触发。</summary>
     public event Action? PreviewRequested;
@@ -43,8 +42,8 @@ public sealed class DrawingNumberReorderDialog : Form
             FormBorderStyle = FormBorderStyle.FixedDialog;
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.CenterParent;
-            UiLayout.ConfigureForm(this, 390, 290, 370, 270);
-            ClientSize = new Size(UiLayout.Scale(390), UiLayout.Scale(270));
+            UiLayout.ConfigureForm(this, 390, 258, 370, 238);
+            ClientSize = new Size(UiLayout.Scale(390), UiLayout.Scale(258));
 
             _wpfControl = new DrawingNumberReorderControl(jobCount, detectedPrefix);
             _wpfControl.OkRequested += () =>

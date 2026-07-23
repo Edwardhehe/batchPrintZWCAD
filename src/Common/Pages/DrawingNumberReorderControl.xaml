@@ -9,7 +9,6 @@
             <RowDefinition Height="32"/>
             <RowDefinition Height="32"/>
             <RowDefinition Height="32"/>
-            <RowDefinition Height="32"/>
         </Grid.RowDefinitions>
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="82"/>
@@ -58,22 +57,13 @@
             </Grid>
         </Border>
 
-        <!-- 排序方向 -->
-        <Label Grid.Row="3" Grid.Column="0" Content="排序方向" VerticalAlignment="Center" Padding="0"/>
-        <ComboBox Grid.Row="3" Grid.Column="1" x:Name="SortOrderCombo"
-                  Width="220" Height="23" HorizontalAlignment="Left"
-                  SelectedIndex="0" SelectionChanged="OnTextChanged">
-            <ComboBoxItem Content="从上到下，从左到右"/>
-            <ComboBoxItem Content="从左到右，从上到下"/>
-        </ComboBox>
-
         <!-- 预览 -->
-        <Label Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="2" x:Name="PreviewLabel"
+        <Label Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="2" x:Name="PreviewLabel"
                Content="" VerticalAlignment="Center" Padding="0"
                Foreground="DimGray" FontSize="11"/>
 
         <!-- 按钮 -->
-        <StackPanel Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="2"
+        <StackPanel Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="2"
                     HorizontalAlignment="Right" Orientation="Horizontal" Margin="0,8,0,0">
             <Button Content="确定" Width="76" Height="26" Click="OnOkClick" Margin="4,0,0,0"/>
             <Button Content="预览顺序" Width="88" Height="26" Click="OnPreviewClick" Margin="4,0,0,0"/>

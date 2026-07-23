@@ -19,9 +19,6 @@ public sealed partial class DrawingNumberReorderControl : UserControl
     public string Suffix => SuffixBox.Text.Trim();
     public int StartNumber => int.TryParse(StartNumberBox.Text, out var v) ? Math.Max(1, Math.Min(9999, v)) : 1;
 
-    /// <summary>排序方向：先水平再垂直（从左到右，从上到下）</summary>
-    public bool HorizontalFirst => SortOrderCombo.SelectedIndex == 1;
-
     /// <summary>用户点击"预览顺序"时触发。</summary>
     public event Action? PreviewRequested;
 
