@@ -2453,27 +2453,42 @@ public sealed class BatchPlotForm : Form
         AppSettingsStore.Save(_settings);
     }
 
-    /// <summary>初始化留白下拉列表，正值=扩大纸张，负值=缩比例。</summary>
+    /// <summary>留白下拉列表选项，+ 为扩大纸张，- 为缩比例。</summary>
+    private sealed class MarginOption
+    {
+        public double Value { get; set; }
+        public override string ToString() => Value > 0
+            ? $"+ {Value:0.#} mm"
+            : $"- {Math.Abs(Value):0.#} mm";
+    }
+
+    /// <summary>初始化留白下拉列表，正值=扩大纸张，负值=缩比例，整数1~10配对显示。</summary>
     internal static void InitMarginCombo(ComboBox combo, int width, double savedValue)
     {
-        double[] options = { -10, -5, -3, -2, -1.5, -1, -0.5, 0.5, 1, 1.5, 2, 3, 5, 10 };
         combo.DropDownStyle = ComboBoxStyle.DropDownList;
         combo.Width = width;
         combo.Items.Clear();
-        foreach (var v in options)
-            combo.Items.Add(v.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture));
-        var target = savedValue.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
-        var idx = -1;
+        // 整数 1~10，每档先 + 再 -，共 20 项
+        for (var n = 1; n <= 10; n++)
+        {
+            combo.Items.Add(new MarginOption { Value = n });
+            combo.Items.Add(new MarginOption { Value = -n });
+        }
+        // 选中与保存值最接近的项
+        var bestIdx = 0;
+        var bestDiff = double.MaxValue;
         for (var i = 0; i < combo.Items.Count; i++)
         {
-            if (combo.Items[i]?.ToString() == target) { idx = i; break; }
+            if (combo.Items[i] is MarginOption opt)
+            {
+                var diff = Math.Abs(opt.Value - savedValue);
+                if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
+            }
         }
-        combo.SelectedIndex = idx >= 0 ? idx : Math.Max(0, combo.Items.IndexOf("1"));
+        combo.SelectedIndex = bestIdx;
     }
 
     /// <summary>读取留白下拉列表的选中值（毫米）。</summary>
     internal static double ReadMarginValue(ComboBox combo)
-        => double.TryParse(combo.SelectedItem?.ToString(),
-            System.Globalization.NumberStyles.Any,
-            System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : 1.0;
+        => combo.SelectedItem is MarginOption opt ? opt.Value : 1.0;
 }
