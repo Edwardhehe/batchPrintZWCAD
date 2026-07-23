@@ -1239,14 +1239,17 @@ public static class PlotterService
             return;
 
         var size = plotSettings.PlotPaperSize;
-        var direct = DirectSizeError(size.X, size.Y, job.PaperWidthMm, job.PaperHeightMm);
-        var rotated = DirectSizeError(size.X, size.Y, job.PaperHeightMm, job.PaperWidthMm);
+        // 扩大纸张留白模式：校验实际加载尺寸应等于有效尺寸（原始+留白×2），而非原始尺寸。
+        var expectedW = job.EffectivePaperWidthMm > 0 ? job.EffectivePaperWidthMm : job.PaperWidthMm;
+        var expectedH = job.EffectivePaperHeightMm > 0 ? job.EffectivePaperHeightMm : job.PaperHeightMm;
+        var direct = DirectSizeError(size.X, size.Y, expectedW, expectedH);
+        var rotated = DirectSizeError(size.X, size.Y, expectedH, expectedW);
         if (Math.Min(direct, rotated) <= ExactMediaToleranceMm)
             return;
 
         throw new InvalidOperationException(
             $"中望 CAD 实际加载纸张 {size.X:0.######} x {size.Y:0.######} mm，"
-            + $"与任意纸张 {job.PaperWidthMm:0.######} x {job.PaperHeightMm:0.######} mm 不一致；"
+            + $"与任意纸张 {expectedW:0.######} x {expectedH:0.######} mm 不一致；"
             + "已停止打印，禁止生成错误页幅。");
     }
 
