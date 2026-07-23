@@ -240,10 +240,10 @@ public sealed class BatchPlotForm : Form
         _leaveMarginCheckBox.Margin = new Padding(UiLayout.Scale(12), UiLayout.Scale(7), UiLayout.Scale(12), 0);
         SetTip(_leaveMarginCheckBox, "勾选后按设定距离在纸张短边两侧留白，居中等比例缩小打印。");
         _marginInput.DecimalPlaces = 1;
-        _marginInput.Minimum = 0.1m;
-        _marginInput.Maximum = 20m;
+        _marginInput.Minimum = -10m;
+        _marginInput.Maximum = 10m;
         _marginInput.Increment = 0.5m;
-        _marginInput.Value = Math.Max(0.1m, (decimal)_settings.PaperMarginMm);
+        _marginInput.Value = _settings.PaperMarginMm != 0 ? (decimal)_settings.PaperMarginMm : 1m;
         _marginInput.Width = UiLayout.Scale(68);
         _marginInput.Enabled = _leaveMarginCheckBox.Checked;
         _marginInput.Margin = new Padding(0, UiLayout.Scale(4), 0, 0);
@@ -2184,6 +2184,17 @@ public sealed class BatchPlotForm : Form
     /// </summary>
     private void PrepareCustomPaperRegistrations(IReadOnlyList<PlotJob> jobs, string deviceName)
     {
+        // 扩大纸张留白模式（PaperMarginMm > 0）：预先计算有效纸张尺寸并标记为自定义纸张。
+        foreach (var job in jobs)
+        {
+            if (job.LeavePaperMargin && job.PaperMarginMm > 0 && job.PaperWidthMm > 0 && job.PaperHeightMm > 0)
+            {
+                job.EffectivePaperWidthMm = job.PaperWidthMm + job.PaperMarginMm * 2;
+                job.EffectivePaperHeightMm = job.PaperHeightMm + job.PaperMarginMm * 2;
+                job.RequiresCustomPaperRegistration = true;
+            }
+        }
+
         var customJobs = jobs
             .Where(job => job.RequiresCustomPaperRegistration)
             .ToList();
@@ -2227,8 +2238,8 @@ public sealed class BatchPlotForm : Form
         var requests = customJobs
             .Select(job => new PmpCustomPaper.PaperRequest
             {
-                WidthMm = job.PaperWidthMm,
-                HeightMm = job.PaperHeightMm
+                WidthMm = job.EffectivePaperWidthMm > 0 ? job.EffectivePaperWidthMm : job.PaperWidthMm,
+                HeightMm = job.EffectivePaperHeightMm > 0 ? job.EffectivePaperHeightMm : job.PaperHeightMm
             })
             .ToList();
         var registrations = PmpCustomPaper.RegisterCustomPapers(installedPmp, requests)

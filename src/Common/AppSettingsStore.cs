@@ -211,9 +211,9 @@ public static class AppSettingsStore
             settings.DirectorySettingsVersion = 3;
         }
         SyncLegacyDirectoryWidths(settings);
-        if (settings.PaperMarginMm <= 0)
+        if (settings.PaperMarginMm == 0)
         {
-            settings.PaperMarginMm = 1;
+            settings.PaperMarginMm = 1; // 0 无意义，默认1mm缩比例模式
         }
 
         settings.PdfFileNameSeparator = NormalizeFileNameSeparator(settings.PdfFileNameSeparator);

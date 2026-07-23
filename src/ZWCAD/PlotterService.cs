@@ -528,23 +528,40 @@ public static class PlotterService
             return;
         }
 
-        var marginMm = job.PaperMarginMm > 0d ? job.PaperMarginMm : 1d;
         var windowWidth = Math.Abs(window.MaxPoint.X - window.MinPoint.X);
         var windowHeight = Math.Abs(window.MaxPoint.Y - window.MinPoint.Y);
-        var paperSize = plotSettings.PlotPaperSize;
-        var paperShortSide = Math.Min(paperSize.X, paperSize.Y);
-        var windowShortSide = Math.Min(windowWidth, windowHeight);
-        var usableShortSide = paperShortSide - marginMm * 2d;
+        if (windowWidth <= 0d || windowHeight <= 0d)
+            throw new InvalidOperationException("打印窗口尺寸无效，无法计算打印比例。");
 
-        if (windowWidth <= 0d || windowHeight <= 0d || usableShortSide <= 0d)
+        if (job.PaperMarginMm > 0d)
         {
-            throw new InvalidOperationException("打印窗口或纸张尺寸无效，无法计算留白打印比例。");
+            // ── 扩大纸张模式 ──
+            // 纸张已被扩大为 PaperWidthMm+margin*2 × PaperHeightMm+margin*2。
+            // 比例按原始图框尺寸（未扩大）计算，使内容居中、四周留白均等。
+            var originalShortMm = Math.Min(job.PaperWidthMm, job.PaperHeightMm);
+            var windowShortSide = Math.Min(windowWidth, windowHeight);
+            if (originalShortMm <= 0d || windowShortSide <= 0d)
+                throw new InvalidOperationException("纸张或打印窗口尺寸无效，无法计算扩大纸张留白比例。");
+            var scale = originalShortMm / windowShortSide;
+            validator.SetUseStandardScale(plotSettings, false);
+            validator.SetCustomPrintScale(plotSettings, new CustomScale(scale, 1d));
+            return;
         }
 
+        // ── 缩比例模式（PaperMarginMm < 0 时 abs 取值） ──
+        var marginMm = Math.Abs(job.PaperMarginMm) > 0d ? Math.Abs(job.PaperMarginMm) : 1d;
+        var paperSize = plotSettings.PlotPaperSize;
+        var paperShortSide = Math.Min(paperSize.X, paperSize.Y);
+        var windowShort = Math.Min(windowWidth, windowHeight);
+        var usableShortSide = paperShortSide - marginMm * 2d;
+
+        if (usableShortSide <= 0d)
+            throw new InvalidOperationException("留白值过大导致可用纸张面积为零，请减小留白距离。");
+
         // 保持原图框窗口不变，只缩小打印比例。扩大窗口会把图框外的相邻对象带入 PDF。
-        var scale = usableShortSide / windowShortSide;
+        var scaleReduced = usableShortSide / windowShort;
         validator.SetUseStandardScale(plotSettings, false);
-        validator.SetCustomPrintScale(plotSettings, new CustomScale(scale, 1d));
+        validator.SetCustomPrintScale(plotSettings, new CustomScale(scaleReduced, 1d));
     }
 
     private static void SetExactWindowScale(
@@ -965,7 +982,10 @@ public static class PlotterService
         var tolerance = job.RequireExactPaperSize
             ? ExactMediaToleranceMm
             : settings.PaperMatchToleranceMm;
-        var exact = FindByPhysicalSize(media, job.PaperWidthMm, job.PaperHeightMm, tolerance);
+        // 扩大纸张留白模式：按有效尺寸（含留白）选纸
+        var searchWidth = job.EffectivePaperWidthMm > 0 ? job.EffectivePaperWidthMm : job.PaperWidthMm;
+        var searchHeight = job.EffectivePaperHeightMm > 0 ? job.EffectivePaperHeightMm : job.PaperHeightMm;
+        var exact = FindByPhysicalSize(media, searchWidth, searchHeight, tolerance);
         if (exact != null)
         {
             return exact;

@@ -167,8 +167,8 @@ public sealed class SinglePlotForm : Form
         _leaveMargin.Checked = false;
         _leaveMargin.TextAlign = ContentAlignment.MiddleLeft;
         _marginInput.DecimalPlaces = 1;
-        _marginInput.Minimum = 0.1m;
-        _marginInput.Maximum = 20m;
+        _marginInput.Minimum = -10m;
+        _marginInput.Maximum = 10m;
         _marginInput.Increment = 0.5m;
         _marginInput.Value = 1m;
         _marginInput.Width = UiLayout.Scale(72);

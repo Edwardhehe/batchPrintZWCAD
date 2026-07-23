@@ -20,6 +20,18 @@ public static class CustomPaperBatchPreparer
 
     public static PreparationResult Prepare(IReadOnlyList<PlotJob> jobs, string deviceName)
     {
+        // 扩大纸张留白模式（PaperMarginMm > 0）：预先计算有效纸张尺寸并标记为自定义纸张。
+        // 这样后续的 RegisterCustomPapers 会一次性把所有扩大尺寸写入 PMP，不逐张处理。
+        foreach (var job in jobs)
+        {
+            if (job.LeavePaperMargin && job.PaperMarginMm > 0 && job.PaperWidthMm > 0 && job.PaperHeightMm > 0)
+            {
+                job.EffectivePaperWidthMm = job.PaperWidthMm + job.PaperMarginMm * 2;
+                job.EffectivePaperHeightMm = job.PaperHeightMm + job.PaperMarginMm * 2;
+                job.RequiresCustomPaperRegistration = true;
+            }
+        }
+
         var customJobs = jobs
             .Where(job => job.RequiresCustomPaperRegistration)
             .ToList();
@@ -70,8 +82,9 @@ public static class CustomPaperBatchPreparer
         var requests = customJobs
             .Select(job => new PmpCustomPaper.PaperRequest
             {
-                WidthMm = job.PaperWidthMm,
-                HeightMm = job.PaperHeightMm
+                // 扩大纸张模式时用有效尺寸（+margin*2），任意加长时用实测尺寸
+                WidthMm = job.EffectivePaperWidthMm > 0 ? job.EffectivePaperWidthMm : job.PaperWidthMm,
+                HeightMm = job.EffectivePaperHeightMm > 0 ? job.EffectivePaperHeightMm : job.PaperHeightMm
             })
             .ToList();
         var registrations = PmpCustomPaper.RegisterCustomPapers(installedPmp, requests)

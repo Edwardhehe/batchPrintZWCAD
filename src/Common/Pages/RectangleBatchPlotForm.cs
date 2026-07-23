@@ -204,10 +204,10 @@ public sealed class RectangleBatchPlotForm : Form
         _leaveMargin.Anchor = AnchorStyles.Left | AnchorStyles.Top;
         _leaveMargin.Margin = new Padding(UiLayout.Scale(4), UiLayout.Scale(7), 0, 0);
         _marginInput.DecimalPlaces = 1;
-        _marginInput.Minimum = 0.1m;
-        _marginInput.Maximum = 20m;
+        _marginInput.Minimum = -10m;
+        _marginInput.Maximum = 10m;
         _marginInput.Increment = 0.5m;
-        _marginInput.Value = Math.Max(0.1m, (decimal)_settings.PaperMarginMm);
+        _marginInput.Value = _settings.PaperMarginMm != 0 ? (decimal)_settings.PaperMarginMm : 1m;
         _marginInput.Width = UiLayout.Scale(58);
         _marginInput.Enabled = _leaveMargin.Checked;
         _leaveMargin.CheckedChanged += (_, _) => _marginInput.Enabled = _leaveMargin.Checked;

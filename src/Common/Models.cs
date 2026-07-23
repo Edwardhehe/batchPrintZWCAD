@@ -111,8 +111,15 @@ public sealed class PlotJob
     public string OutputPath { get; set; } = "";
     /// <summary>是否按纸张短边预留边距，打印时居中等比例缩小。</summary>
     public bool LeavePaperMargin { get; set; }
-    /// <summary>纸张短边两侧的留白距离（毫米）。</summary>
+    /// <summary>
+    /// 留白距离（毫米）。正数 = 扩大纸张模式（纸张各边增加 margin*2，比例不变）；
+    /// 负数 = 缩比例模式（原有逻辑，用 abs 值计算缩放比例）。
+    /// </summary>
     public double PaperMarginMm { get; set; } = 1d;
+    /// <summary>扩大纸张留白模式下实际使用的打印宽度（毫米）；0 表示使用 PaperWidthMm。</summary>
+    public double EffectivePaperWidthMm { get; set; }
+    /// <summary>扩大纸张留白模式下实际使用的打印高度（毫米）；0 表示使用 PaperHeightMm。</summary>
+    public double EffectivePaperHeightMm { get; set; }
 
     /// <summary>MinX/Y/MaxX/MaxY 已经是 DCS 坐标，GetPlotWindow 跳过 WCS→DCS 变换。</summary>
     public bool IsDcsWindow { get; set; }
