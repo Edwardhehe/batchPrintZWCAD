@@ -94,19 +94,19 @@ public sealed class BatchPlotForm : Form
             ShowAlways = true
         };
 
-        var actionRowHeight = UiLayout.ButtonHeight() + UiLayout.Scale(7);
+        var actionRowHeight = UiLayout.ButtonHeight() + UiLayout.Scale(3);
         var top = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
-            Height = actionRowHeight + UiLayout.ButtonHeight() * 2 + UiLayout.Scale(30),
+            Height = actionRowHeight + UiLayout.ButtonHeight() * 2 + UiLayout.Scale(18),
             ColumnCount = 1,
             RowCount = 3,
-            Padding = new Padding(UiLayout.Scale(10), UiLayout.Scale(8), UiLayout.Scale(10), UiLayout.Scale(6)),
+            Padding = new Padding(UiLayout.Scale(10), UiLayout.Scale(4), UiLayout.Scale(10), UiLayout.Scale(4)),
             BackColor = SystemColors.Control
         };
         top.RowStyles.Add(new RowStyle(SizeType.Absolute, actionRowHeight));
-        top.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.ButtonHeight() + UiLayout.Scale(10)));
         top.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.ButtonHeight() + UiLayout.Scale(4)));
+        top.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.ButtonHeight() + UiLayout.Scale(2)));
 
         var actionRow = new FlowLayoutPanel
         {
@@ -123,7 +123,7 @@ public sealed class BatchPlotForm : Form
             ColumnCount = 8,
             RowCount = 1,
             Margin = Padding.Empty,
-            Padding = new Padding(0, UiLayout.Scale(6), 0, 0)
+            Padding = new Padding(0, UiLayout.Scale(2), 0, 0)
         };
         var pathRow = new FlowLayoutPanel
         {
@@ -173,9 +173,6 @@ public sealed class BatchPlotForm : Form
         var renumberButton = MakeButton("图号重排", 92);
         renumberButton.Click += (_, _) => RenumberDrawingNumbers();
 
-        var refreshNameButton = MakeButton("刷新文件名", 104);
-        refreshNameButton.Click += (_, _) => SortAndRefreshOutputPaths();
-
         var generateDirectoryButton = MakeButton("生成目录", 92);
         generateDirectoryButton.Click += (_, _) => GenerateDrawingDirectory();
 
@@ -200,7 +197,7 @@ public sealed class BatchPlotForm : Form
         SetTip(addFilesButton, "选择一个或多个 DWG，加入批量打印清单。");
         SetTip(clearButton, "清空当前清单，不影响 CAD 文件和图框库。");
         SetTip(renumberButton, "按空间位置重新排序图框，按顺序分配前缀+递增图号。");
-        SetTip(refreshNameButton, "按当前图号、图名和设置重新生成输出文件名。");
+        SetTip(chooseOutputButton, "手动选择输出目录。");
         SetTip(generateDirectoryButton, "在当前 CAD 指定基点，生成图纸目录表。");
         SetTip(chooseOutputButton, "手动选择输出目录。");
 
@@ -242,7 +239,14 @@ public sealed class BatchPlotForm : Form
         InitMarginCombo(_marginInput, UiLayout.Scale(68), _settings.PaperMarginMm);
         _marginInput.Enabled = _leaveMarginCheckBox.Checked;
         _marginInput.Margin = new Padding(0, UiLayout.Scale(4), 0, 0);
-        _leaveMarginCheckBox.CheckedChanged += (_, _) => _marginInput.Enabled = _leaveMarginCheckBox.Checked;
+        _leaveMarginCheckBox.CheckedChanged += (_, _) =>
+        {
+            _marginInput.Enabled = _leaveMarginCheckBox.Checked;
+            // 留白开关切换时立即更新所有作业状态，清除扩大纸张模式留下的精确纸张标记。
+            ApplyLeaveMarginSelection(_jobs);
+        };
+        // 留白值改变时立即重置所有作业的扩大纸张状态，避免正↔负切换后遗留无效精确纸张标记。
+        _marginInput.SelectedIndexChanged += (_, _) => ApplyLeaveMarginSelection(_jobs);
 
         actionRow.Controls.Add(scanButton);
         actionRow.Controls.Add(scanWindowButton);
@@ -251,7 +255,6 @@ public sealed class BatchPlotForm : Form
         actionRow.Controls.Add(clearButton);
         actionRow.Controls.Add(MakeSeparator());
         actionRow.Controls.Add(renumberButton);
-        actionRow.Controls.Add(refreshNameButton);
         actionRow.Controls.Add(generateDirectoryButton);
         settingsRow.Controls.Add(MakeLabel("输出:"), 0, 0);
         settingsRow.Controls.Add(_outputDirectory, 1, 0);
@@ -345,6 +348,11 @@ public sealed class BatchPlotForm : Form
         quickBar.Controls.Add(sortSettingsButton);
         quickBar.Controls.Add(fileNameSettingsButton);
         quickBar.Controls.Add(directorySettingsButton);
+        var generalSettingsButton = MakeButton("常规设置", 76);
+        generalSettingsButton.Margin = new Padding(UiLayout.Scale(4), 0, 0, 0);
+        generalSettingsButton.Click += (_, _) => ShowSettingsAtTab(0);
+        tips.SetToolTip(generalSettingsButton, "配置纸张匹配容差、保存路径等常规选项，直接跳转到常规标签页。");
+        quickBar.Controls.Add(generalSettingsButton);
         Controls.Add(quickBar);
 
         Controls.Add(top);

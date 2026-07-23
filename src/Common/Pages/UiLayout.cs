@@ -56,7 +56,7 @@ public static class UiLayout
 
     public static int ButtonWidth(string text, int minimumWidth)
     {
-        var measured = TextRenderer.MeasureText(text, DefaultFont).Width + Scale(16);
+        var measured = TextRenderer.MeasureText(text, DefaultFont).Width + Scale(8);
         return Math.Max(Scale(minimumWidth), measured);
     }
 
@@ -82,7 +82,7 @@ public static class UiLayout
             Text = text,
             Width = ButtonWidth(text, minimumWidth),
             Height = ButtonHeight(),
-            Margin = new Padding(0, Scale(1), Scale(5), Scale(1)),
+            Margin = new Padding(0, Scale(1), Scale(3), Scale(1)),
             UseVisualStyleBackColor = true
         };
     }
