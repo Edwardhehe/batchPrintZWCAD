@@ -67,10 +67,11 @@ public static class RectangleFrameScanner
     /// </summary>
     /// <param name="document">当前 CAD 文档</param>
     /// <param name="scanWindow">扫描窗口（WCS 坐标）</param>
-    public static List<Result> ScanWindow(Document document, Extents3d scanWindow)
+    public static List<Result> ScanWindow(Document document, Extents3d scanWindow, double? paperMatchToleranceMm = null)
     {
         LayerScannableCache.Clear();
         BlockDefinitionCache.Clear();
+        var effectivePaperToleranceMm = paperMatchToleranceMm ?? AppSettingsStore.Load().PaperMatchToleranceMm;
         var sourceFile = string.IsNullOrWhiteSpace(document.Database.Filename)
             ? document.Name
             : document.Database.Filename;
@@ -107,7 +108,15 @@ public static class RectangleFrameScanner
         var layoutName = layout.LayoutName;
         tr.Commit();
 
-        return FilterAndPackageRectangles(document, rectangles, scanWindow, ownerId, sourceFile, layoutName, !layout.ModelType);
+        return FilterAndPackageRectangles(
+            document,
+            rectangles,
+            scanWindow,
+            ownerId,
+            sourceFile,
+            layoutName,
+            !layout.ModelType,
+            effectivePaperToleranceMm);
     }
 
     /// <summary>
@@ -118,10 +127,11 @@ public static class RectangleFrameScanner
     /// </summary>
     /// <param name="document">当前 CAD 文档</param>
     /// <param name="scope">扫描范围</param>
-    public static List<Result> ScanScope(Document document, TitleBlockScanScope scope)
+    public static List<Result> ScanScope(Document document, TitleBlockScanScope scope, double? paperMatchToleranceMm = null)
     {
         LayerScannableCache.Clear();
         BlockDefinitionCache.Clear();
+        var effectivePaperToleranceMm = paperMatchToleranceMm ?? AppSettingsStore.Load().PaperMatchToleranceMm;
         var sourceFile = string.IsNullOrWhiteSpace(document.Database.Filename)
             ? document.Name
             : document.Database.Filename;
@@ -160,7 +170,15 @@ public static class RectangleFrameScanner
         var allResults = new List<Result>();
         foreach (var (rectangles, ownerId, layoutName, isPaperSpace, _) in spaceData)
         {
-            var results = FilterAndPackageRectangles(document, rectangles, null, ownerId, sourceFile, layoutName, isPaperSpace);
+            var results = FilterAndPackageRectangles(
+                document,
+                rectangles,
+                null,
+                ownerId,
+                sourceFile,
+                layoutName,
+                isPaperSpace,
+                effectivePaperToleranceMm);
             allResults.AddRange(results);
         }
 
@@ -200,7 +218,8 @@ public static class RectangleFrameScanner
         ObjectId ownerId,
         string sourceFile,
         string layoutName,
-        bool isPaperSpace)
+        bool isPaperSpace,
+        double paperMatchToleranceMm)
     {
         // 3a. 窗口裁剪（可选）
         List<LocalRectangle> inWindow;
@@ -228,8 +247,9 @@ public static class RectangleFrameScanner
         {
             var width = rectangle.ActualWidth > 0 ? rectangle.ActualWidth : rectangle.MaxX - rectangle.MinX;
             var height = rectangle.ActualHeight > 0 ? rectangle.ActualHeight : rectangle.MaxY - rectangle.MinY;
-            // 矩形框只靠几何边长识别图幅，短边误差过大会把普通长矩形误吸附为加长图；因此加长图短边容差收紧到 2%。
-            var options = PaperSizeDetector.DetectCandidates(width, height, PaperSizeDetector.RectangleBatchDetectionOptions);
+            // 短边按设置中的毫米容差匹配常用比例；长边先吸附 1/8 模数，超出同一容差才转任意动态纸张。
+            var detectionOptions = PaperSizeDetector.CreateRectangleBatchOptions(paperMatchToleranceMm, isPaperSpace);
+            var options = PaperSizeDetector.DetectCandidates(width, height, detectionOptions);
             if (options.Count == 0)
             {
                 continue;
@@ -273,6 +293,7 @@ public static class RectangleFrameScanner
                     DetectionNote = "矩形框批量打印",
                     PaperWidthMm = paper.PaperWidthMm,
                     PaperHeightMm = paper.PaperHeightMm,
+                    RequiresCustomPaperRegistration = paper.RequiresCustomPaper,
                     MinX = rectangle.MinX,
                     MinY = rectangle.MinY,
                     MaxX = rectangle.MaxX,
@@ -421,15 +442,34 @@ public static class RectangleFrameScanner
             }
         }
 
-        // ── 分支 1：Polyline → 矩形检测 ──
+        // ── 分支 1：Polyline（轻量线）→ 矩形检测 ──
         if (entity is Polyline polyline
-            // 图框 PL 可能专门放在 Defpoints 或其他“不打印”辅助层；
+            // 图框 PL 可能专门放在 Defpoints 或其他”不打印”辅助层；
             // 它只提供打印边界，不代表该层图素会进入打印内容，因此这里只要求图层开启且未冻结。
             && IsFramePolylineLayerScannable(tr, entity)
             && TryGetRectangle(polyline, transform, out var rectangle))
         {
             // 先全部收集，不去重——不同实例的同一定义各自独立，去重放在后续 FilterRectangles
             rectangles.Add(rectangle);
+        }
+
+        // ── 分支 1b：Polyline2d（老式 POLYLINE+VERTEX）→ 矩形检测 ──
+        // 旧版 CAD 绘制的图框常用老式多段线，LIST 命令输出 “POLYLINE/VERTEX”，
+        // .NET API 类型为 Polyline2d，与轻量 Polyline 不同，需单独处理。
+        if (entity is Polyline2d polyline2d
+            && IsFramePolylineLayerScannable(tr, entity)
+            && TryGetRectangleFrom2d(tr, polyline2d, transform, out var rectangle2d))
+        {
+            rectangles.Add(rectangle2d);
+        }
+
+        // ── 分支 1c：Polyline3d（3DPOLY）→ 矩形检测 ──
+        // 三维多段线在 XY 平面上也可构成矩形图框，顶点类型为 Vertex3d。
+        if (entity is Polyline3d polyline3d
+            && IsFramePolylineLayerScannable(tr, entity)
+            && TryGetRectangleFrom3d(tr, polyline3d, transform, out var rectangle3d))
+        {
+            rectangles.Add(rectangle3d);
         }
 
         // ── 分支 2：BlockReference → 缓存 + 递归进入 ──
@@ -923,6 +963,145 @@ public static class RectangleFrameScanner
     /// <param name="transform">累积变换矩阵（块参照嵌套时的坐标变换）</param>
     /// <param name="rectangle">输出的矩形数据（包围盒 + 实际边长 + 角点）</param>
     /// <returns>true 表示是有效矩形</returns>
+    /// <summary>
+    /// 从 Polyline3d（3DPOLY）提取矩形，逻辑与 TryGetRectangleFrom2d 一致。
+    /// Polyline3d 只有直线段，无圆弧；顶点类型为 Vertex3d，只取线型顶点（枚举值=0）。
+    /// </summary>
+    private static bool TryGetRectangleFrom3d(Transaction tr, Polyline3d polyline3d, Matrix3d transform, out LocalRectangle rectangle)
+    {
+        rectangle = new LocalRectangle();
+        var points = new List<Point3d>();
+        foreach (ObjectId vertexId in polyline3d)
+        {
+            if (tr.GetObject(vertexId, OpenMode.ForRead, false) is not PolylineVertex3d vertex)
+                continue;
+            // 只接受线型顶点（枚举值=0），跳过样条曲线控制点
+            if ((int)vertex.VertexType != 0)
+                continue;
+            // 压平 Z 坐标，允许图框略微不在 XY 平面上
+            var wcs = vertex.Position.TransformBy(transform);
+            points.Add(new Point3d(wcs.X, wcs.Y, 0));
+        }
+
+        if (points.Count < 4) return false;
+
+        var minX = points.Min(p => p.X);
+        var minY = points.Min(p => p.Y);
+        var maxX = points.Max(p => p.X);
+        var maxY = points.Max(p => p.Y);
+        var boxWidth = maxX - minX;
+        var boxHeight = maxY - minY;
+        if (boxWidth <= 1e-6 || boxHeight <= 1e-6) return false;
+
+        var tolerance = Math.Max(boxWidth, boxHeight) * 0.001;
+
+        if (points.Count > 1 && SamePoint(points[0], points[points.Count - 1], tolerance))
+            points.RemoveAt(points.Count - 1);
+
+        RemoveConsecutiveDuplicatePoints(points, tolerance);
+        RemoveCollinearPoints(points, tolerance);
+
+        if (points.Count != 4) return false;
+
+        var d02 = points[0].DistanceTo(points[2]);
+        var d13 = points[1].DistanceTo(points[3]);
+        if (Math.Abs(d02 - d13) > tolerance) return false;
+
+        var mid02 = new Point3d((points[0].X + points[2].X) / 2d, (points[0].Y + points[2].Y) / 2d, 0);
+        var mid13 = new Point3d((points[1].X + points[3].X) / 2d, (points[1].Y + points[3].Y) / 2d, 0);
+        if (mid02.DistanceTo(mid13) > tolerance) return false;
+
+        var side0 = points[0].DistanceTo(points[1]);
+        var side1 = points[1].DistanceTo(points[2]);
+        var actualWidth = Math.Max(side0, side1);
+        var actualHeight = Math.Min(side0, side1);
+
+        rectangle = new LocalRectangle
+        {
+            MinX = minX, MinY = minY, MaxX = maxX, MaxY = maxY,
+            ActualWidth = actualWidth, ActualHeight = actualHeight,
+            CornerPoints = new[]
+            {
+                points[0].X, points[0].Y,
+                points[1].X, points[1].Y,
+                points[2].X, points[2].Y,
+                points[3].X, points[3].Y
+            }
+        };
+        return true;
+    }
+
+    /// <summary>
+    /// 从老式 Polyline2d（POLYLINE+VERTEX）提取矩形，逻辑与 TryGetRectangle 一致。
+    /// Polyline2d 的顶点存储在子实体中，需通过事务逐个读取。
+    /// </summary>
+    private static bool TryGetRectangleFrom2d(Transaction tr, Polyline2d polyline2d, Matrix3d transform, out LocalRectangle rectangle)
+    {
+        rectangle = new LocalRectangle();
+        var points = new List<Point3d>();
+        foreach (ObjectId vertexId in polyline2d)
+        {
+            if (tr.GetObject(vertexId, OpenMode.ForRead, false) is not Vertex2d vertex)
+                continue;
+            // 只接受普通顶点（枚举值=0），跳过样条曲线控制点等非几何顶点
+            if ((int)vertex.VertexType != 0)
+                continue;
+            // 圆弧段判断
+            if (Math.Abs(vertex.Bulge) > 1e-9) return false;
+            points.Add(vertex.Position.TransformBy(transform));
+        }
+
+        if (points.Count < 4) return false;
+
+        var minX = points.Min(p => p.X);
+        var minY = points.Min(p => p.Y);
+        var maxX = points.Max(p => p.X);
+        var maxY = points.Max(p => p.Y);
+        var boxWidth = maxX - minX;
+        var boxHeight = maxY - minY;
+        if (boxWidth <= 1e-6 || boxHeight <= 1e-6) return false;
+
+        var tolerance = Math.Max(boxWidth, boxHeight) * 0.001;
+
+        // 去掉与首点重合的尾点（闭合时最后一个顶点等于第一个）
+        if (points.Count > 1 && SamePoint(points[0], points[points.Count - 1], tolerance))
+            points.RemoveAt(points.Count - 1);
+
+        RemoveConsecutiveDuplicatePoints(points, tolerance);
+        RemoveCollinearPoints(points, tolerance);
+
+        if (points.Count != 4) return false;
+
+        // 矩形验证：对角线等长 + 中点重合
+        var d02 = points[0].DistanceTo(points[2]);
+        var d13 = points[1].DistanceTo(points[3]);
+        if (Math.Abs(d02 - d13) > tolerance) return false;
+
+        var mid02 = new Point3d((points[0].X + points[2].X) / 2d, (points[0].Y + points[2].Y) / 2d, 0);
+        var mid13 = new Point3d((points[1].X + points[3].X) / 2d, (points[1].Y + points[3].Y) / 2d, 0);
+        if (mid02.DistanceTo(mid13) > tolerance) return false;
+
+        // 计算实际边长（相邻两点距离）
+        var side0 = points[0].DistanceTo(points[1]);
+        var side1 = points[1].DistanceTo(points[2]);
+        var actualWidth = Math.Max(side0, side1);
+        var actualHeight = Math.Min(side0, side1);
+
+        rectangle = new LocalRectangle
+        {
+            MinX = minX, MinY = minY, MaxX = maxX, MaxY = maxY,
+            ActualWidth = actualWidth, ActualHeight = actualHeight,
+            CornerPoints = new[]
+            {
+                points[0].X, points[0].Y,
+                points[1].X, points[1].Y,
+                points[2].X, points[2].Y,
+                points[3].X, points[3].Y
+            }
+        };
+        return true;
+    }
+
     private static bool TryGetRectangle(Polyline polyline, Matrix3d transform, out LocalRectangle rectangle)
     {
         rectangle = new LocalRectangle();

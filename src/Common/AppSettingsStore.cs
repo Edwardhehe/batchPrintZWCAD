@@ -31,7 +31,7 @@ public sealed class AppSettings
 {
     public string LastPlotDevice { get; set; } = "";
     public string LastStyleSheet { get; set; } = "";
-    public double PaperMatchToleranceMm { get; set; } = 3;
+    public double PaperMatchToleranceMm { get; set; } = 0.5;
     public bool AddSequenceWhenPdfExists { get; set; } = false;
     /// <summary>记录批打印窗口上一次“合并 PDF”的勾选状态；首次使用默认为不勾选。</summary>
     public bool MergePdf { get; set; }
@@ -46,6 +46,8 @@ public sealed class AppSettings
     public bool AddFileNameSequence { get; set; }
     public bool LeavePaperMargin { get; set; }
     public double PaperMarginMm { get; set; } = 1;
+    /// <summary>图框库批量打印空间排序方向：true=从左到右从上到下，false=从上到下从左到右。</summary>
+    public bool SortOrderHorizontalFirst { get; set; }
     public string PdfFileNameSeparator { get; set; } = "_";
     public List<string> PdfFileNameFields { get; set; } = new() { "DrawingNumber", "Title" };
     /// <summary>
@@ -135,7 +137,7 @@ public static class AppSettingsStore
     {
         if (settings.PaperMatchToleranceMm <= 0)
         {
-            settings.PaperMatchToleranceMm = 3;
+            settings.PaperMatchToleranceMm = 0.5;
         }
 
         if (settings.DirectoryIndexWidth <= 0)
