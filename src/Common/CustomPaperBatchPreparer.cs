@@ -20,8 +20,21 @@ public static class CustomPaperBatchPreparer
 
     public static PreparationResult Prepare(IReadOnlyList<PlotJob> jobs, string deviceName)
     {
+        // 每次准备前先清除所有作业上的旧扩大纸张状态，防止切换留白模式后出现陈旧标记。
+        foreach (var job in jobs)
+        {
+            if (!job.LeavePaperMargin || job.PaperMarginMm <= 0)
+            {
+                job.EffectivePaperWidthMm = 0;
+                job.EffectivePaperHeightMm = 0;
+                job.RequiresCustomPaperRegistration = false;
+                job.RequireExactPaperSize = false;
+                job.UseExactWindowScale = false;
+                job.CustomPaperWasAdded = false;
+            }
+        }
+
         // 扩大纸张留白模式（PaperMarginMm > 0）：预先计算有效纸张尺寸并标记为自定义纸张。
-        // 这样后续的 RegisterCustomPapers 会一次性把所有扩大尺寸写入 PMP，不逐张处理。
         foreach (var job in jobs)
         {
             if (job.LeavePaperMargin && job.PaperMarginMm > 0 && job.PaperWidthMm > 0 && job.PaperHeightMm > 0)

@@ -1086,6 +1086,8 @@ public sealed class RectangleBatchPlotForm : Form
                     .Where(candidate => candidate.Selected || ReferenceEquals(candidate, row))
                     .Select(candidate => candidate.Job)
                     .ToList();
+                // 同步留白设置到所有准备作业，保证扩大/缩比例模式即时生效。
+                ApplyLeaveMarginSelection(previewJobs);
                 CustomPaperBatchPreparer.Prepare(previewJobs, device);
                 PlotterService.Preview(row.Job, device, SelectedStyle(), _document);
             }
@@ -1380,6 +1382,16 @@ public sealed class RectangleBatchPlotForm : Form
             // 留白是本次输出选项，预览和正式打印都写入同一个 PlotJob，保证效果一致。
             job.LeavePaperMargin = leaveMargin;
             job.PaperMarginMm = marginMm;
+            // 切换到负值（缩比例）或关闭留白时，清除上次扩大纸张模式留下的有效尺寸和精确纸张标记。
+            if (!leaveMargin || marginMm <= 0)
+            {
+                job.EffectivePaperWidthMm = 0;
+                job.EffectivePaperHeightMm = 0;
+                job.RequiresCustomPaperRegistration = false;
+                job.RequireExactPaperSize = false;
+                job.UseExactWindowScale = false;
+                job.CustomPaperWasAdded = false;
+            }
         }
     }
 

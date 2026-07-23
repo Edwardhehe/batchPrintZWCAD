@@ -1258,8 +1258,9 @@ public static class PlotterService
         var paperRotation = media?.NeedsRotation == true
             ? PlotRotation.Degrees090
             : PlotRotation.Degrees000;
-        var paperWidth = job.PaperWidthMm;
-        var paperHeight = job.PaperHeightMm;
+        // 扩大纸张模式下以有效尺寸（含留白）判断横竖方向，保证与实际纸张方向一致。
+        var paperWidth = job.EffectivePaperWidthMm > 0 ? job.EffectivePaperWidthMm : job.PaperWidthMm;
+        var paperHeight = job.EffectivePaperHeightMm > 0 ? job.EffectivePaperHeightMm : job.PaperHeightMm;
         var windowWidth = Math.Abs(window.MaxPoint.X - window.MinPoint.X);
         var windowHeight = Math.Abs(window.MaxPoint.Y - window.MinPoint.Y);
         if (paperWidth <= 1e-9 || paperHeight <= 1e-9

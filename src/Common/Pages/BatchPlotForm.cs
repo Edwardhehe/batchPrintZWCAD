@@ -2110,6 +2110,15 @@ public sealed class BatchPlotForm : Form
             // 留白选项是本次打印设置，不改变图框识别数据，只在输出/预览时生效。
             job.LeavePaperMargin = leaveMargin;
             job.PaperMarginMm = marginMm;
+            // 切换到负值（缩比例）或关闭留白时，清除上次扩大纸张模式留下的有效尺寸和精确纸张标记。
+            if (!leaveMargin || marginMm <= 0)
+            {
+                job.EffectivePaperWidthMm = 0;
+                job.EffectivePaperHeightMm = 0;
+                job.RequiresCustomPaperRegistration = false;
+                job.RequireExactPaperSize = false;
+                job.UseExactWindowScale = false;
+            }
         }
     }
 
@@ -2153,6 +2162,8 @@ public sealed class BatchPlotForm : Form
             var previewJobs = _jobs
                 .Where(candidate => candidate.Selected || ReferenceEquals(candidate, job))
                 .ToList();
+            // 预览时同步给所有准备作业应用当前留白设置，保证扩大/缩比例模式即时生效。
+            ApplyLeaveMarginSelection(previewJobs);
             PrepareCustomPaperRegistrations(previewJobs, device);
             AppendLog("INFO", $"CAD 内部预览 {job.DrawingNumber}_{job.Title}");
             PlotterService.Preview(job, device, style, _currentDocument);
@@ -2179,6 +2190,20 @@ public sealed class BatchPlotForm : Form
     /// </summary>
     private void PrepareCustomPaperRegistrations(IReadOnlyList<PlotJob> jobs, string deviceName)
     {
+        // 每次准备前先清除所有作业上的旧扩大纸张状态，防止切换留白模式后出现陈旧标记。
+        foreach (var job in jobs)
+        {
+            if (!job.LeavePaperMargin || job.PaperMarginMm <= 0)
+            {
+                job.EffectivePaperWidthMm = 0;
+                job.EffectivePaperHeightMm = 0;
+                job.RequiresCustomPaperRegistration = false;
+                job.RequireExactPaperSize = false;
+                job.UseExactWindowScale = false;
+                job.CustomPaperWasAdded = false;
+            }
+        }
+
         // 扩大纸张留白模式（PaperMarginMm > 0）：预先计算有效纸张尺寸并标记为自定义纸张。
         foreach (var job in jobs)
         {
