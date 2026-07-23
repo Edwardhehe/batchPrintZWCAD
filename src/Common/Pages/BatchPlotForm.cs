@@ -849,6 +849,9 @@ public sealed class BatchPlotForm : Form
             .ThenBy(x => x.Title, StringComparer.CurrentCultureIgnoreCase)
             .ToList();
 
+        // 图号相同且图名也相同时，按排序设置的空间方向（摆放顺序）作为最终排序依据。
+        sorted = SpatiallyBreakTies(sorted);
+
         _jobs.Clear();
         var sequenceDigits = FileNameSanitizer.ResolveSequenceDigits(
             _settings.AutoFileNameSequenceDigits,
@@ -1296,6 +1299,38 @@ public sealed class BatchPlotForm : Form
     private static List<PlotJob> SortSpatially(IReadOnlyList<PlotJob> jobs, bool horizontalFirst)
     {
         return SpatialSorter.Sort(jobs, horizontalFirst);
+    }
+
+    /// <summary>
+    /// 对已按（图号, 图名）排序的列表，在图号和图名完全相同的连续组内按空间位置（摆放顺序）二次排序。
+    /// </summary>
+    private List<PlotJob> SpatiallyBreakTies(List<PlotJob> sortedJobs)
+    {
+        if (sortedJobs.Count <= 1) return sortedJobs;
+        var result = new List<PlotJob>(sortedJobs.Count);
+        var i = 0;
+        while (i < sortedJobs.Count)
+        {
+            var anchor = sortedJobs[i];
+            var j = i + 1;
+            // 收集图号、图名、优先级全部相同的连续段
+            while (j < sortedJobs.Count
+                && sortedJobs[j].SortPriority == anchor.SortPriority
+                && NaturalStringComparer.Instance.Compare(sortedJobs[j].DrawingNumber, anchor.DrawingNumber) == 0
+                && string.Equals(sortedJobs[j].Title, anchor.Title, StringComparison.CurrentCultureIgnoreCase))
+            {
+                j++;
+            }
+            var group = sortedJobs.GetRange(i, j - i);
+            if (group.Count > 1)
+            {
+                // 空间方向由排序设置控制
+                group = SpatialSorter.Sort(group, _settings.SortOrderHorizontalFirst);
+            }
+            result.AddRange(group);
+            i = j;
+        }
+        return result;
     }
 
     private void ClearJobs()
