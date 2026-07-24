@@ -1,7 +1,7 @@
 <UserControl x:Class="ZwcadBatchPlot.DrawingNumberReorderControl"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             FontFamily="Microsoft YaHei" FontSize="12">
+             FontFamily="Microsoft YaHei" FontSize="13">
     <Grid Margin="12,10,12,8">
         <Grid.RowDefinitions>
             <RowDefinition Height="32"/>
@@ -60,7 +60,7 @@
         <!-- 预览 -->
         <Label Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="2" x:Name="PreviewLabel"
                Content="" VerticalAlignment="Center" Padding="0"
-               Foreground="DimGray" FontSize="11"/>
+               Foreground="DimGray" FontSize="12"/>
 
         <!-- 按钮 -->
         <StackPanel Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="2"

@@ -1,7 +1,7 @@
 <UserControl x:Class="ZwcadBatchPlot.SortOrderControl"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             FontFamily="Microsoft YaHei" FontSize="12">
+             FontFamily="Microsoft YaHei" FontSize="13">
     <UserControl.Resources>
         <Style x:Key="CellStyle" TargetType="Border">
             <Setter Property="BorderBrush" Value="#FF888888"/>
@@ -71,7 +71,7 @@
                     </Grid>
                 </Border>
                 <TextBlock Text="先按行（从上到下），行内再从左到右"
-                           Foreground="DimGray" FontSize="10" Margin="0,4,0,0"
+                           Foreground="DimGray" FontSize="11" Margin="0,4,0,0"
                            TextWrapping="Wrap"/>
             </StackPanel>
 
@@ -104,7 +104,7 @@
                     </Grid>
                 </Border>
                 <TextBlock Text="先按列（从左到右），列内再从上到下"
-                           Foreground="DimGray" FontSize="10" Margin="0,4,0,0"
+                           Foreground="DimGray" FontSize="11" Margin="0,4,0,0"
                            TextWrapping="Wrap"/>
             </StackPanel>
         </Grid>

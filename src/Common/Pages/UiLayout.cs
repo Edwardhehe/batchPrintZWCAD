@@ -7,7 +7,7 @@ namespace ZwcadBatchPlot;
 public static class UiLayout
 {
     // 全部插件窗体统一使用小一号字体，提升信息密度并保持中文显示清晰。
-    public static readonly Font DefaultFont = new("Microsoft YaHei UI", 7F, FontStyle.Regular, GraphicsUnit.Point);
+    public static readonly Font DefaultFont = new("Microsoft YaHei UI", 8F, FontStyle.Regular, GraphicsUnit.Point);
 
     private static readonly float DpiX;
     private static readonly float DpiY;
