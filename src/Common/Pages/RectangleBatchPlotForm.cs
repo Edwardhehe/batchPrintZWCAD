@@ -42,7 +42,6 @@ public sealed class RectangleBatchPlotForm : Form
     private readonly BindingList<Row> _displayRows = new();
     private readonly DataGridView _grid = new();
     private readonly TextBox _outputDirectory = new();
-    private readonly ComboBox _sortOrder = new();
     private readonly ComboBox _outputFormatCombo = new();
     private readonly ComboBox _savePathModeCombo = new();
     private readonly ComboBox _style = new();
@@ -89,15 +88,15 @@ public sealed class RectangleBatchPlotForm : Form
         var top = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
-            Height = UiLayout.Scale(126),
+            Height = UiLayout.Scale(106),
             ColumnCount = 1,
             RowCount = 3,
-            Padding = new Padding(UiLayout.Scale(10), UiLayout.Scale(8), UiLayout.Scale(10), UiLayout.Scale(6)),
+            Padding = new Padding(UiLayout.Scale(10), UiLayout.Scale(4), UiLayout.Scale(10), UiLayout.Scale(4)),
             BackColor = Color.FromArgb(245, 247, 250)
         };
-        top.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(38)));
-        top.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(34)));
-        top.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(34)));
+        top.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.ButtonHeight() + UiLayout.Scale(3)));
+        top.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.ButtonHeight() + UiLayout.Scale(4)));
+        top.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.ButtonHeight() + UiLayout.Scale(2)));
 
         var actions = NewFlow();
         var scanCurrent = UiLayout.CreateButton("扫描当前图", 108);
@@ -174,24 +173,8 @@ public sealed class RectangleBatchPlotForm : Form
             Margin = new Padding(0, UiLayout.Scale(8), UiLayout.Scale(8), 0)
         });
         options.Controls.Add(_savePathModeCombo);
-        options.Controls.Add(new Label
-        {
-            Text = "排序方式:",
-            AutoSize = true,
-            TextAlign = ContentAlignment.MiddleLeft,
-            Margin = new Padding(0, UiLayout.Scale(8), UiLayout.Scale(4), 0)
-        });
-        _sortOrder.DropDownStyle = ComboBoxStyle.DropDownList;
-        _sortOrder.Height = UiLayout.ButtonHeight();
-        _sortOrder.Width = UiLayout.Scale(180);
-        _sortOrder.Margin = new Padding(0, UiLayout.Scale(3), UiLayout.Scale(8), UiLayout.Scale(3));
-        _sortOrder.Items.AddRange(new object[] { "从上到下，从左到右", "从左到右，从上到下" });
-        _sortOrder.SelectedIndex = 0;
-        _sortOrder.SelectedIndexChanged += (_, _) => SortRows();
-        options.Controls.Add(_sortOrder);
 
         _mergePdf.Text = "合并 PDF";
-        // 与图框块批打印共用上一次合并状态；首次使用时 AppSettings 默认值为 false。
         _mergePdf.Checked = _settings.MergePdf;
         _mergePdf.AutoSize = true;
         _mergePdf.Anchor = AnchorStyles.Left | AnchorStyles.Top;
@@ -239,7 +222,6 @@ public sealed class RectangleBatchPlotForm : Form
         _printButton.FlatAppearance.BorderColor = Color.FromArgb(0, 95, 170);
         _printButton.Click += (_, _) => PrintOrStop();
         outputRow.Controls.Add(_printButton, 7, 0);
-        tips.SetToolTip(_sortOrder, "改变列表、红框编号和最终输出文件的顺序。");
         tips.SetToolTip(_mergePdf, "仅 PDF 可用；书签和按纸张大小分组合并可在批量打印设置中配置。");
         tips.SetToolTip(marginPanel, "勾选后按设定距离在纸张短边两侧留白，居中等比例缩小打印。");
 
@@ -337,6 +319,29 @@ public sealed class RectangleBatchPlotForm : Form
         _status.BorderStyle = BorderStyle.FixedSingle;
         Controls.Add(_grid);
         Controls.Add(_status);
+
+        // ── 底部快捷设置栏 ──
+        var quickBar = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Bottom,
+            Height = UiLayout.ButtonHeight() + UiLayout.Scale(8),
+            FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight,
+            WrapContents = false,
+            Padding = new Padding(UiLayout.Scale(8), UiLayout.Scale(3), 0, UiLayout.Scale(3)),
+            BackColor = Color.FromArgb(245, 247, 250)
+        };
+        var sortSettingsBtn = UiLayout.CreateButton("排序设置", 76);
+        sortSettingsBtn.Margin = new Padding(0, 0, UiLayout.Scale(4), 0);
+        sortSettingsBtn.Click += (_, _) => ShowSortSettings();
+        tips.SetToolTip(sortSettingsBtn, "选择矩形框空间排列顺序，并按选定方向重排当前列表。");
+        var generalSettingsBtn = UiLayout.CreateButton("常规设置", 76);
+        generalSettingsBtn.Margin = new Padding(0, 0, 0, 0);
+        generalSettingsBtn.Click += (_, _) => ShowSettingsAtTab(0);
+        tips.SetToolTip(generalSettingsBtn, "配置纸张匹配容差等常规选项。");
+        quickBar.Controls.Add(sortSettingsBtn);
+        quickBar.Controls.Add(generalSettingsBtn);
+        Controls.Add(quickBar);
+
         Controls.Add(top);
 
         static FlowLayoutPanel NewFlow() => new()
@@ -570,7 +575,7 @@ public sealed class RectangleBatchPlotForm : Form
 
         _viewSortedByHeader = false;
         _viewSortColumnIndex = -1;
-        var horizontalFirst = _sortOrder.SelectedIndex == 1;
+        var horizontalFirst = _settings.SortOrderHorizontalFirst;
 
         // 多布局按 TabOrder 分组（Scanner 已按 TabOrder 排序），组内空间排序，组间保持布局顺序
         var layoutOrder = _rows
@@ -1498,7 +1503,7 @@ public sealed class RectangleBatchPlotForm : Form
     private void UpdateVisuals()
     {
         var selected = _rows.Count(row => row.Selected);
-        var order = _sortOrder.SelectedIndex == 1 ? "左→右、上→下" : "上→下、左→右";
+        var order = _settings.SortOrderHorizontalFirst ? "左→右、上→下" : "上→下、左→右";
         _status.Text = $"识别 {_rows.Count} 个矩形框  |  已选 {selected} 个  |  格式：{SelectedOutputFormat}  |  顺序：{order}  |  输出：{_outputDirectory.Text}";
         try
         {
@@ -1727,5 +1732,25 @@ public sealed class RectangleBatchPlotForm : Form
         }
 
         base.Dispose(disposing);
+    }
+
+    private void ShowSortSettings()
+    {
+        using var dialog = new SortOrderDialog(_settings.SortOrderHorizontalFirst);
+        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+        _settings.SortOrderHorizontalFirst = dialog.HorizontalFirst;
+        AppSettingsStore.Save(_settings);
+        SortRows();
+    }
+
+    private void ShowSettingsAtTab(int tabIndex)
+    {
+        SettingsForm.InitialTabIndex = tabIndex;
+        using var form = new SettingsForm(_document);
+        if (form.ShowDialog(this) != DialogResult.OK) return;
+        // 重新加载相关设置
+        var updated = AppSettingsStore.Load();
+        _settings.PaperMatchToleranceMm = updated.PaperMatchToleranceMm;
+        _settings.SortOrderHorizontalFirst = updated.SortOrderHorizontalFirst;
     }
 }
