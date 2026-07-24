@@ -213,8 +213,8 @@ public sealed class SettingsForm : Form
             Dock = DockStyle.Top,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            Padding = new Padding(UiLayout.Scale(6)),
-            Margin = new Padding(0, 0, 0, UiLayout.Scale(8))
+            Padding = new Padding(UiLayout.Scale(4)),
+            Margin = new Padding(0, 0, 0, UiLayout.Scale(4))
         };
         content.Dock = DockStyle.Top;
         content.AutoSize = true;

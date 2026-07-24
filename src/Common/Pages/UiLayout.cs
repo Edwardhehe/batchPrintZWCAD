@@ -90,7 +90,7 @@ public static class UiLayout
     /// <summary>向 TableLayoutPanel 添加标签+控件行。</summary>
     public static void AddRow(TableLayoutPanel table, int row, string labelText, Control control)
     {
-        table.RowStyles.Add(new RowStyle(SizeType.Absolute, Scale(34)));
+        table.RowStyles.Add(new RowStyle(SizeType.Absolute, Scale(26)));
         table.Controls.Add(new Label
         {
             Text = labelText,
