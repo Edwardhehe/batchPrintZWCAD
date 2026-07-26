@@ -12,11 +12,17 @@ using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.EditorInput;
 using Autodesk.AutoCAD.Geometry;
+#if ACAD_CORE
+using CadApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
+#else
+using CadApp = Autodesk.AutoCAD.ApplicationServices.Application;
+#endif
 #else
 using ZwSoft.ZwCAD.ApplicationServices;
 using ZwSoft.ZwCAD.DatabaseServices;
 using ZwSoft.ZwCAD.EditorInput;
 using ZwSoft.ZwCAD.Geometry;
+using CadApp = ZwSoft.ZwCAD.ApplicationServices.Application;
 #endif
 
 namespace ZwcadBatchPlot;
@@ -1236,7 +1242,9 @@ public sealed class RectangleBatchPlotForm : Form
                 var mergeInputs = selected.Select(job => new PdfMergeInput(
                     job.OutputPath,
                     Path.GetFileNameWithoutExtension(originalPaths[job]),
-                    job.PaperName,
+                    OutputPaperNameResolver.Resolve(
+                        job,
+                        _settings.OutputLongPaperSnapToleranceMm),
                     job.PaperWidthMm,
                     job.PaperHeightMm)).ToList();
                 var mergePlans = PdfDocumentService.PlanMerges(
@@ -1745,12 +1753,89 @@ public sealed class RectangleBatchPlotForm : Form
 
     private void ShowSettingsAtTab(int tabIndex)
     {
-        SettingsForm.InitialTabIndex = tabIndex;
-        using var form = new SettingsForm(_document);
-        if (form.ShowDialog(this) != DialogResult.OK) return;
-        // 重新加载相关设置
-        var updated = AppSettingsStore.Load();
-        _settings.PaperMatchToleranceMm = updated.PaperMatchToleranceMm;
-        _settings.SortOrderHorizontalFirst = updated.SortOrderHorizontalFirst;
+        while (true)
+        {
+            SettingsForm.InitialTabIndex = tabIndex;
+            using var form = new SettingsForm();
+            if (form.ShowDialog(this) != DialogResult.OK)
+            {
+                return;
+            }
+
+            // 重新加载相关设置
+            var updated = AppSettingsStore.Load();
+            _settings.PaperMatchToleranceMm = updated.PaperMatchToleranceMm;
+            _settings.OutputLongPaperSnapToleranceMm = updated.OutputLongPaperSnapToleranceMm;
+            _settings.LongPaperNameFormat = updated.LongPaperNameFormat;
+            _settings.SortOrderHorizontalFirst = updated.SortOrderHorizontalFirst;
+
+            if (!form.RequestPickDirectoryRowHeight
+                && !form.RequestPickDirectoryTextAppearance
+                && string.IsNullOrWhiteSpace(form.RequestedDirectoryColumnKey))
+            {
+                return;
+            }
+
+            tabIndex = form.SelectedTabIndex;
+            Hide();
+            System.Windows.Forms.Application.DoEvents();
+            try
+            {
+                var document = GetActiveCadDocument();
+                if (document == null)
+                {
+                    MessageBox.Show(
+                        "当前没有可用的 CAD 图纸，请先打开图纸后重试。",
+                        "批量打印设置",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                    continue;
+                }
+
+                var settings = AppSettingsStore.Load();
+                bool ok;
+                string message;
+                if (form.RequestPickDirectoryTextAppearance)
+                {
+                    ok = DirectoryTableGenerator.PromptTextAppearance(document, settings, out _, out message);
+                }
+                else if (form.RequestPickDirectoryRowHeight)
+                {
+                    ok = DirectoryTableGenerator.PromptRowHeight(document, settings, out _, out message);
+                }
+                else
+                {
+                    ok = DirectoryTableGenerator.PromptColumnSize(
+                        document,
+                        settings,
+                        form.RequestedDirectoryColumnKey ?? "",
+                        out _,
+                        out message);
+                }
+
+                MessageBox.Show(
+                    message,
+                    "批量打印设置",
+                    MessageBoxButtons.OK,
+                    ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+            }
+            finally
+            {
+                Show();
+                Activate();
+            }
+        }
+    }
+
+    private static Document? GetActiveCadDocument()
+    {
+        try
+        {
+            return CadApp.DocumentManager.MdiActiveDocument;
+        }
+        catch
+        {
+            return null;
+        }
     }
 }

@@ -503,7 +503,9 @@ public static class DwgSplitService
             settings.PdfFileNamePattern,
             job,
             sequenceNumber,
-            sequenceDigits);
+            sequenceDigits,
+            settings.LongPaperNameFormat,
+            settings.OutputLongPaperSnapToleranceMm);
         return FileNameSanitizer.MakeUnique(
             directory,
             baseName,

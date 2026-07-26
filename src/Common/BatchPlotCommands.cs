@@ -113,25 +113,53 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
     [CommandMethod("ZBP_SETTINGS", CommandFlags.Session)]
     public void ShowSettings()
     {
-        var doc = CadApp.DocumentManager.MdiActiveDocument;
         while (true)
         {
-            using var form = new SettingsForm(doc);
-            if (ShowModalDialog(form) != DialogResult.OK || doc == null)
+            using var form = new SettingsForm();
+            if (ShowModalDialog(form) != DialogResult.OK)
             {
                 return;
             }
 
-            if (!form.RequestPickDirectoryRowHeight && string.IsNullOrWhiteSpace(form.RequestedDirectoryColumnKey))
+            if (!form.RequestPickDirectoryRowHeight
+                && !form.RequestPickDirectoryTextAppearance
+                && string.IsNullOrWhiteSpace(form.RequestedDirectoryColumnKey))
             {
                 return;
+            }
+
+            // 设置窗关闭后用户可能已切换文档；点选前再次刷新，且不复用设置窗构造时的文档引用。
+            var doc = CadApp.DocumentManager.MdiActiveDocument;
+            if (doc == null)
+            {
+                MessageBox.Show(
+                    "当前没有可用的 CAD 图纸，请先打开图纸后重试。",
+                    "批量打印设置",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                continue;
             }
 
             var settings = AppSettingsStore.Load();
-            var ok = form.RequestPickDirectoryRowHeight
-                ? DirectoryTableGenerator.PromptRowHeight(doc, settings, out _, out var message)
-                : DirectoryTableGenerator.PromptColumnSize(
-                    doc, settings, form.RequestedDirectoryColumnKey ?? "", out _, out message);
+            bool ok;
+            string message;
+            if (form.RequestPickDirectoryTextAppearance)
+            {
+                ok = DirectoryTableGenerator.PromptTextAppearance(doc, settings, out _, out message);
+            }
+            else if (form.RequestPickDirectoryRowHeight)
+            {
+                ok = DirectoryTableGenerator.PromptRowHeight(doc, settings, out _, out message);
+            }
+            else
+            {
+                ok = DirectoryTableGenerator.PromptColumnSize(
+                    doc,
+                    settings,
+                    form.RequestedDirectoryColumnKey ?? "",
+                    out _,
+                    out message);
+            }
             MessageBox.Show(message, "批量打印设置", MessageBoxButtons.OK, ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
             // 每次 CAD 取样后重新打开设置页，支持连续调整目录行高和多个列宽。
         }

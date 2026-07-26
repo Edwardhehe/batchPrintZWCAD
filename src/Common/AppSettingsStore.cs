@@ -44,7 +44,7 @@ public sealed class AppSettings
 {
     public string LastPlotDevice { get; set; } = "";
     public string LastStyleSheet { get; set; } = "";
-    public double PaperMatchToleranceMm { get; set; } = 0.5;
+    public double PaperMatchToleranceMm { get; set; } = 1.0;
     public bool AddSequenceWhenPdfExists { get; set; } = false;
     /// <summary>记录批打印窗口上一次“合并 PDF”的勾选状态；首次使用默认为不勾选。</summary>
     public bool MergePdf { get; set; }
@@ -63,6 +63,11 @@ public sealed class AppSettings
     public bool SortOrderHorizontalFirst { get; set; }
     /// <summary>加长图图名命名格式：分数（配置1）或小数（配置2）等。</summary>
     public LongPaperNameFormat LongPaperNameFormat { get; set; } = LongPaperNameFormat.Fraction;
+    /// <summary>
+    /// 仅用于文件名、图纸目录等输出图幅名：实测加长图长边与最近 1/8 模数的吸附容差（毫米）。
+    /// 不参与实际打印纸张、PMP 尺寸或打印范围的识别。
+    /// </summary>
+    public double OutputLongPaperSnapToleranceMm { get; set; } = 4.0;
     public string PdfFileNameSeparator { get; set; } = "_";
     public List<string> PdfFileNameFields { get; set; } = new() { "DrawingNumber", "Title" };
     /// <summary>
@@ -152,7 +157,12 @@ public static class AppSettingsStore
     {
         if (settings.PaperMatchToleranceMm <= 0)
         {
-            settings.PaperMatchToleranceMm = 0.5;
+            settings.PaperMatchToleranceMm = 1.0;
+        }
+
+        if (settings.OutputLongPaperSnapToleranceMm <= 0)
+        {
+            settings.OutputLongPaperSnapToleranceMm = 4.0;
         }
 
         if (settings.DirectoryIndexWidth <= 0)

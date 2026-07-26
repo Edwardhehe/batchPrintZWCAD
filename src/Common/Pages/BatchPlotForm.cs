@@ -1367,7 +1367,8 @@ public sealed class BatchPlotForm : Form
             job,
             sequenceNumber,
             sequenceDigits,
-            _settings.LongPaperNameFormat);
+            _settings.LongPaperNameFormat,
+            _settings.OutputLongPaperSnapToleranceMm);
         return FileNameSanitizer.MakeUnique(
             GetOutputDirectory(job),
             baseName,
@@ -1559,7 +1560,8 @@ public sealed class BatchPlotForm : Form
         while (true)
         {
             SettingsForm.InitialTabIndex = tabIndex;
-            using var form = new SettingsForm(_currentDocument);
+            // 批打窗口可能在用户切换/新建图纸后仍保持打开；设置页始终绑定当前活动图纸。
+            using var form = new SettingsForm();
             if (form.ShowDialog(this) != DialogResult.OK)
             {
                 return;
@@ -1569,14 +1571,19 @@ public sealed class BatchPlotForm : Form
             SortAndRefreshOutputPaths();
             AppendLog("INFO", "设置已更新。");
 
-            if (!form.RequestPickDirectoryRowHeight && string.IsNullOrWhiteSpace(form.RequestedDirectoryColumnKey))
+            if (!form.RequestPickDirectoryRowHeight
+                && !form.RequestPickDirectoryTextAppearance
+                && string.IsNullOrWhiteSpace(form.RequestedDirectoryColumnKey))
             {
                 tabIndex = form.SelectedTabIndex;
                 return;
             }
 
             tabIndex = form.SelectedTabIndex;
-            PickDirectorySizeFromCad(form.RequestPickDirectoryRowHeight, form.RequestedDirectoryColumnKey);
+            PickDirectorySettingFromCad(
+                form.RequestPickDirectoryRowHeight,
+                form.RequestPickDirectoryTextAppearance,
+                form.RequestedDirectoryColumnKey);
         }
     }
 
@@ -1606,16 +1613,44 @@ public sealed class BatchPlotForm : Form
         AppendLog("INFO", $"已按\"{orderName}\"重排图框顺序。");
     }
 
-    private void PickDirectorySizeFromCad(bool pickRowHeight, string? columnKey)
+    private void PickDirectorySettingFromCad(
+        bool pickRowHeight,
+        bool pickTextAppearance,
+        string? columnKey)
     {
         Hide();
         System.Windows.Forms.Application.DoEvents();
         try
         {
+            var document = GetActiveCadDocument();
+            if (document == null)
+            {
+                const string noDocumentMessage = "当前没有可用的 CAD 图纸，请先打开图纸后重试。";
+                AppendLog("WARN", noDocumentMessage);
+                MessageBox.Show(noDocumentMessage, "批量打印设置", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
             var settings = AppSettingsStore.Load();
-            var ok = pickRowHeight
-                ? DirectoryTableGenerator.PromptRowHeight(_currentDocument, settings, out _, out var message)
-                : DirectoryTableGenerator.PromptColumnSize(_currentDocument, settings, columnKey ?? "", out _, out message);
+            bool ok;
+            string message;
+            if (pickTextAppearance)
+            {
+                ok = DirectoryTableGenerator.PromptTextAppearance(document, settings, out _, out message);
+            }
+            else if (pickRowHeight)
+            {
+                ok = DirectoryTableGenerator.PromptRowHeight(document, settings, out _, out message);
+            }
+            else
+            {
+                ok = DirectoryTableGenerator.PromptColumnSize(
+                    document,
+                    settings,
+                    columnKey ?? "",
+                    out _,
+                    out message);
+            }
             ReloadSettings();
             AppendLog(ok ? "INFO" : "WARN", message);
             MessageBox.Show(message, "批量打印设置", MessageBoxButtons.OK, ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
@@ -1624,6 +1659,18 @@ public sealed class BatchPlotForm : Form
         {
             Show();
             Activate();
+        }
+    }
+
+    private static Document? GetActiveCadDocument()
+    {
+        try
+        {
+            return CadApp.DocumentManager.MdiActiveDocument;
+        }
+        catch
+        {
+            return null;
         }
     }
 
@@ -1660,6 +1707,7 @@ public sealed class BatchPlotForm : Form
         _settings.DirectoryDrawGridLines = updated.DirectoryDrawGridLines;
         _settings.DirectoryColumns = updated.DirectoryColumns.Select(x => x.Clone()).ToList();
         _settings.LongPaperNameFormat = updated.LongPaperNameFormat;
+        _settings.OutputLongPaperSnapToleranceMm = updated.OutputLongPaperSnapToleranceMm;
         _mergePdfCheckBox.Checked = updated.MergePdf;
     }
 
@@ -1999,7 +2047,9 @@ public sealed class BatchPlotForm : Form
                     var mergeInputs = selected.Select(job => new PdfMergeInput(
                         job.OutputPath,
                         Path.GetFileNameWithoutExtension(originalOutputPaths[job]),
-                        job.PaperName,
+                        OutputPaperNameResolver.Resolve(
+                            job,
+                            _settings.OutputLongPaperSnapToleranceMm),
                         job.PaperWidthMm,
                         job.PaperHeightMm)).ToList();
                     var mergePlans = PdfDocumentService.PlanMerges(

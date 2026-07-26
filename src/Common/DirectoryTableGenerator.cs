@@ -90,7 +90,7 @@ public static class DirectoryTableGenerator
                 for (var columnIndex = 0; columnIndex < columns.Count; columnIndex++)
                 {
                     var column = columns[columnIndex];
-                    var value = GetColumnValue(column.Key, jobs[rowIndex], rowIndex);
+                    var value = GetColumnValue(column.Key, jobs[rowIndex], rowIndex, settings);
                     AddCellText(
                         space, tr, document.Database, textStyleId, value,
                         origin, widths, columnIndex, drawingRow, rowHeight, settings,
@@ -176,6 +176,111 @@ public static class DirectoryTableGenerator
         return true;
     }
 
+    /// <summary>
+    /// 在当前活动图纸中点选文字，并把目录绘制所需的五项外观属性写入设置。
+    /// 只保存可跨图纸持久化的值（颜色索引、字高、宽度因子、样式名、图层名），
+    /// 绝不保存实体或文字样式的 ObjectId，避免切换/新建图纸后引用旧数据库对象。
+    /// </summary>
+    public static bool PromptTextAppearance(
+        Document document,
+        AppSettings settings,
+        out AppSettings updated,
+        out string message)
+    {
+        updated = settings;
+        if (document == null)
+        {
+            message = "当前没有可用的 CAD 图纸。";
+            return false;
+        }
+
+        try
+        {
+            var options = new PromptEntityOptions("\n点选一段文字作为图纸目录文字样式: ");
+            options.SetRejectMessage("\n请选择单行文字、多行文字或属性文字。");
+            // AttributeReference/AttributeDefinition 均继承 DBText；false 表示允许其派生类型。
+            options.AddAllowedClass(typeof(DBText), false);
+            options.AddAllowedClass(typeof(MText), false);
+
+            var selection = document.Editor.GetEntity(options);
+            if (selection.Status != PromptStatus.OK)
+            {
+                message = "已取消点选目录文字样式。";
+                return false;
+            }
+
+            using var tr = document.Database.TransactionManager.StartTransaction();
+            if (tr.GetObject(selection.ObjectId, OpenMode.ForRead, false) is not Entity entity)
+            {
+                message = "选择的对象不是有效文字。";
+                return false;
+            }
+
+            double textHeight;
+            double widthFactor;
+            ObjectId textStyleId;
+            if (entity is DBText dbText)
+            {
+                textHeight = dbText.Height;
+                widthFactor = dbText.WidthFactor;
+                textStyleId = dbText.TextStyleId;
+            }
+            else if (entity is MText mText)
+            {
+                textHeight = mText.TextHeight;
+                textStyleId = mText.TextStyleId;
+                widthFactor = 1d;
+                if (!textStyleId.IsNull
+                    && tr.GetObject(textStyleId, OpenMode.ForRead, false) is TextStyleTableRecord mTextStyle
+                    && mTextStyle.XScale > 0)
+                {
+                    // MText 没有独立 WidthFactor，目录使用其文字样式的 XScale 作为对应宽度因子。
+                    widthFactor = mTextStyle.XScale;
+                }
+            }
+            else
+            {
+                message = "请选择单行文字、多行文字或属性文字。";
+                return false;
+            }
+
+            var textStyleName = "";
+            if (!textStyleId.IsNull
+                && tr.GetObject(textStyleId, OpenMode.ForRead, false) is TextStyleTableRecord textStyle)
+            {
+                textStyleName = textStyle.Name ?? "";
+            }
+
+            settings.DirectoryColorIndex = Math.Max(0, Math.Min(256, entity.ColorIndex));
+            if (textHeight > 1e-6)
+            {
+                settings.DirectoryTextHeight = textHeight;
+            }
+            if (widthFactor > 1e-6)
+            {
+                settings.DirectoryTextWidthFactor = widthFactor;
+            }
+            settings.DirectoryTextStyleName = textStyleName;
+            settings.DirectoryLayerName = string.IsNullOrWhiteSpace(entity.Layer) ? "0" : entity.Layer;
+
+            tr.Commit();
+            AppSettingsStore.Save(settings);
+            updated = settings;
+            message =
+                $"已从所选文字读取目录样式：颜色 {settings.DirectoryColorIndex}，" +
+                $"字高 {settings.DirectoryTextHeight:0.##}，宽度因子 {settings.DirectoryTextWidthFactor:0.##}，" +
+                $"文字样式“{(string.IsNullOrWhiteSpace(settings.DirectoryTextStyleName) ? "默认" : settings.DirectoryTextStyleName)}”，" +
+                $"图层“{settings.DirectoryLayerName}”。";
+            return true;
+        }
+        catch (Exception ex)
+        {
+            // 当前图纸可能刚被关闭或切换；只报告失败，不写入半套设置。
+            message = "点选目录文字样式失败，请确认当前活动图纸仍然打开：" + ex.Message;
+            return false;
+        }
+    }
+
     private static List<DirectoryColumnSetting> GetEnabledColumns(AppSettings settings)
     {
         return (settings.DirectoryColumns ?? new List<DirectoryColumnSetting>())
@@ -184,7 +289,7 @@ public static class DirectoryTableGenerator
             .ToList();
     }
 
-    private static string GetColumnValue(string key, PlotJob job, int rowIndex)
+    private static string GetColumnValue(string key, PlotJob job, int rowIndex, AppSettings settings)
     {
         // 这里的字段键与 TitleBlockScanner 写入 PlotJob 的识别结果保持一一对应。
         return key switch
@@ -192,7 +297,9 @@ public static class DirectoryTableGenerator
             "Sequence" => (rowIndex + 1).ToString(),
             "DrawingNumber" => job.DrawingNumber,
             "Title" => job.Title,
-            "PaperName" => job.PaperName,
+            "PaperName" => FileNameSanitizer.NormalizeLongPaperFraction(
+                OutputPaperNameResolver.Resolve(job, settings.OutputLongPaperSnapToleranceMm),
+                settings.LongPaperNameFormat),
             "Date" => job.Date,
             "Revision" => job.Revision,
             "Phase" => job.Phase,

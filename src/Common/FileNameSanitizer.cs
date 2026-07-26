@@ -142,7 +142,8 @@ public static class FileNameSanitizer
         PlotJob job,
         int? sequenceNumber = null,
         int sequenceDigits = 0,
-        LongPaperNameFormat longPaperNameFormat = LongPaperNameFormat.Fraction)
+        LongPaperNameFormat longPaperNameFormat = LongPaperNameFormat.Fraction,
+        double outputLongPaperSnapToleranceMm = 4d)
     {
         var result = new StringBuilder();
         var value = pattern ?? "";
@@ -164,7 +165,9 @@ public static class FileNameSanitizer
                 'E' => job.Info1,
                 'F' => job.Info2,
                 'G' => job.Phase,
-                'T' => NormalizeLongPaperFraction(job.PaperName, longPaperNameFormat),
+                'T' => NormalizeLongPaperFraction(
+                    OutputPaperNameResolver.Resolve(job, outputLongPaperSnapToleranceMm),
+                    longPaperNameFormat),
                 'N' => sequenceNumber.HasValue ? FormatSequenceNumber(sequenceNumber.Value, sequenceDigits) : "",
                 _ => null
             };
@@ -221,7 +224,13 @@ public static class FileNameSanitizer
     /// 空值自动跳过，确保最终文件名不含多余分隔符。
     /// sequenceNumber > 0 时 "Sequence" 键生效，按 sequenceDigits 补零。
     /// </summary>
-    public static List<string> GetFileNameParts(PlotJob job, List<string> fieldKeys, int sequenceNumber = 0, int sequenceDigits = 2, LongPaperNameFormat longPaperNameFormat = LongPaperNameFormat.Fraction)
+    public static List<string> GetFileNameParts(
+        PlotJob job,
+        List<string> fieldKeys,
+        int sequenceNumber = 0,
+        int sequenceDigits = 2,
+        LongPaperNameFormat longPaperNameFormat = LongPaperNameFormat.Fraction,
+        double outputLongPaperSnapToleranceMm = 4d)
     {
         var parts = new List<string>();
         foreach (var key in fieldKeys)
@@ -235,7 +244,9 @@ public static class FileNameSanitizer
                 "Phase" => job.Phase,
                 "Info1" => job.Info1,
                 "Info2" => job.Info2,
-                "PaperName" => NormalizeLongPaperFraction(job.PaperName, longPaperNameFormat),
+                "PaperName" => NormalizeLongPaperFraction(
+                    OutputPaperNameResolver.Resolve(job, outputLongPaperSnapToleranceMm),
+                    longPaperNameFormat),
                 "Sequence" => sequenceNumber > 0 ? sequenceNumber.ToString($"D{Math.Max(1, Math.Min(10, sequenceDigits))}") : "",
                 _ => ""
             };

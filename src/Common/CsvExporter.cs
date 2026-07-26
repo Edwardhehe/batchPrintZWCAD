@@ -6,8 +6,9 @@ namespace ZwcadBatchPlot;
 
 public static class CsvExporter
 {
-    public static void ExportJobs(string path, IEnumerable<PlotJob> jobs)
+    public static void ExportJobs(string path, IEnumerable<PlotJob> jobs, AppSettings? settings = null)
     {
+        settings ??= AppSettingsStore.Load();
         var lines = new List<string>
         {
             "是否打印,图号,图名,信息1,信息2,图幅,比例,实际尺寸,输出纸张,块名,空间,文件,输出PDF,识别说明"
@@ -21,7 +22,9 @@ public static class CsvExporter
                 Csv(job.Title),
                 Csv(job.Info1),
                 Csv(job.Info2),
-                Csv(job.PaperName),
+                Csv(FileNameSanitizer.NormalizeLongPaperFraction(
+                    OutputPaperNameResolver.Resolve(job, settings.OutputLongPaperSnapToleranceMm),
+                    settings.LongPaperNameFormat)),
                 Csv(job.ScaleText),
                 Csv(job.SizeText),
                 Csv(job.PaperSizeText),

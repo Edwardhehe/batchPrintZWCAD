@@ -8,9 +8,15 @@ using System.Windows.Forms;
 #if AUTOCAD
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.DatabaseServices;
+#if ACAD_CORE
+using CadApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
+#else
+using CadApp = Autodesk.AutoCAD.ApplicationServices.Application;
+#endif
 #else
 using ZwSoft.ZwCAD.ApplicationServices;
 using ZwSoft.ZwCAD.DatabaseServices;
+using CadApp = ZwSoft.ZwCAD.ApplicationServices.Application;
 #endif
 
 namespace ZwcadBatchPlot;
@@ -19,9 +25,9 @@ public sealed class SettingsForm : Form
 {
     private const string DefaultTextStyleDisplay = "(默认)";
 
-    private readonly Document? _document;
     private readonly NumericUpDown _paperTolerance = new();
     private readonly ComboBox _longPaperNameFormat = new();
+    private readonly NumericUpDown _outputLongPaperSnapTolerance = new();
     private readonly CheckBox _addSequenceWhenPdfExists = new();
     private readonly CheckBox _openExternalDwgForPlot = new();
     private readonly CheckBox _useFileNameAsPdfBookmark = new();
@@ -48,6 +54,7 @@ public sealed class SettingsForm : Form
 
     public string? RequestedDirectoryColumnKey { get; private set; }
     public bool RequestPickDirectoryRowHeight { get; private set; }
+    public bool RequestPickDirectoryTextAppearance { get; private set; }
 
     /// <summary>
     /// 设置/获取下次打开设置窗口时默认显示的标签页索引（0=常规, 1=文件名, 2=图纸目录）。
@@ -62,9 +69,8 @@ public sealed class SettingsForm : Form
 
     private TabControl _tabs = null!;
 
-    public SettingsForm(Document? document = null)
+    public SettingsForm()
     {
-        _document = document;
         InitializeComponents();
         LoadSettings();
     }
@@ -451,7 +457,24 @@ public sealed class SettingsForm : Form
             "配置6（预留）",
         });
         _longPaperNameFormat.SelectedIndex = 0;
+        _longPaperNameFormat.SelectedIndexChanged += (_, _) => UpdateFileNamePreview();
         longPaperRow.Controls.Add(_longPaperNameFormat);
+        longPaperRow.Controls.Add(new Label
+        {
+            Text = "输出加长图长边吸附容差(mm)：",
+            AutoSize = true,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Margin = new Padding(UiLayout.Scale(16), UiLayout.Scale(4), UiLayout.Scale(6), 0)
+        });
+        ConfigureNumber(_outputLongPaperSnapTolerance, 0.5M, 20M, 0.5M, 1);
+        _outputLongPaperSnapTolerance.Width = UiLayout.Scale(85);
+        _outputLongPaperSnapTolerance.Margin = new Padding(0, UiLayout.Scale(1), 0, 0);
+        _outputLongPaperSnapTolerance.ValueChanged += (_, _) => UpdateFileNamePreview();
+        longPaperRow.Controls.Add(_outputLongPaperSnapTolerance);
+        var outputLongPaperTip = new ToolTip();
+        outputLongPaperTip.SetToolTip(
+            _outputLongPaperSnapTolerance,
+            "仅影响文件名、图纸目录等输出图幅名吸附到最近的 1/8 模数；不改变实际打印纸张尺寸。");
         longPaperGroup.Controls.Add(longPaperRow);
         root.Controls.Add(longPaperGroup, 0, 2);
 
@@ -488,7 +511,9 @@ public sealed class SettingsForm : Form
             _fileNamePattern.Text,
             example,
             startNumber,
-            sequenceDigits);
+            sequenceDigits,
+            (LongPaperNameFormat)Math.Max(0, _longPaperNameFormat.SelectedIndex),
+            (double)_outputLongPaperSnapTolerance.Value);
         if (_autoFileNameSequenceDigits.Checked)
         {
             _fileNamePreview.Text += "（实际位数按图框列表总张数计算）";
@@ -547,7 +572,18 @@ public sealed class SettingsForm : Form
         parameters.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(88)));
         parameters.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(28)));
 
-        parameters.Controls.Add(BuildDirectoryParameter("颜色索引", _directoryColorIndex), 0, 0);
+        var pickTextAppearance = UiLayout.CreateButton("点选目录文字", 108);
+        pickTextAppearance.Margin = new Padding(0, UiLayout.Scale(2), 0, 0);
+        pickTextAppearance.Click += (_, _) => RequestTextAppearanceFromCad();
+        var pickTextTip = new ToolTip();
+        pickTextTip.SetToolTip(
+            pickTextAppearance,
+            "在当前活动图纸中点选文字，自动读取颜色、字高、宽度因子、文字样式和图层。");
+
+        parameters.Controls.Add(
+            BuildDirectoryParameter("颜色索引", _directoryColorIndex, pickTextAppearance),
+            0,
+            0);
         parameters.Controls.Add(BuildDirectoryParameter("文字高度", _directoryTextHeight), 1, 0);
         parameters.Controls.Add(BuildDirectoryParameter("宽度因子", _directoryTextWidthFactor), 2, 0);
         parameters.Controls.Add(BuildDirectoryParameter("文字样式", _directoryTextStyle), 3, 0);
@@ -603,7 +639,7 @@ public sealed class SettingsForm : Form
         return page;
     }
 
-    private static Control BuildDirectoryParameter(string label, Control input)
+    private static Control BuildDirectoryParameter(string label, Control input, Control? trailingControl = null)
     {
         // 输入框统一使用固有高度（约 19px）：NumericUpDown 和普通 ComboBox 的高度由字体锁定，
         // 无法拉伸，因此两个下拉框用 OwnerDrawFixed + ItemHeight 压到同一高度。
@@ -630,6 +666,12 @@ public sealed class SettingsForm : Form
             TextAlign = ContentAlignment.BottomLeft
         }, 0, 0);
         panel.Controls.Add(input, 0, 1);
+        if (trailingControl != null)
+        {
+            trailingControl.Dock = DockStyle.None;
+            trailingControl.Anchor = AnchorStyles.Left;
+            panel.Controls.Add(trailingControl, 0, 2);
+        }
         return panel;
     }
 
@@ -640,7 +682,7 @@ public sealed class SettingsForm : Form
         _directoryRowHeight.Margin = new Padding(0, UiLayout.Scale(2), UiLayout.Scale(4), 0);
         var pickHeight = UiLayout.CreateButton("图中交互", 68);
         pickHeight.Margin = new Padding(0, UiLayout.Scale(2), 0, 0);
-        pickHeight.Enabled = _document != null;
+        pickHeight.Enabled = GetActiveDocument() != null;
         pickHeight.Click += (_, _) => RequestRowHeightFromCad();
 
         var panel = new TableLayoutPanel
@@ -992,6 +1034,9 @@ public sealed class SettingsForm : Form
         SelectTextStyle(settings.DirectoryTextStyleName);
         LoadDirectoryColumns(settings.DirectoryColumns);
         _longPaperNameFormat.SelectedIndex = Math.Max(0, Math.Min(5, (int)settings.LongPaperNameFormat));
+        _outputLongPaperSnapTolerance.Value = UiLayout.Clamp(
+            _outputLongPaperSnapTolerance,
+            settings.OutputLongPaperSnapToleranceMm);
     }
 
     private void SaveSettings()
@@ -1045,6 +1090,7 @@ public sealed class SettingsForm : Form
         current.DirectoryDrawGridLines = _directoryDrawGridLines.Checked;
         current.DirectoryColumns = directoryColumns;
         current.LongPaperNameFormat = (LongPaperNameFormat)Math.Max(0, Math.Min(5, _longPaperNameFormat.SelectedIndex));
+        current.OutputLongPaperSnapToleranceMm = (double)_outputLongPaperSnapTolerance.Value;
         return true;
     }
 
@@ -1276,12 +1322,13 @@ public sealed class SettingsForm : Form
         _directoryTextStyle.Items.Clear();
         _directoryTextStyle.Items.Add(DefaultTextStyleDisplay);
 
-        if (_document != null)
+        var document = GetActiveDocument();
+        if (document != null)
         {
             try
             {
-                using var tr = _document.Database.TransactionManager.StartTransaction();
-                var table = (TextStyleTable)tr.GetObject(_document.Database.TextStyleTableId, OpenMode.ForRead);
+                using var tr = document.Database.TransactionManager.StartTransaction();
+                var table = (TextStyleTable)tr.GetObject(document.Database.TextStyleTableId, OpenMode.ForRead);
                 foreach (ObjectId id in table)
                 {
                     var record = (TextStyleTableRecord)tr.GetObject(id, OpenMode.ForRead);
@@ -1331,7 +1378,7 @@ public sealed class SettingsForm : Form
 
     private void RequestColumnWidthFromCad(int rowIndex)
     {
-        if (_document == null)
+        if (GetActiveDocument() == null)
         {
             MessageBox.Show("当前没有可用的 CAD 文档。", "批量打印设置", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
@@ -1358,7 +1405,7 @@ public sealed class SettingsForm : Form
 
     private void RequestRowHeightFromCad()
     {
-        if (_document == null)
+        if (GetActiveDocument() == null)
         {
             MessageBox.Show("当前没有可用的 CAD 文档。", "批量打印设置", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
@@ -1374,6 +1421,39 @@ public sealed class SettingsForm : Form
         RequestPickDirectoryRowHeight = true;
         DialogResult = DialogResult.OK;
         Close();
+    }
+
+    private void RequestTextAppearanceFromCad()
+    {
+        if (GetActiveDocument() == null)
+        {
+            MessageBox.Show("当前没有可用的 CAD 文档。", "批量打印设置", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        if (!TryReadSettingsFromControls(out var settings))
+        {
+            return;
+        }
+
+        // 和列宽/行高一致：先保存页面编辑并退出模态窗体，再回到 CAD 命令上下文点选实体。
+        AppSettingsStore.Save(settings);
+        RequestPickDirectoryTextAppearance = true;
+        DialogResult = DialogResult.OK;
+        Close();
+    }
+
+    private Document? GetActiveDocument()
+    {
+        try
+        {
+            // 不缓存 ObjectId 或旧文档：每次按钮状态/点选请求都以当前 MDI 活动图纸为准。
+            return CadApp.DocumentManager.MdiActiveDocument;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     protected override void OnFormClosing(FormClosingEventArgs e)
