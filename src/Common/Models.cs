@@ -129,7 +129,12 @@ public sealed class PlotJob
     public bool UseExactWindowScale { get; set; }
     /// <summary>本次命令是否向 PMP 新增了纸张，供 CAD 决定是否强制刷新介质列表。</summary>
     public bool CustomPaperWasAdded { get; set; }
-    /// <summary>图框库扫描得到任意加长尺寸，PDF 批打前必须按实测宽高注册到 PMP。</summary>
+    /// <summary>
+    /// 图框扫描阶段识别出的固有任意纸张标记。该值不随正负留白切换，
+    /// 用于区分“图纸本来就要自定义纸张”和“正留白临时扩大纸张”。
+    /// </summary>
+    public bool DetectedRequiresCustomPaperRegistration { get; set; }
+    /// <summary>本次输出是否必须把纸张按实测宽高注册到当前 PDF/DWF 绘图器 PMP。</summary>
     public bool RequiresCustomPaperRegistration { get; set; }
     /// <summary>打印区域 4 个实际 WCS 角点，格式 [x0,y0,x1,y1,x2,y2,x3,y3]。null 时用 Min/Max。</summary>
     public double[]? CornerPoints { get; set; }

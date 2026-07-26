@@ -216,6 +216,13 @@ public static class AcadPlotterInstaller
             var targetPmpDir = Path.Combine(targetRoot, "PMP Files");
             var sourcePmp = Path.Combine(targetPmpDir, PreferredPmp);
             var targetPmp = Path.Combine(targetPmpDir, PreferredDwfPmp);
+            var targetPc5 = Path.Combine(targetRoot, PreferredDwfPlotter);
+            // DWF 正留白会向 LA_dwf.pmp 注册扩大纸张；重复打开窗口时不能再用 LA_pdf.pmp 覆盖。
+            if (IsUsableFile(targetPc5) && IsUsableFile(targetPmp))
+            {
+                return PreferredDwfPlotter;
+            }
+
             if (!File.Exists(sourcePmp))
             {
                 return "";
@@ -230,7 +237,6 @@ public static class AcadPlotterInstaller
                 .OrderBy(path => string.Equals(Path.GetFileName(path), "DWF6 ePlot.pc5", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
                 .FirstOrDefault(path => Path.GetFileName(path).IndexOf("DWF", StringComparison.OrdinalIgnoreCase) >= 0
                                         && Path.GetFileName(path).IndexOf("DWFx", StringComparison.OrdinalIgnoreCase) < 0);
-            var targetPc5 = Path.Combine(targetRoot, PreferredDwfPlotter);
             if (string.IsNullOrWhiteSpace(sourcePc5))
             {
                 return File.Exists(targetPc5) ? PreferredDwfPlotter : "";

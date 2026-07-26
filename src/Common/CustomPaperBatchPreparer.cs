@@ -20,29 +20,39 @@ public static class CustomPaperBatchPreparer
 
     public static PreparationResult Prepare(IReadOnlyList<PlotJob> jobs, string deviceName)
     {
-        // 每次准备前先清除所有作业上的旧扩大纸张状态，防止切换留白模式后出现陈旧标记。
-        foreach (var job in jobs)
-        {
-            if (!job.LeavePaperMargin || job.PaperMarginMm <= 0)
-            {
-                job.EffectivePaperWidthMm = 0;
-                job.EffectivePaperHeightMm = 0;
-                job.RequiresCustomPaperRegistration = false;
-                job.RequireExactPaperSize = false;
-                job.UseExactWindowScale = false;
-                job.CustomPaperWasAdded = false;
-            }
-        }
+        var isPdfDevice = string.Equals(
+            deviceName,
+            AcadPlotterInstaller.PreferredPdfPlotter,
+            StringComparison.OrdinalIgnoreCase);
+        var isDwfDevice = string.Equals(
+            deviceName,
+            AcadPlotterInstaller.PreferredDwfPlotter,
+            StringComparison.OrdinalIgnoreCase);
 
-        // 扩大纸张留白模式（PaperMarginMm > 0）：预先计算有效纸张尺寸并标记为自定义纸张。
+        // 每次都从“扫描固有纸张”重新推导运行状态，避免正→负留白切换后残留扩大纸张，
+        // 也避免把任意加长图原本需要精确注册的标记误清掉。
         foreach (var job in jobs)
         {
-            if (job.LeavePaperMargin && job.PaperMarginMm > 0 && job.PaperWidthMm > 0 && job.PaperHeightMm > 0)
+            var expandsPaper = job.LeavePaperMargin
+                               && job.PaperMarginMm > 0
+                               && job.PaperWidthMm > 0
+                               && job.PaperHeightMm > 0;
+            if (expandsPaper)
             {
                 job.EffectivePaperWidthMm = job.PaperWidthMm + job.PaperMarginMm * 2;
                 job.EffectivePaperHeightMm = job.PaperHeightMm + job.PaperMarginMm * 2;
-                job.RequiresCustomPaperRegistration = true;
             }
+            else
+            {
+                job.EffectivePaperWidthMm = 0;
+                job.EffectivePaperHeightMm = 0;
+            }
+
+            job.RequiresCustomPaperRegistration =
+                job.DetectedRequiresCustomPaperRegistration || expandsPaper;
+            job.RequireExactPaperSize = false;
+            job.UseExactWindowScale = false;
+            job.CustomPaperWasAdded = false;
         }
 
         var customJobs = jobs
@@ -53,14 +63,14 @@ public static class CustomPaperBatchPreparer
             return new PreparationResult();
         }
 
-        if (!string.Equals(
-                deviceName,
-                AcadPlotterInstaller.PreferredPdfPlotter,
-                StringComparison.OrdinalIgnoreCase))
+        if (!isPdfDevice && !isDwfDevice)
         {
-            // 动态物理纸张只适用于 LA_pdf；切换到其他输出格式时不得沿用之前预览设置的严格介质标记。
+            // PNG/JPG 等设备不支持本软件的动态毫米纸张；不得沿用 PDF/DWF 的严格介质标记。
             foreach (var job in customJobs)
             {
+                job.EffectivePaperWidthMm = 0;
+                job.EffectivePaperHeightMm = 0;
+                job.RequiresCustomPaperRegistration = false;
                 job.RequireExactPaperSize = false;
                 job.UseExactWindowScale = false;
                 job.CustomPaperWasAdded = false;
@@ -70,25 +80,41 @@ public static class CustomPaperBatchPreparer
         }
 
         var plottersDirectory = AcadPlotterInstaller.GetPlottersDirectory();
-        var installedPlotter = Path.Combine(plottersDirectory, AcadPlotterInstaller.PreferredPdfPlotter);
-        var installedPmp = Path.Combine(plottersDirectory, "PMP Files", "LA_pdf.pmp");
+        var preferredPlotter = isDwfDevice
+            ? AcadPlotterInstaller.PreferredDwfPlotter
+            : AcadPlotterInstaller.PreferredPdfPlotter;
+        var pmpFileName = isDwfDevice ? "LA_dwf.pmp" : "LA_pdf.pmp";
+        var outputKind = isDwfDevice ? "DWF" : "PDF";
+        var installedPlotter = Path.Combine(plottersDirectory, preferredPlotter);
+        var installedPmp = Path.Combine(plottersDirectory, "PMP Files", pmpFileName);
         if (!File.Exists(installedPlotter) || !File.Exists(installedPmp))
         {
-            var installResult = AcadPlotterInstaller.InstallBundledPlotter();
-            if (!installResult.Installed)
+            if (isDwfDevice)
             {
-                throw new InvalidOperationException("LA_pdf 打印机配置不完整: " + installResult.Message);
+                var installedDevice = AcadPlotterInstaller.InstallDwfPlotter();
+                if (!string.Equals(installedDevice, preferredPlotter, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException("LA_dwf 打印机配置不完整，无法注册 DWF 正负留白纸张。");
+                }
+            }
+            else
+            {
+                var installResult = AcadPlotterInstaller.InstallBundledPlotter();
+                if (!installResult.Installed)
+                {
+                    throw new InvalidOperationException("LA_pdf 打印机配置不完整: " + installResult.Message);
+                }
             }
 
             plottersDirectory = AcadPlotterInstaller.GetPlottersDirectory();
-            installedPlotter = Path.Combine(plottersDirectory, AcadPlotterInstaller.PreferredPdfPlotter);
-            installedPmp = Path.Combine(plottersDirectory, "PMP Files", "LA_pdf.pmp");
+            installedPlotter = Path.Combine(plottersDirectory, preferredPlotter);
+            installedPmp = Path.Combine(plottersDirectory, "PMP Files", pmpFileName);
         }
 
         if (!File.Exists(installedPlotter) || !File.Exists(installedPmp))
         {
             throw new FileNotFoundException(
-                "LA_pdf.pc3/pc5 或 LA_pdf.pmp 不存在，无法批量注册任意纸张。",
+                $"LA_{outputKind.ToLowerInvariant()} 绘图器或 {pmpFileName} 不存在，无法批量注册正负留白纸张。",
                 installedPmp);
         }
 
@@ -102,12 +128,14 @@ public static class CustomPaperBatchPreparer
             .ToList();
         var registrations = PmpCustomPaper.RegisterCustomPapers(installedPmp, requests)
             ?? throw new InvalidOperationException(
-                "LA_pdf.pmp 批量注册任意纸张失败，已停止打印，避免回退到错误纸张。");
+                $"{pmpFileName} 批量注册 {outputKind} 正负留白纸张失败，已停止打印，避免回退到错误纸张。");
         var anyAdded = registrations.Any(registration => registration.WasAdded);
         var attachmentMessage = "";
 
 #if AUTOCAD
-        if (!AcadPlotterInstaller.EnsurePmpAttachment(
+        // PDF 的跨版本 PC3 需要现有兼容层修正 PMP 关联。DWF PC3 继承其原生驱动，
+        // 不能套用 DWG To PDF 的驱动路径；它只需保持安装时建立的 LA_dwf.pmp 关联。
+        if (isPdfDevice && !AcadPlotterInstaller.EnsurePmpAttachment(
                 installedPlotter,
                 installedPmp,
                 forceRewrite: anyAdded,
@@ -119,7 +147,8 @@ public static class CustomPaperBatchPreparer
 
         foreach (var job in customJobs)
         {
-            // 任意加长图必须按实测纸张精确选纸和缩放，禁止名称匹配或相近纸张回退。
+            // DWF 与 PDF 都必须按注册后的实际纸张精确选纸；正值使用扩大纸张，
+            // 负值使用原纸并在 ConfigurePlotScale 中缩小内容。
             job.RequireExactPaperSize = true;
             job.UseExactWindowScale = true;
             job.CustomPaperWasAdded = false;

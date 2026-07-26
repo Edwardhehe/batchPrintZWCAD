@@ -229,7 +229,9 @@ public sealed class RectangleBatchPlotForm : Form
         _printButton.Click += (_, _) => PrintOrStop();
         outputRow.Controls.Add(_printButton, 7, 0);
         tips.SetToolTip(_mergePdf, "仅 PDF 可用；书签和按纸张大小分组合并可在批量打印设置中配置。");
-        tips.SetToolTip(marginPanel, "勾选后按设定距离在纸张短边两侧留白，居中等比例缩小打印。");
+        tips.SetToolTip(
+            marginPanel,
+            "PDF/DWF 均支持：正数扩大纸张并保持原比例，负数保持原纸张并居中缩小内容。");
 
         top.Controls.Add(actions, 0, 0);
         top.Controls.Add(outputRow, 0, 1);
@@ -1395,12 +1397,13 @@ public sealed class RectangleBatchPlotForm : Form
             // 留白是本次输出选项，预览和正式打印都写入同一个 PlotJob，保证效果一致。
             job.LeavePaperMargin = leaveMargin;
             job.PaperMarginMm = marginMm;
-            // 切换到负值（缩比例）或关闭留白时，清除上次扩大纸张模式留下的有效尺寸和精确纸张标记。
+            // 负留白只缩比例，不能把图框扫描得到的任意纸张注册要求一并清除。
+            job.RequiresCustomPaperRegistration =
+                job.DetectedRequiresCustomPaperRegistration || (leaveMargin && marginMm > 0);
             if (!leaveMargin || marginMm <= 0)
             {
                 job.EffectivePaperWidthMm = 0;
                 job.EffectivePaperHeightMm = 0;
-                job.RequiresCustomPaperRegistration = false;
                 job.RequireExactPaperSize = false;
                 job.UseExactWindowScale = false;
                 job.CustomPaperWasAdded = false;
@@ -1683,6 +1686,7 @@ public sealed class RectangleBatchPlotForm : Form
         job.PaperHeightMm = paper.PaperHeightMm;
         job.PaperSizeText = $"{paper.PaperWidthMm:0.##} x {paper.PaperHeightMm:0.##} mm";
         job.ScaleText = paper.ScaleText;
+        job.DetectedRequiresCustomPaperRegistration = paper.RequiresCustomPaper;
         job.RequiresCustomPaperRegistration = paper.RequiresCustomPaper;
         // 用户从任意纸切回标准/模数纸时，立即清除上一次预览留下的严格动态纸张状态。
         if (!paper.RequiresCustomPaper)

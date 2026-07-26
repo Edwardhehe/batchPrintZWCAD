@@ -314,6 +314,7 @@ public static class TitleBlockScanner
                     DetectionNote = $"{boundaryNote}; {paper.Note}",
                     PaperWidthMm = paper.PaperWidthMm,
                     PaperHeightMm = paper.PaperHeightMm,
+                    DetectedRequiresCustomPaperRegistration = paper.RequiresCustomPaper,
                     RequiresCustomPaperRegistration = paper.RequiresCustomPaper,
                     MinX = extents.MinPoint.X,
                     MinY = extents.MinPoint.Y,

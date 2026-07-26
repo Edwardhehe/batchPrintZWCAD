@@ -293,6 +293,7 @@ public static class RectangleFrameScanner
                     DetectionNote = "矩形框批量打印",
                     PaperWidthMm = paper.PaperWidthMm,
                     PaperHeightMm = paper.PaperHeightMm,
+                    DetectedRequiresCustomPaperRegistration = paper.RequiresCustomPaper,
                     RequiresCustomPaperRegistration = paper.RequiresCustomPaper,
                     MinX = rectangle.MinX,
                     MinY = rectangle.MinY,

@@ -2205,12 +2205,13 @@ public sealed class BatchPlotForm : Form
             // 留白选项是本次打印设置，不改变图框识别数据，只在输出/预览时生效。
             job.LeavePaperMargin = leaveMargin;
             job.PaperMarginMm = marginMm;
-            // 切换到负值（缩比例）或关闭留白时，清除上次扩大纸张模式留下的有效尺寸和精确纸张标记。
+            // 正留白需要临时扩大纸张；负留白/关闭留白仍须保留扫描阶段识别出的任意纸张注册要求。
+            job.RequiresCustomPaperRegistration =
+                job.DetectedRequiresCustomPaperRegistration || (leaveMargin && marginMm > 0);
             if (!leaveMargin || marginMm <= 0)
             {
                 job.EffectivePaperWidthMm = 0;
                 job.EffectivePaperHeightMm = 0;
-                job.RequiresCustomPaperRegistration = false;
                 job.RequireExactPaperSize = false;
                 job.UseExactWindowScale = false;
             }
@@ -2280,117 +2281,25 @@ public sealed class BatchPlotForm : Form
     }
 
     /// <summary>
-    /// 汇总本次图框库批打中的全部任意加长纸张，去重后一次性更新 LA_pdf.pmp。
-    /// 扫描阶段只记录实测物理尺寸；到真正 PDF 输出前才修改用户 PMP，避免仅浏览列表也产生配置变更。
+    /// 汇总本批任意纸张及正留白扩大纸张，并一次性写入当前 PDF/DWF 绘图器的 PMP。
     /// </summary>
     private void PrepareCustomPaperRegistrations(IReadOnlyList<PlotJob> jobs, string deviceName)
     {
-        // 每次准备前先清除所有作业上的旧扩大纸张状态，防止切换留白模式后出现陈旧标记。
-        foreach (var job in jobs)
-        {
-            if (!job.LeavePaperMargin || job.PaperMarginMm <= 0)
-            {
-                job.EffectivePaperWidthMm = 0;
-                job.EffectivePaperHeightMm = 0;
-                job.RequiresCustomPaperRegistration = false;
-                job.RequireExactPaperSize = false;
-                job.UseExactWindowScale = false;
-                job.CustomPaperWasAdded = false;
-            }
-        }
-
-        // 扩大纸张留白模式（PaperMarginMm > 0）：预先计算有效纸张尺寸并标记为自定义纸张。
-        foreach (var job in jobs)
-        {
-            if (job.LeavePaperMargin && job.PaperMarginMm > 0 && job.PaperWidthMm > 0 && job.PaperHeightMm > 0)
-            {
-                job.EffectivePaperWidthMm = job.PaperWidthMm + job.PaperMarginMm * 2;
-                job.EffectivePaperHeightMm = job.PaperHeightMm + job.PaperMarginMm * 2;
-                job.RequiresCustomPaperRegistration = true;
-            }
-        }
-
-        var customJobs = jobs
-            .Where(job => job.RequiresCustomPaperRegistration)
-            .ToList();
-        if (customJobs.Count == 0)
+        var result = CustomPaperBatchPreparer.Prepare(jobs, deviceName);
+        if (result.Registrations.Count == 0)
         {
             return;
         }
 
-        if (!string.Equals(
-                deviceName,
-                AcadPlotterInstaller.PreferredPdfPlotter,
-                StringComparison.OrdinalIgnoreCase))
-        {
-            // 任意物理纸张只适用于 LA_pdf；切换到 PNG/JPG/DWF 后必须清掉之前预览留下的精确 PDF 标记。
-            foreach (var job in customJobs)
-            {
-                job.RequireExactPaperSize = false;
-                job.UseExactWindowScale = false;
-                job.CustomPaperWasAdded = false;
-            }
-            return;
-        }
-
-        var plottersDirectory = AcadPlotterInstaller.GetPlottersDirectory();
-        var installedPlotter = Path.Combine(plottersDirectory, AcadPlotterInstaller.PreferredPdfPlotter);
-        var installedPmp = Path.Combine(plottersDirectory, "PMP Files", "LA_pdf.pmp");
-        if (!File.Exists(installedPlotter) || !File.Exists(installedPmp))
-        {
-            var installResult = AcadPlotterInstaller.InstallBundledPlotter();
-            if (!installResult.Installed)
-                throw new InvalidOperationException("LA_pdf 打印机配置不完整: " + installResult.Message);
-
-            plottersDirectory = AcadPlotterInstaller.GetPlottersDirectory();
-            installedPlotter = Path.Combine(plottersDirectory, AcadPlotterInstaller.PreferredPdfPlotter);
-            installedPmp = Path.Combine(plottersDirectory, "PMP Files", "LA_pdf.pmp");
-        }
-
-        if (!File.Exists(installedPlotter) || !File.Exists(installedPmp))
-            throw new FileNotFoundException("LA_pdf.pc3/pc5 或 LA_pdf.pmp 不存在，无法批量注册任意纸张。", installedPmp);
-
-        var requests = customJobs
-            .Select(job => new PmpCustomPaper.PaperRequest
-            {
-                WidthMm = job.EffectivePaperWidthMm > 0 ? job.EffectivePaperWidthMm : job.PaperWidthMm,
-                HeightMm = job.EffectivePaperHeightMm > 0 ? job.EffectivePaperHeightMm : job.PaperHeightMm
-            })
-            .ToList();
-        var registrations = PmpCustomPaper.RegisterCustomPapers(installedPmp, requests)
-            ?? throw new InvalidOperationException("LA_pdf.pmp 批量注册任意加长纸张失败，已停止打印，避免回退到错误纸张。");
-        var anyAdded = registrations.Any(registration => registration.WasAdded);
-
-#if AUTOCAD
-        if (!AcadPlotterInstaller.EnsurePmpAttachment(
-                installedPlotter,
-                installedPmp,
-                forceRewrite: anyAdded,
-                out var attachmentMessage))
-        {
-            throw new InvalidOperationException("LA_pdf.pc3 关联批量 PMP 失败：" + attachmentMessage);
-        }
-        AppendLog("INFO", "AutoCAD 批量任意纸张关联刷新: " + attachmentMessage);
-#endif
-
-        foreach (var job in customJobs)
-        {
-            // 任意加长图必须按实测纸张精确选纸和缩放；禁止名称匹配或相近纸张回退。
-            job.RequireExactPaperSize = true;
-            job.UseExactWindowScale = true;
-            job.CustomPaperWasAdded = false;
-        }
-
-        if (anyAdded)
-        {
-            // AutoCAD/ZWCAD 的介质目录按模型/布局分别缓存；每类空间只让第一张触发一次重载。
-            foreach (var firstJob in customJobs.GroupBy(job => job.IsPaperSpace).Select(group => group.First()))
-                firstJob.CustomPaperWasAdded = true;
-        }
-
-        var sizes = string.Join(", ", registrations.Select(registration =>
+        var sizes = string.Join(", ", result.Registrations.Select(registration =>
             $"{registration.WidthMm:0.######}x{registration.HeightMm:0.######}mm({(registration.WasAdded ? "新增" : "复用")})"));
-        AppendLog("INFO", $"任意加长纸张已一次性准备，共 {registrations.Count} 种: {sizes}");
+        AppendLog("INFO", $"PDF/DWF 自定义纸张已一次性准备，共 {result.Registrations.Count} 种: {sizes}");
+#if AUTOCAD
+        if (!string.IsNullOrWhiteSpace(result.AttachmentMessage))
+        {
+            AppendLog("INFO", "AutoCAD 自定义纸张关联刷新: " + result.AttachmentMessage);
+        }
+#endif
     }
 
     private void RestoreGridSelection(IReadOnlyList<DataGridViewRow> selectedRows, DataGridViewCell? currentCell)

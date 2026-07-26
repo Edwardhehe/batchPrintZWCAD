@@ -301,6 +301,12 @@ public static class AcadPlotterInstaller
             Directory.CreateDirectory(targetRoot);
             Directory.CreateDirectory(targetPmpDir);
 
+            // LA_dwf.pmp 会在 DWF 正留白时动态写入扩大后的纸张，已有有效配置必须保留。
+            if (IsValidPlotterFile(targetPc3) && IsValidPlotterFile(targetPmp))
+            {
+                return PreferredDwfPlotter;
+            }
+
             var sourcePc3 = Directory.GetFiles(targetRoot, "*.pc3")
                 .Where(path => !string.Equals(Path.GetFileName(path), PreferredDwfPlotter, StringComparison.OrdinalIgnoreCase))
                 .OrderBy(path => string.Equals(Path.GetFileName(path), "DWF6 ePlot.pc3", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
