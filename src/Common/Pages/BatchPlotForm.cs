@@ -79,9 +79,9 @@ public sealed class BatchPlotForm : Form
     private void InitializeComponents()
     {
 #if AUTOCAD
-        Text = "LA图框块批量打印";
+        Text = "LA图框块批量打印 V1.14";
 #else
-        Text = "LA图框块批量打印";
+        Text = "LA图框块批量打印 V1.14";
 #endif
         FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
         ClientSize = new Size(UiLayout.Scale(900), UiLayout.Scale(520));

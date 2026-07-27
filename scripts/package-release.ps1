@@ -1,11 +1,11 @@
 ﻿param(
-    [string]$Version = "1.13"
+    [string]$Version = "1.14"
 )
 
 $ErrorActionPreference = "Stop"
 
 if ($Version -notmatch '^\d+\.\d+(?:\.\d+)?$') {
-    throw "Version must look like 1.13 or 1.13.0."
+    throw "Version must look like 1.14 or 1.14.0."
 }
 
 $root = Split-Path -Parent $PSScriptRoot

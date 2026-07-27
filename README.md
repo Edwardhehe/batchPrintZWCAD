@@ -1,6 +1,6 @@
 # 中望 CAD 批量打印插件
 
-一个面向 ZWCAD 和 AutoCAD 的 .NET 批量打印插件。插件可以学习图框块，识别图名、图号、图幅和比例，支持跨文件批量扫描，并输出 PDF、PNG、JPG、DWF 或按图框拆分 DWG。当前版本：v1.13。
+一个面向 ZWCAD 和 AutoCAD 的 .NET 批量打印插件。插件可以学习图框块，识别图名、图号、图幅和比例，支持跨文件批量扫描，并输出 PDF、PNG、JPG、DWF 或按图框拆分 DWG。当前版本：v1.14。
 
 ## 使用教程
 
@@ -225,10 +225,10 @@ dotnet build BatchPlotter.csproj -c Release
 生成本地发布目录与三组 ZIP：
 
 ```powershell
-.\scripts\package-release.ps1 -Version 1.13
+.\scripts\package-release.ps1 -Version 1.14
 ```
 
-输出位于 `release\v1.13\`，包含 ZWCAD、AutoCAD 2015–2024、AutoCAD 2025–2027 三组完整安装目录和对应压缩包。
+输出位于 `release\v1.14\`，包含 ZWCAD、AutoCAD 2015–2024、AutoCAD 2025–2027 三组完整安装目录和对应压缩包。
 
 ## 说明
 

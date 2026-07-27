@@ -84,7 +84,7 @@ public sealed class RectangleBatchPlotForm : Form
 
     private void InitializeComponents()
     {
-        Text = "LA矩形框批量打印";
+        Text = "LA矩形框批量打印 V1.14";
         FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
         ClientSize = new Size(UiLayout.Scale(900), UiLayout.Scale(520));
         StartPosition = FormStartPosition.CenterScreen;
