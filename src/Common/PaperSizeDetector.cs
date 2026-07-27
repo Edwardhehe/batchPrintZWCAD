@@ -507,9 +507,8 @@ public static class PaperSizeDetector
             return "";
         }
 
-        var divisor = extensionUnits < LongPaperIncrementDenominator
-            ? GreatestCommonDivisor(extensionUnits, LongPaperIncrementDenominator)
-            : 1;
+        // 延伸量即使大于 1 也必须约分，例如 12/8 应显示为 3/2，而不是保留假分数原值。
+        var divisor = GreatestCommonDivisor(extensionUnits, LongPaperIncrementDenominator);
         return $"{extensionUnits / divisor}/{LongPaperIncrementDenominator / divisor}";
     }
 
