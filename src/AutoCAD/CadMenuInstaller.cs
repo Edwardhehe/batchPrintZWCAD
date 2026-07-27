@@ -1,6 +1,5 @@
 using System;
 using System.Reflection;
-using System.Runtime.InteropServices;
 #if ACAD_CORE
 using CadApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
 #else
@@ -14,41 +13,6 @@ public static class CadMenuInstaller
     private const string MenuName = "批量打印";
     private const string LegacyMenuName = "ZW批量打印";
 
-#if ACAD_CORE
-    // Core SDK 的 Core.Application 没有 MenuBar/MenuGroups，
-    // 通过 COM P/Invoke 获取运行中的 AutoCAD Application 对象来访问菜单接口
-
-    [DllImport("ole32.dll")]
-    private static extern int CLSIDFromProgID([MarshalAs(UnmanagedType.LPWStr)] string lpszProgID,
-        out Guid pclsid);
-
-    [DllImport("ole32.dll")]
-    private static extern int GetActiveObject(ref Guid rclsid, IntPtr pvReserved,
-        [MarshalAs(UnmanagedType.IUnknown)] out object ppunk);
-
-    private static object? GetAcadComApplication()
-    {
-        try
-        {
-            int hr = CLSIDFromProgID("AutoCAD.Application", out Guid clsid);
-            if (hr < 0)
-            {
-                return null;
-            }
-            hr = GetActiveObject(ref clsid, IntPtr.Zero, out object app);
-            if (hr < 0)
-            {
-                return null;
-            }
-            return app;
-        }
-        catch
-        {
-            return null;
-        }
-    }
-#endif
-
     public static void Install(bool force = false)
     {
         try
@@ -61,11 +25,14 @@ public static class CadMenuInstaller
             try
             {
 #if ACAD_CORE
-                object? acadComApp = GetAcadComApplication();
-                if (acadComApp != null)
+                // Core SDK 的 Core.Application 没有 MenuBar/MenuGroups，
+                // 通过反射访问 AcMgd 中的完整 Application 类
+                Type? fullAppType = Type.GetType(
+                    "Autodesk.AutoCAD.ApplicationServices.Application, AcMgd");
+                if (fullAppType != null)
                 {
-                    menuBar = GetProperty(acadComApp, "MenuBar");
-                    menuGroups = GetProperty(acadComApp, "MenuGroups");
+                    menuBar = GetStaticProperty(fullAppType, "MenuBar");
+                    menuGroups = GetStaticProperty(fullAppType, "MenuGroups");
                 }
 #else
                 menuBar = CadApp.MenuBar;
@@ -74,7 +41,6 @@ public static class CadMenuInstaller
             }
             catch
             {
-                // 静默失败，下面统一处理 null
             }
 
             if (menuBar == null || menuGroups == null)
@@ -143,6 +109,22 @@ public static class CadMenuInstaller
             WriteMessage("\n批量打印菜单加载失败: " + ex.Message);
         }
     }
+
+#if ACAD_CORE
+    private static object? GetStaticProperty(Type type, string name)
+    {
+        try
+        {
+            PropertyInfo? pi = type.GetProperty(name,
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+            return pi?.GetValue(null);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+#endif
 
     private static void ShowMenuBar()
     {
