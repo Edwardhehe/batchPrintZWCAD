@@ -45,6 +45,11 @@ public sealed class AppSettings
     public string LastPlotDevice { get; set; } = "";
     public string LastStyleSheet { get; set; } = "";
     public double PaperMatchToleranceMm { get; set; } = 1.0;
+    /// <summary>
+    /// 矩形框批打是否识别由 4 个独立直线实体或直线型开放 PL 首尾相连组成的矩形。
+    /// 默认关闭，避免改变既有图纸的扫描结果。
+    /// </summary>
+    public bool RecognizeFourLineRectangleFrames { get; set; }
     public bool AddSequenceWhenPdfExists { get; set; } = false;
     /// <summary>记录批打印窗口上一次“合并 PDF”的勾选状态；首次使用默认为不勾选。</summary>
     public bool MergePdf { get; set; }

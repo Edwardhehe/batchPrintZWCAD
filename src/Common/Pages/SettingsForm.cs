@@ -26,6 +26,7 @@ public sealed class SettingsForm : Form
     private const string DefaultTextStyleDisplay = "(默认)";
 
     private readonly NumericUpDown _paperTolerance = new();
+    private readonly CheckBox _recognizeFourLineRectangleFrames = new();
     private readonly ComboBox _longPaperNameFormat = new();
     private readonly NumericUpDown _outputLongPaperSnapTolerance = new();
     private readonly CheckBox _addSequenceWhenPdfExists = new();
@@ -145,7 +146,7 @@ public sealed class SettingsForm : Form
             Dock = DockStyle.Top,
             AutoSize = true,
             ColumnCount = 1,
-            RowCount = 5,
+            RowCount = 6,
             Margin = Padding.Empty,
             Padding = Padding.Empty
         };
@@ -163,6 +164,16 @@ public sealed class SettingsForm : Form
 
         var paperTable = CreateSettingsTable(1);
         UiLayout.AddRow(paperTable, 0, "纸张匹配容差(mm)", _paperTolerance);
+
+        _recognizeFourLineRectangleFrames.Text = "识别四条直线或直线型 PL 首尾相连组成的矩形框";
+        _recognizeFourLineRectangleFrames.AutoSize = true;
+        _recognizeFourLineRectangleFrames.Dock = DockStyle.Fill;
+        var frameRecognitionTip = new ToolTip();
+        frameRecognitionTip.SetToolTip(
+            _recognizeFourLineRectangleFrames,
+            "仅在四个独立实体的端点严格首尾相连并通过矩形几何校验时识别；后续沿用原有 PL 矩形框打印流程。");
+        var frameRecognitionTable = CreateSettingsTable(1);
+        UiLayout.AddRow(frameRecognitionTable, 0, "", _recognizeFourLineRectangleFrames);
 
         var plotTable = CreateSettingsTable(1);
         UiLayout.AddRow(plotTable, 0, "", _openExternalDwgForPlot);
@@ -203,10 +214,11 @@ public sealed class SettingsForm : Form
         UiLayout.AddRow(completedActionTable, 1, "", _openMergedPdfAfterMerge);
 
         categories.Controls.Add(CreateSettingsGroup("纸张匹配", paperTable), 0, 0);
-        categories.Controls.Add(CreateSettingsGroup("打印行为", plotTable), 0, 1);
-        categories.Controls.Add(CreateSettingsGroup("输出文件", outputTable), 0, 2);
-        categories.Controls.Add(CreateSettingsGroup("PDF 合并", mergeTable), 0, 3);
-        categories.Controls.Add(CreateSettingsGroup("完成后操作", completedActionTable), 0, 4);
+        categories.Controls.Add(CreateSettingsGroup("矩形框识别", frameRecognitionTable), 0, 1);
+        categories.Controls.Add(CreateSettingsGroup("打印行为", plotTable), 0, 2);
+        categories.Controls.Add(CreateSettingsGroup("输出文件", outputTable), 0, 3);
+        categories.Controls.Add(CreateSettingsGroup("PDF 合并", mergeTable), 0, 4);
+        categories.Controls.Add(CreateSettingsGroup("完成后操作", completedActionTable), 0, 5);
         page.Controls.Add(categories);
         return page;
     }
@@ -1008,6 +1020,7 @@ public sealed class SettingsForm : Form
     private void Apply(AppSettings settings)
     {
         _paperTolerance.Value = UiLayout.Clamp(_paperTolerance, settings.PaperMatchToleranceMm);
+        _recognizeFourLineRectangleFrames.Checked = settings.RecognizeFourLineRectangleFrames;
         _addSequenceWhenPdfExists.Checked = settings.AddSequenceWhenPdfExists;
         _useFileNameAsPdfBookmark.Checked = settings.UseFileNameAsPdfBookmark;
         _mergePdfByPaperSize.Checked = settings.MergePdfByPaperSize;
@@ -1060,6 +1073,7 @@ public sealed class SettingsForm : Form
         }
 
         current.PaperMatchToleranceMm = (double)_paperTolerance.Value;
+        current.RecognizeFourLineRectangleFrames = _recognizeFourLineRectangleFrames.Checked;
         current.AddSequenceWhenPdfExists = _addSequenceWhenPdfExists.Checked;
         current.UseFileNameAsPdfBookmark = _useFileNameAsPdfBookmark.Checked;
         current.MergePdfByPaperSize = _mergePdfByPaperSize.Checked;

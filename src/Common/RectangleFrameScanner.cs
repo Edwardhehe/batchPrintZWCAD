@@ -15,7 +15,8 @@ using ZwSoft.ZwCAD.Geometry;
 namespace ZwcadBatchPlot;
 
 /// <summary>
-/// 矩形框扫描器：扫描一个或多个布局中的 Polyline 矩形，
+/// 矩形框扫描器：扫描一个或多个布局中的闭合 Polyline 矩形；
+/// 用户开启对应设置后，也识别由 4 个独立直线或直线型开放 PL 首尾相连组成的矩形，
 /// 筛选出符合标准纸张比例的作为待打印图框。
 ///
 /// 公共入口：
@@ -48,6 +49,108 @@ public static class RectangleFrameScanner
         public Point3d End;
     }
 
+    /// <summary>四叉树中的端点记录；同一线段的两个端点分别插入。</summary>
+    private struct SegmentEndpoint
+    {
+        public Point3d Point;
+        public int SegmentIndex;
+    }
+
+    /// <summary>
+    /// 二维端点四叉树。只负责按小范围查找相邻端点，矩形闭环和几何正确性仍由后续算法验证。
+    /// </summary>
+    private sealed class EndpointQuadtree
+    {
+        private const int NodeCapacity = 16;
+        private const int MaximumDepth = 16;
+
+        private readonly double _minX;
+        private readonly double _minY;
+        private readonly double _maxX;
+        private readonly double _maxY;
+        private readonly int _depth;
+        private readonly List<SegmentEndpoint> _items = new();
+        private EndpointQuadtree[]? _children;
+
+        public EndpointQuadtree(double minX, double minY, double maxX, double maxY, int depth = 0)
+        {
+            _minX = minX;
+            _minY = minY;
+            _maxX = maxX;
+            _maxY = maxY;
+            _depth = depth;
+        }
+
+        public void Insert(SegmentEndpoint item)
+        {
+            if (_children != null)
+            {
+                ChildFor(item.Point).Insert(item);
+                return;
+            }
+
+            _items.Add(item);
+            if (_items.Count <= NodeCapacity || _depth >= MaximumDepth)
+            {
+                return;
+            }
+
+            Subdivide();
+            foreach (var existing in _items)
+            {
+                ChildFor(existing.Point).Insert(existing);
+            }
+            _items.Clear();
+        }
+
+        public void Query(double minX, double minY, double maxX, double maxY, ICollection<SegmentEndpoint> result)
+        {
+            if (maxX < _minX || minX > _maxX || maxY < _minY || minY > _maxY)
+            {
+                return;
+            }
+
+            if (_children != null)
+            {
+                foreach (var child in _children)
+                {
+                    child.Query(minX, minY, maxX, maxY, result);
+                }
+                return;
+            }
+
+            foreach (var item in _items)
+            {
+                if (item.Point.X >= minX && item.Point.X <= maxX
+                    && item.Point.Y >= minY && item.Point.Y <= maxY)
+                {
+                    result.Add(item);
+                }
+            }
+        }
+
+        private void Subdivide()
+        {
+            var midX = (_minX + _maxX) / 2d;
+            var midY = (_minY + _maxY) / 2d;
+            _children = new[]
+            {
+                new EndpointQuadtree(_minX, _minY, midX, midY, _depth + 1),
+                new EndpointQuadtree(midX, _minY, _maxX, midY, _depth + 1),
+                new EndpointQuadtree(_minX, midY, midX, _maxY, _depth + 1),
+                new EndpointQuadtree(midX, midY, _maxX, _maxY, _depth + 1)
+            };
+        }
+
+        private EndpointQuadtree ChildFor(Point3d point)
+        {
+            var midX = (_minX + _maxX) / 2d;
+            var midY = (_minY + _maxY) / 2d;
+            var index = (point.X >= midX ? 1 : 0) + (point.Y >= midY ? 2 : 0);
+            return _children![index];
+        }
+    }
+
     /// <summary>扫描结果：包含一个 PlotJob 和候选纸张列表。</summary>
     public sealed class Result
     {
@@ -67,11 +170,18 @@ public static class RectangleFrameScanner
     /// </summary>
     /// <param name="document">当前 CAD 文档</param>
     /// <param name="scanWindow">扫描窗口（WCS 坐标）</param>
-    public static List<Result> ScanWindow(Document document, Extents3d scanWindow, double? paperMatchToleranceMm = null)
+    public static List<Result> ScanWindow(
+        Document document,
+        Extents3d scanWindow,
+        double? paperMatchToleranceMm = null,
+        bool? recognizeFourLineRectangles = null)
     {
         LayerScannableCache.Clear();
         BlockDefinitionCache.Clear();
-        var effectivePaperToleranceMm = paperMatchToleranceMm ?? AppSettingsStore.Load().PaperMatchToleranceMm;
+        var storedSettings = AppSettingsStore.Load();
+        var effectivePaperToleranceMm = paperMatchToleranceMm ?? storedSettings.PaperMatchToleranceMm;
+        var recognizeFourLines =
+            recognizeFourLineRectangles ?? storedSettings.RecognizeFourLineRectangleFrames;
         var sourceFile = string.IsNullOrWhiteSpace(document.Database.Filename)
             ? document.Name
             : document.Database.Filename;
@@ -103,7 +213,7 @@ public static class RectangleFrameScanner
             return new List<Result>();
         }
 
-        var rectangles = CollectRectanglesFromSpace(tr, owner);
+        var rectangles = CollectRectanglesFromSpace(tr, owner, recognizeFourLines);
         var ownerId = owner.ObjectId;
         var layoutName = layout.LayoutName;
         tr.Commit();
@@ -127,11 +237,18 @@ public static class RectangleFrameScanner
     /// </summary>
     /// <param name="document">当前 CAD 文档</param>
     /// <param name="scope">扫描范围</param>
-    public static List<Result> ScanScope(Document document, TitleBlockScanScope scope, double? paperMatchToleranceMm = null)
+    public static List<Result> ScanScope(
+        Document document,
+        TitleBlockScanScope scope,
+        double? paperMatchToleranceMm = null,
+        bool? recognizeFourLineRectangles = null)
     {
         LayerScannableCache.Clear();
         BlockDefinitionCache.Clear();
-        var effectivePaperToleranceMm = paperMatchToleranceMm ?? AppSettingsStore.Load().PaperMatchToleranceMm;
+        var storedSettings = AppSettingsStore.Load();
+        var effectivePaperToleranceMm = paperMatchToleranceMm ?? storedSettings.PaperMatchToleranceMm;
+        var recognizeFourLines =
+            recognizeFourLineRectangles ?? storedSettings.RecognizeFourLineRectangleFrames;
         var sourceFile = string.IsNullOrWhiteSpace(document.Database.Filename)
             ? document.Name
             : document.Database.Filename;
@@ -156,7 +273,7 @@ public static class RectangleFrameScanner
                     continue;
                 }
 
-                var rectangles = CollectRectanglesFromSpace(tr, owner);
+                var rectangles = CollectRectanglesFromSpace(tr, owner, recognizeFourLines);
                 spaceData.Add((rectangles, owner.ObjectId, layout.LayoutName, !layout.ModelType, layout.TabOrder));
             }
 
@@ -189,10 +306,17 @@ public static class RectangleFrameScanner
     // 内部：单空间收集 & 过滤打包
     // ═══════════════════════════════════════════════════════════════
 
-    /// <summary>遍历单个空间（BlockTableRecord）内所有顶层实体，递归收集矩形 Polyline。</summary>
-    private static List<LocalRectangle> CollectRectanglesFromSpace(Transaction tr, BlockTableRecord owner)
+    /// <summary>
+    /// 遍历单个空间内的闭合 PL 矩形；开关开启时，同时收集顶层独立直线/直线型 PL，
+    /// 经四叉树找出四边闭环后转换为同一个 LocalRectangle 流程。
+    /// </summary>
+    private static List<LocalRectangle> CollectRectanglesFromSpace(
+        Transaction tr,
+        BlockTableRecord owner,
+        bool recognizeFourLineRectangles)
     {
         var rectangles = new List<LocalRectangle>();
+        var segments = recognizeFourLineRectangles ? new List<LineSegment>() : null;
         foreach (ObjectId id in owner)
         {
             if (tr.GetObject(id, OpenMode.ForRead, false) is not Entity entity)
@@ -200,7 +324,20 @@ public static class RectangleFrameScanner
                 continue;
             }
 
-            CollectEntityRectangles(tr, entity, Matrix3d.Identity, rectangles, null, new HashSet<ObjectId>(), 0);
+            CollectEntityRectangles(
+                tr,
+                entity,
+                Matrix3d.Identity,
+                rectangles,
+                segments,
+                new HashSet<ObjectId>(),
+                0,
+                recognizeFourLineRectangles);
+        }
+
+        if (segments != null && segments.Count >= 4)
+        {
+            rectangles.AddRange(FindRectanglesFromSegments(segments));
         }
 
         return rectangles;
@@ -396,14 +533,16 @@ public static class RectangleFrameScanner
     /// <param name="segments">收集到的线段列表（Line 和开放 Polyline）</param>
     /// <param name="visitedDefinitions">已访问的块定义 ID，防循环</param>
     /// <param name="depth">当前递归深度</param>
+    /// <param name="recognizeFourLineRectangles">是否启用四个独立边实体组成矩形的识别</param>
     private static void CollectEntityRectangles(
         Transaction tr,
         Entity entity,
         Matrix3d transform,
         ICollection<LocalRectangle> rectangles,
-        ICollection<LineSegment> segments,
+        ICollection<LineSegment>? segments,
         ISet<ObjectId> visitedDefinitions,
-        int depth)
+        int depth,
+        bool recognizeFourLineRectangles)
     {
         // 跳过标注图层——避免把自己的标注当矩形扫进去
         if (string.Equals(entity.Layer, TemporaryOverlayLayer, StringComparison.OrdinalIgnoreCase))
@@ -412,42 +551,54 @@ public static class RectangleFrameScanner
         }
 
         // ── 分支 0：Line → 收集线段（仅块内部，最多 3 层）──
-        if (segments != null && depth <= 3 && entity is Line line && IsEntityLayerScannable(tr, entity))
+        if (segments != null
+            && depth <= 3
+            && entity is Line line
+            && IsEntityVisible(entity)
+            && IsFrameBoundaryLayerScannable(tr, entity))
         {
-            segments.Add(new LineSegment
+            var segment = new LineSegment
             {
                 Start = line.StartPoint.TransformBy(transform),
                 End = line.EndPoint.TransformBy(transform)
-            });
+            };
+            if (segment.Start.DistanceTo(segment.End) > 1e-6)
+            {
+                segments.Add(segment);
+            }
         }
 
-        // ── 分支 0.5：开放 2 点 Polyline（无圆弧）→ 收集线段（仅块内部，最多 3 层）──
-        if (segments != null && depth <= 3 && entity is Polyline plSegment && !plSegment.Closed
-            && plSegment.NumberOfVertices == 2
-            && IsEntityLayerScannable(tr, entity))
+        // ── 分支 0.5：开放直线型 PL → 每个实体只提取首尾端点作为一条矩形边 ──
+        if (segments != null
+            && depth <= 3
+            && entity is Polyline plSegment
+            && IsEntityVisible(entity)
+            && IsFrameBoundaryLayerScannable(tr, entity)
+            && TryGetStraightOpenPolylineSegment(plSegment, transform, out var polylineSegment))
         {
-            // 确认无圆弧段
-            var hasBulge = false;
-            for (var i = 0; i < plSegment.NumberOfVertices; i++)
-            {
-                if (Math.Abs(plSegment.GetBulgeAt(i)) > 1e-9) { hasBulge = true; break; }
-            }
+            segments.Add(polylineSegment);
+        }
 
-            if (!hasBulge)
-            {
-                segments.Add(new LineSegment
-                {
-                    Start = plSegment.GetPoint3dAt(0).TransformBy(transform),
-                    End = plSegment.GetPoint3dAt(1).TransformBy(transform)
-                });
-            }
+        // 老式开放 POLYLINE 也按一个独立实体处理；仅允许全部顶点共线且无圆弧。
+        if (segments != null
+            && depth <= 3
+            && entity is Polyline2d pl2dSegment
+            && IsEntityVisible(entity)
+            && IsFrameBoundaryLayerScannable(tr, entity)
+            && TryGetStraightOpenPolyline2dSegment(
+                tr,
+                pl2dSegment,
+                transform,
+                out var legacyPolylineSegment))
+        {
+            segments.Add(legacyPolylineSegment);
         }
 
         // ── 分支 1：Polyline（轻量线）→ 矩形检测 ──
         if (entity is Polyline polyline
             // 图框 PL 可能专门放在 Defpoints 或其他”不打印”辅助层；
             // 它只提供打印边界，不代表该层图素会进入打印内容，因此这里只要求图层开启且未冻结。
-            && IsFramePolylineLayerScannable(tr, entity)
+            && IsFrameBoundaryLayerScannable(tr, entity)
             && TryGetRectangle(polyline, transform, out var rectangle))
         {
             // 先全部收集，不去重——不同实例的同一定义各自独立，去重放在后续 FilterRectangles
@@ -458,7 +609,7 @@ public static class RectangleFrameScanner
         // 旧版 CAD 绘制的图框常用老式多段线，LIST 命令输出 “POLYLINE/VERTEX”，
         // .NET API 类型为 Polyline2d，与轻量 Polyline 不同，需单独处理。
         if (entity is Polyline2d polyline2d
-            && IsFramePolylineLayerScannable(tr, entity)
+            && IsFrameBoundaryLayerScannable(tr, entity)
             && TryGetRectangleFrom2d(tr, polyline2d, transform, out var rectangle2d))
         {
             rectangles.Add(rectangle2d);
@@ -467,7 +618,7 @@ public static class RectangleFrameScanner
         // ── 分支 1c：Polyline3d（3DPOLY）→ 矩形检测 ──
         // 三维多段线在 XY 平面上也可构成矩形图框，顶点类型为 Vertex3d。
         if (entity is Polyline3d polyline3d
-            && IsFramePolylineLayerScannable(tr, entity)
+            && IsFrameBoundaryLayerScannable(tr, entity)
             && TryGetRectangleFrom3d(tr, polyline3d, transform, out var rectangle3d))
         {
             rectangles.Add(rectangle3d);
@@ -511,11 +662,11 @@ public static class RectangleFrameScanner
             // 用单位矩阵遍历获取块局部坐标，存入缓存供其他实例复用。
             // 同一块定义内只保留最大的矩形框。
             // 四线段拼合在块内独立处理；深度 ≤ 3 层。
-            // 合并预扫和主循环为单次遍历：边数线段边收集矩形。
+            // 四叉树负责限制邻域搜索成本，因此不再用固定 200 条上限截断复杂块。
             var localRects = new List<LocalRectangle>();
-            var lineCount = 0;
-            var limitSegments = depth >= 3;
-            var blockSegments = limitSegments ? null : new List<LineSegment>();
+            var blockSegments = recognizeFourLineRectangles && depth < 3
+                ? new List<LineSegment>()
+                : null;
             foreach (ObjectId id in definition)
             {
                 if (tr.GetObject(id, OpenMode.ForRead, false) is not Entity nested)
@@ -524,7 +675,7 @@ public static class RectangleFrameScanner
                 }
 
                 // 递归阶段不能按“是否打印”提前截断，否则块内不可打印层上的图框 PL
-                // 永远到不了下面的矩形检测分支。普通 Line 是否可拼框仍由严格规则单独控制。
+                // 永远到不了下面的矩形检测分支。图框边实体只要求图层可见，内容输出仍严格检查可打印性。
                 if (!IsEntityLayerVisibleForScanning(tr, nested))
                 {
                     continue;
@@ -535,18 +686,16 @@ public static class RectangleFrameScanner
                     continue;
                 }
 
-                // 线段计数（与收集合并）：超过 200 条则停止收集线段
-                if (!limitSegments && (nested is Line || (nested is Polyline pl && !pl.Closed && pl.NumberOfVertices == 2)))
-                {
-                    if (++lineCount > 200)
-                    {
-                        limitSegments = true;
-                        blockSegments = null;
-                    }
-                }
-
                 // 用单位矩阵递归 → 子实体结果均在当前块定义局部坐标下
-                CollectEntityRectangles(tr, nested, Matrix3d.Identity, localRects, blockSegments, visitedDefinitions, depth + 1);
+                CollectEntityRectangles(
+                    tr,
+                    nested,
+                    Matrix3d.Identity,
+                    localRects,
+                    blockSegments,
+                    visitedDefinitions,
+                    depth + 1,
+                    recognizeFourLineRectangles);
             }
 
             if (blockSegments != null && blockSegments.Count >= 4)
@@ -581,6 +730,115 @@ public static class RectangleFrameScanner
         }
     }
 
+    /// <summary>
+    /// 将一个开放轻量 PL 作为“一条边”提取。允许中间有冗余共线顶点，
+    /// 但禁止圆弧、折线和沿原路回折，确保四个实体恰好对应矩形四条边。
+    /// </summary>
+    private static bool TryGetStraightOpenPolylineSegment(
+        Polyline polyline,
+        Matrix3d transform,
+        out LineSegment segment)
+    {
+        segment = new LineSegment();
+        if (polyline.Closed || polyline.NumberOfVertices < 2)
+        {
+            return false;
+        }
+
+        var points = new List<Point3d>(polyline.NumberOfVertices);
+        for (var index = 0; index < polyline.NumberOfVertices; index++)
+        {
+            if (index < polyline.NumberOfVertices - 1
+                && Math.Abs(polyline.GetBulgeAt(index)) > 1e-9)
+            {
+                return false;
+            }
+            points.Add(polyline.GetPoint3dAt(index).TransformBy(transform));
+        }
+
+        return TryBuildStraightSegment(points, out segment);
+    }
+
+    /// <summary>老式开放 POLYLINE 的直线边提取，与轻量 PL 使用相同的共线和单调校验。</summary>
+    private static bool TryGetStraightOpenPolyline2dSegment(
+        Transaction tr,
+        Polyline2d polyline,
+        Matrix3d transform,
+        out LineSegment segment)
+    {
+        segment = new LineSegment();
+        if (polyline.Closed)
+        {
+            return false;
+        }
+
+        var vertices = new List<Vertex2d>();
+        foreach (ObjectId vertexId in polyline)
+        {
+            if (tr.GetObject(vertexId, OpenMode.ForRead, false) is Vertex2d vertex)
+            {
+                vertices.Add(vertex);
+            }
+        }
+        if (vertices.Count < 2)
+        {
+            return false;
+        }
+
+        var points = new List<Point3d>(vertices.Count);
+        for (var index = 0; index < vertices.Count; index++)
+        {
+            if (index < vertices.Count - 1 && Math.Abs(vertices[index].Bulge) > 1e-9)
+            {
+                return false;
+            }
+            points.Add(vertices[index].Position.TransformBy(transform));
+        }
+
+        return TryBuildStraightSegment(points, out segment);
+    }
+
+    private static bool TryBuildStraightSegment(IReadOnlyList<Point3d> points, out LineSegment segment)
+    {
+        segment = new LineSegment();
+        var start = points[0];
+        var end = points[points.Count - 1];
+        var dx = end.X - start.X;
+        var dy = end.Y - start.Y;
+        var lengthSquared = dx * dx + dy * dy;
+        if (lengthSquared <= 1e-12)
+        {
+            return false;
+        }
+
+        var length = Math.Sqrt(lengthSquared);
+        var distanceTolerance = Math.Max(1e-6, length * 1e-8);
+        var parameterTolerance = distanceTolerance / length;
+        var previousParameter = -parameterTolerance;
+        foreach (var point in points)
+        {
+            // 点到首尾直线的垂距必须接近 0。
+            var cross = (point.X - start.X) * dy - (point.Y - start.Y) * dx;
+            if (Math.Abs(cross) / length > distanceTolerance)
+            {
+                return false;
+            }
+
+            // 顶点必须沿首点→尾点单调前进，禁止一条 PL 在同一直线上回折或超出首尾端点。
+            var parameter = ((point.X - start.X) * dx + (point.Y - start.Y) * dy) / lengthSquared;
+            if (parameter < -parameterTolerance
+                || parameter > 1d + parameterTolerance
+                || parameter + parameterTolerance < previousParameter)
+            {
+                return false;
+            }
+            previousParameter = parameter;
+        }
+
+        segment = new LineSegment { Start = start, End = end };
+        return true;
+    }
+
     // ═══════════════════════════════════════════════════════════════
     // 四线段拼合矩形检测
     // ═══════════════════════════════════════════════════════════════
@@ -589,9 +847,9 @@ public static class RectangleFrameScanner
     /// 从独立线段集合中找出由 4 条线段首尾连接而成的矩形。
     ///
     /// 算法：
-    ///   1. 端点聚类：将坐标按容差网格分组，构建端点→线段索引的哈希表
+    ///   1. 将全部端点放入四叉树，以角点附近的小范围查询代替全量两两比较
     ///   2. 图遍历：从每条线段出发，沿连接关系走 4 步，找回到起点的闭环
-    ///   3. 几何验证：对角线等长 + 中点重合，复用 TryGetRectangle 的判定逻辑
+    ///   3. 几何验证：直角、对边平行等长、对角线等长且中点重合
     ///   4. 防重复：对 4 条线段索引排序生成去重 key
     /// </summary>
     /// <param name="segments">从 Line 和开放 Polyline 提取的线段列表</param>
@@ -604,61 +862,64 @@ public static class RectangleFrameScanner
             return rectangles;
         }
 
-        // 端点容差（CAD 绘图单位，通常即 mm）
-        const double endpointTolerance = 0.5;
+        // 只容纳浮点计算噪声，不允许用较大容差把实际有缝隙的四条线“吸”成闭环。
+        const double endpointTolerance = 0.000001;
+        const int maximumConnectionsAtCorner = 12;
 
-        // ── 第 1 步：端点聚类，构建哈希表 ──
-        // key: (xGrid, yGrid) 容差网格坐标；value: 以此点为端点的线段索引列表
-        var endpointMap = new Dictionary<(long X, long Y), List<int>>();
+        // ── 第 1 步：把端点写入四叉树 ──
+        var minX = segments.Min(segment => Math.Min(segment.Start.X, segment.End.X));
+        var minY = segments.Min(segment => Math.Min(segment.Start.Y, segment.End.Y));
+        var maxX = segments.Max(segment => Math.Max(segment.Start.X, segment.End.X));
+        var maxY = segments.Max(segment => Math.Max(segment.Start.Y, segment.End.Y));
+        var padding = Math.Max(endpointTolerance, Math.Max(maxX - minX, maxY - minY) * 1e-12);
+        var endpointTree = new EndpointQuadtree(
+            minX - padding,
+            minY - padding,
+            maxX + padding,
+            maxY + padding);
         for (var i = 0; i < segments.Count; i++)
         {
-            AddEndpoint(endpointMap, segments[i].Start, i, endpointTolerance);
-            AddEndpoint(endpointMap, segments[i].End, i, endpointTolerance);
+            endpointTree.Insert(new SegmentEndpoint { Point = segments[i].Start, SegmentIndex = i });
+            endpointTree.Insert(new SegmentEndpoint { Point = segments[i].End, SegmentIndex = i });
         }
 
-        // ── 第 2 步：查找与指定点连接的线段 ──
-        // 查 3×3 邻域网格，避免端点恰好在网格边界两侧时漏掉
-        // 端点匹配用欧几里得距离，比曼哈顿距离更严格
+        // ── 第 2 步：用四叉树查询与指定点首尾相连的线段 ──
         bool IsNear(Point3d a, Point3d b, double tol)
         {
             var dx = a.X - b.X;
             var dy = a.Y - b.Y;
-            return dx * dx + dy * dy <= tol * tol;
+            var dz = a.Z - b.Z;
+            return dx * dx + dy * dy + dz * dz <= tol * tol;
         }
 
-        List<int> FindConnected(int excludeIndex, Point3d point)
+        List<int> FindConnected(ISet<int> excludedIndices, Point3d point)
         {
             var result = new List<int>();
             var seen = new HashSet<int>();
-            var baseKey = GridKey(point, endpointTolerance);
-            for (var dx = -1L; dx <= 1; dx++)
+            var endpoints = new List<SegmentEndpoint>();
+            endpointTree.Query(
+                point.X - endpointTolerance,
+                point.Y - endpointTolerance,
+                point.X + endpointTolerance,
+                point.Y + endpointTolerance,
+                endpoints);
+            foreach (var endpoint in endpoints)
             {
-                for (var dy = -1L; dy <= 1; dy++)
+                var segmentIndex = endpoint.SegmentIndex;
+                if (excludedIndices.Contains(segmentIndex) || !seen.Add(segmentIndex))
                 {
-                    (long X, long Y) key = (baseKey.Item1 + dx, baseKey.Item2 + dy);
-                    if (!endpointMap.TryGetValue(key, out var list))
-                    {
-                        continue;
-                    }
+                    continue;
+                }
 
-                    foreach (var i in list)
+                var segment = segments[segmentIndex];
+                if (IsNear(segment.Start, point, endpointTolerance)
+                    || IsNear(segment.End, point, endpointTolerance))
+                {
+                    result.Add(segmentIndex);
+                    // 密集汇聚点容易造成组合爆炸，也不符合常规图框角点特征。
+                    if (result.Count > maximumConnectionsAtCorner)
                     {
-                        if (i == excludeIndex || !seen.Add(i))
-                        {
-                            continue;
-                        }
-
-                        var s = segments[i];
-                        if (IsNear(s.Start, point, endpointTolerance)
-                            || IsNear(s.End, point, endpointTolerance))
-                        {
-                            result.Add(i);
-                            // 矩形角点正常只连 1~2 条线；超过上限说明是密集汇聚点，剪枝防组合爆炸
-                            if (result.Count >= 8)
-                            {
-                                return result;
-                            }
-                        }
+                        return result;
                     }
                 }
             }
@@ -684,39 +945,52 @@ public static class RectangleFrameScanner
             return new Point3d(double.MaxValue, double.MaxValue, 0);
         }
 
-        // ── 第 3 步：遍历找矩形 ──
+        // ── 第 3 步：沿端点连接关系只走 4 条边，并要求第 4 条边回到第 1 条边起点 ──
         var foundKeys = new HashSet<string>();
 
-        for (var i1 = 0; i1 < segments.Count; i1++)
+        void ExploreCycle(int i1, Point3d pointA, Point3d pointB)
         {
-            var s1 = segments[i1];
-            var A = s1.Start;
-            var B = s1.End;
-
-            var connectedB = FindConnected(i1, B);
-            // 端点 B 汇聚太多线段（≥8），不可能是矩形角点，整条跳
-            if (connectedB.Count >= 8)
+            var connectedAtB = FindConnected(new HashSet<int> { i1 }, pointB);
+            if (connectedAtB.Count > maximumConnectionsAtCorner)
             {
-                continue;
+                return;
             }
 
-            foreach (var i2 in connectedB)
+            foreach (var i2 in connectedAtB)
             {
-                var C = OtherEnd(i2, B);
-
-                foreach (var i3 in FindConnected(i1, C).Where(j => j != i2))
+                var pointC = OtherEnd(i2, pointB);
+                var usedAfterSecond = new HashSet<int> { i1, i2 };
+                var connectedAtC = FindConnected(usedAfterSecond, pointC);
+                if (connectedAtC.Count > maximumConnectionsAtCorner)
                 {
-                    var D = OtherEnd(i3, C);
+                    continue;
+                }
 
-                    foreach (var i4 in FindConnected(i1, D).Where(j => j != i2 && j != i3))
+                foreach (var i3 in connectedAtC)
+                {
+                    var pointD = OtherEnd(i3, pointC);
+                    var usedAfterThird = new HashSet<int> { i1, i2, i3 };
+                    var connectedAtD = FindConnected(usedAfterThird, pointD);
+                    if (connectedAtD.Count > maximumConnectionsAtCorner)
                     {
-                        var backToA = OtherEnd(i4, D);
-                        if (!IsNear(backToA, A, endpointTolerance))
+                        continue;
+                    }
+
+                    foreach (var i4 in connectedAtD)
+                    {
+                        var backToA = OtherEnd(i4, pointD);
+                        if (!IsNear(backToA, pointA, endpointTolerance))
                         {
                             continue;
                         }
 
-                        // 防重复：4 条线段索引排序生成唯一 key
+                        var corners = new[] { pointA, pointB, pointC, pointD };
+                        if (!TryBuildRectangleFromCorners(corners, out var rectangle))
+                        {
+                            continue;
+                        }
+
+                        // 防重复：同四个独立实体无论从哪条边、哪个方向出发，只生成一个矩形。
                         var ids = new[] { i1, i2, i3, i4 };
                         Array.Sort(ids);
                         var key = string.Join(",", ids);
@@ -725,39 +999,21 @@ public static class RectangleFrameScanner
                             continue;
                         }
 
-                        // ── 第 4 步：矩形几何验证 ──
-                        var corners = new[] { A, B, C, D };
-                        if (TryBuildRectangleFromCorners(corners, out var rectangle))
-                        {
-                            rectangles.Add(rectangle);
-                        }
+                        rectangles.Add(rectangle);
                     }
                 }
             }
         }
 
-        return rectangles;
-    }
-
-    /// <summary>将端点按容差网格分组，添加到映射表。</summary>
-    private static void AddEndpoint(Dictionary<(long, long), List<int>> map, Point3d point, int segmentIndex, double tolerance)
-    {
-        var key = GridKey(point, tolerance);
-        if (!map.TryGetValue(key, out var list))
+        for (var i1 = 0; i1 < segments.Count; i1++)
         {
-            list = new List<int>();
-            map[key] = list;
+            var first = segments[i1];
+            // 实体绘制方向任意，必须从两个方向各走一次才能保证不漏掉闭环。
+            ExploreCycle(i1, first.Start, first.End);
+            ExploreCycle(i1, first.End, first.Start);
         }
 
-        list.Add(segmentIndex);
-    }
-
-    /// <summary>生成容差网格坐标 key：(Round(x/tol), Round(y/tol))。</summary>
-    private static (long, long) GridKey(Point3d point, double tolerance)
-    {
-        return (
-            (long)Math.Round(point.X / tolerance),
-            (long)Math.Round(point.Y / tolerance));
+        return rectangles;
     }
 
     /// <summary>
@@ -781,6 +1037,10 @@ public static class RectangleFrameScanner
         }
 
         var tolerance = Math.Max(boxWidth, boxHeight) * 0.001;
+        if (corners.Max(point => point.Z) - corners.Min(point => point.Z) > tolerance)
+        {
+            return false;
+        }
 
         // 4 个角点必须互不相同
         for (var i = 0; i < 4; i++)
@@ -792,6 +1052,48 @@ public static class RectangleFrameScanner
                     return false;
                 }
             }
+        }
+
+        var edgeX = new double[4];
+        var edgeY = new double[4];
+        var edgeLength = new double[4];
+        for (var index = 0; index < 4; index++)
+        {
+            var next = (index + 1) % 4;
+            edgeX[index] = corners[next].X - corners[index].X;
+            edgeY[index] = corners[next].Y - corners[index].Y;
+            edgeLength[index] = Math.Sqrt(
+                edgeX[index] * edgeX[index] + edgeY[index] * edgeY[index]);
+            if (edgeLength[index] <= tolerance)
+            {
+                return false;
+            }
+        }
+
+        const double directionTolerance = 0.001;
+        for (var index = 0; index < 4; index++)
+        {
+            var next = (index + 1) % 4;
+            var normalizedDot = Math.Abs(
+                edgeX[index] * edgeX[next] + edgeY[index] * edgeY[next])
+                / (edgeLength[index] * edgeLength[next]);
+            if (normalizedDot > directionTolerance)
+            {
+                return false;
+            }
+        }
+
+        // 两组对边必须分别平行、等长；可排除自交蝴蝶形和近似梯形。
+        var parallel02 = Math.Abs(edgeX[0] * edgeY[2] - edgeY[0] * edgeX[2])
+                         / (edgeLength[0] * edgeLength[2]);
+        var parallel13 = Math.Abs(edgeX[1] * edgeY[3] - edgeY[1] * edgeX[3])
+                         / (edgeLength[1] * edgeLength[3]);
+        if (parallel02 > directionTolerance
+            || parallel13 > directionTolerance
+            || Math.Abs(edgeLength[0] - edgeLength[2]) > Math.Max(tolerance, edgeLength[0] * 0.001)
+            || Math.Abs(edgeLength[1] - edgeLength[3]) > Math.Max(tolerance, edgeLength[1] * 0.001))
+        {
+            return false;
         }
 
         // corners[0-3] = A, B, C, D（按遍历顺序绕周长排列）
@@ -889,17 +1191,17 @@ public static class RectangleFrameScanner
     }
 
     /// <summary>
-    /// 图框 PL 的图层过滤规则：图层必须开启且未冻结，但允许设置为“不打印”。
-    /// 不打印属性只决定图素是否输出，不应阻止该 PL 作为矩形框批打的边界。
+    /// 图框边界的图层过滤规则：图层必须开启且未冻结，但允许设置为“不打印”。
+    /// 不打印属性只决定图素是否输出，不应阻止闭合 PL 或四个独立边实体作为打印边界。
     /// </summary>
-    private static bool IsFramePolylineLayerScannable(Transaction tr, Entity entity)
+    private static bool IsFrameBoundaryLayerScannable(Transaction tr, Entity entity)
     {
         return IsEntityLayerVisibleForScanning(tr, entity);
     }
 
     /// <summary>
     /// 判断图层在当前图形中是否可见，仅检查关闭/冻结状态，不检查 IsPlottable。
-    /// 此规则只用于查找图框 PL 和递归进入块定义；内容过滤仍调用严格的
+    /// 此规则只用于查找图框边界和递归进入块定义；内容过滤仍调用严格的
     /// <see cref="IsEntityLayerScannable"/>，不会把不打印层误当成有效图纸内容。
     /// </summary>
     private static bool IsEntityLayerVisibleForScanning(Transaction tr, Entity entity)

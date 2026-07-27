@@ -345,7 +345,7 @@ public sealed class RectangleBatchPlotForm : Form
         var generalSettingsBtn = UiLayout.CreateButton("常规设置", 76);
         generalSettingsBtn.Margin = new Padding(0, 0, 0, 0);
         generalSettingsBtn.Click += (_, _) => ShowSettingsAtTab(0);
-        tips.SetToolTip(generalSettingsBtn, "配置纸张匹配容差等常规选项。");
+        tips.SetToolTip(generalSettingsBtn, "配置纸张匹配容差、四条线矩形框识别等常规选项。");
         quickBar.Controls.Add(sortSettingsBtn);
         quickBar.Controls.Add(generalSettingsBtn);
         Controls.Add(quickBar);
@@ -411,14 +411,16 @@ public sealed class RectangleBatchPlotForm : Form
                 results = RectangleFrameScanner.ScanScope(
                     _document,
                     _lastScanScope.Value,
-                    _settings.PaperMatchToleranceMm);
+                    _settings.PaperMatchToleranceMm,
+                    _settings.RecognizeFourLineRectangleFrames);
             }
             else if (_scanWindow.HasValue)
             {
                 results = RectangleFrameScanner.ScanWindow(
                     _document,
                     _scanWindow.Value,
-                    _settings.PaperMatchToleranceMm);
+                    _settings.PaperMatchToleranceMm,
+                    _settings.RecognizeFourLineRectangleFrames);
             }
             else
             {
@@ -427,6 +429,8 @@ public sealed class RectangleBatchPlotForm : Form
 
             if (results.Count == 0)
             {
+                // 设置关闭四线矩形识别后，旧列表中仅由四线组成的图框不能继续残留。
+                LoadRows(results);
                 MessageBox.Show("重新识别后没有找到矩形框。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
@@ -455,7 +459,8 @@ public sealed class RectangleBatchPlotForm : Form
             var results = RectangleFrameScanner.ScanScope(
                 _document,
                 scope.Value,
-                _settings.PaperMatchToleranceMm);
+                _settings.PaperMatchToleranceMm,
+                _settings.RecognizeFourLineRectangleFrames);
             if (results.Count == 0)
             {
                 MessageBox.Show("扫描范围内没有识别到符合常见纸张比例的矩形框。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -511,7 +516,8 @@ public sealed class RectangleBatchPlotForm : Form
             var results = RectangleFrameScanner.ScanWindow(
                 _document,
                 window,
-                _settings.PaperMatchToleranceMm);
+                _settings.PaperMatchToleranceMm,
+                _settings.RecognizeFourLineRectangleFrames);
             if (results.Count == 0)
             {
                 MessageBox.Show("框选范围内没有识别到符合常见纸张比例的矩形框。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -1768,7 +1774,12 @@ public sealed class RectangleBatchPlotForm : Form
 
             // 重新加载相关设置
             var updated = AppSettingsStore.Load();
+            var recognitionSettingsChanged =
+                Math.Abs(_settings.PaperMatchToleranceMm - updated.PaperMatchToleranceMm) > 1e-9
+                || _settings.RecognizeFourLineRectangleFrames
+                != updated.RecognizeFourLineRectangleFrames;
             _settings.PaperMatchToleranceMm = updated.PaperMatchToleranceMm;
+            _settings.RecognizeFourLineRectangleFrames = updated.RecognizeFourLineRectangleFrames;
             _settings.OutputLongPaperSnapToleranceMm = updated.OutputLongPaperSnapToleranceMm;
             _settings.LongPaperNameFormat = updated.LongPaperNameFormat;
             _settings.SortOrderHorizontalFirst = updated.SortOrderHorizontalFirst;
@@ -1777,6 +1788,11 @@ public sealed class RectangleBatchPlotForm : Form
                 && !form.RequestPickDirectoryTextAppearance
                 && string.IsNullOrWhiteSpace(form.RequestedDirectoryColumnKey))
             {
+                if (recognitionSettingsChanged)
+                {
+                    // 开关或纸张容差变化后立即沿用上次扫描范围重扫，避免列表仍显示旧识别结果。
+                    ReloadFrames();
+                }
                 return;
             }
 
