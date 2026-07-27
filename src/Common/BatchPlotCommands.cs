@@ -122,7 +122,11 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
     public void OpenConfigDirectory()
     {
         Directory.CreateDirectory(TitleBlockLibraryStore.DefaultDirectory);
-        System.Diagnostics.Process.Start(TitleBlockLibraryStore.DefaultDirectory);
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = TitleBlockLibraryStore.DefaultDirectory,
+            UseShellExecute = true
+        });
     }
 
     [CommandMethod("_ZBP_INTERNAL_OPEN_CONFIG")]

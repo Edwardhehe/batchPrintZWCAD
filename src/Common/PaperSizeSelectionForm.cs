@@ -51,7 +51,7 @@ public sealed class PaperSizeSelectionForm : Form
 
         _paperName.Dock = DockStyle.Fill;
         _paperName.DropDownStyle = ComboBoxStyle.DropDown;
-        _paperName.Items.AddRange(new object[] { "A0", "A1", "A2", "A3", "A0+", "A1+", "A2+", "A3+", "自定义" });
+        _paperName.Items.AddRange(new object[] { "A0", "A1", "A2", "A3", "A4", "A0+", "A1+", "A2+", "A3+", "自定义" });
         _paperName.SelectedIndexChanged += (_, _) => ApplyPreset(_paperName.Text);
 
         ConfigureNumber(_width);

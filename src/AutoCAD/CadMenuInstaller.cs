@@ -19,22 +19,40 @@ public static class CadMenuInstaller
         {
             ShowMenuBar();
 
+            object? menuBar = null;
+            object? menuGroups = null;
+
+            try
+            {
 #if ACAD_CORE
-            WriteMessage("\n批量打印插件已加载。AutoCAD 2025+ Core 版请使用 ZBP_SHOW_PANEL 命令打开主界面。");
-            return;
+                // Core SDK 的 Core.Application 没有 MenuBar/MenuGroups，
+                // 通过反射访问 AcMgd 中的完整 Application 类
+                Type? fullAppType = Type.GetType(
+                    "Autodesk.AutoCAD.ApplicationServices.Application, AcMgd");
+                if (fullAppType != null)
+                {
+                    menuBar = GetStaticProperty(fullAppType, "MenuBar");
+                    menuGroups = GetStaticProperty(fullAppType, "MenuGroups");
+                }
 #else
-            var menuBar = CadApp.MenuBar;
-            var menuGroups = CadApp.MenuGroups;
+                menuBar = CadApp.MenuBar;
+                menuGroups = CadApp.MenuGroups;
+#endif
+            }
+            catch
+            {
+            }
+
             if (menuBar == null || menuGroups == null)
             {
-                WriteMessage("\n批量打印插件已加载，但当前 CAD 未暴露菜单栏接口。");
+                WriteMessage("\n批量打印插件已加载。当前 CAD 未暴露菜单栏接口，请使用 ZBP_SHOW_PANEL 命令打开主界面。");
                 return;
             }
 
             var menuGroup = InvokeItem(menuGroups, 0);
             if (menuGroup == null)
             {
-                WriteMessage("\n批量打印插件已加载，但未取得默认菜单组。");
+                WriteMessage("\n批量打印插件已加载。未取得默认菜单组，请使用 ZBP_SHOW_PANEL 命令打开主界面。");
                 return;
             }
 
@@ -57,14 +75,14 @@ public static class CadMenuInstaller
             var menus = GetProperty(menuGroup, "Menus");
             if (menus == null)
             {
-                WriteMessage("\n批量打印插件已加载，但未取得菜单集合。");
+                WriteMessage("\n批量打印插件已加载。未取得菜单集合，请使用 ZBP_SHOW_PANEL 命令打开主界面。");
                 return;
             }
 
             var menu = TryInvoke(menus, "Add", MenuName);
             if (menu == null)
             {
-                WriteMessage("\n批量打印插件已加载，但菜单创建失败。");
+                WriteMessage("\n批量打印插件已加载。菜单创建失败，请使用 ZBP_SHOW_PANEL 命令打开主界面。");
                 return;
             }
 
@@ -85,13 +103,28 @@ public static class CadMenuInstaller
             TryInvoke(menu, "InsertInMenuBar", menuCount);
 
             WriteMessage("\n批量打印菜单已加载。");
-#endif
         }
         catch (Exception ex)
         {
             WriteMessage("\n批量打印菜单加载失败: " + ex.Message);
         }
     }
+
+#if ACAD_CORE
+    private static object? GetStaticProperty(Type type, string name)
+    {
+        try
+        {
+            PropertyInfo? pi = type.GetProperty(name,
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+            return pi?.GetValue(null);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+#endif
 
     private static void ShowMenuBar()
     {
@@ -171,7 +204,7 @@ public static class CadMenuInstaller
         return TryInvoke(collection, "Item", index);
     }
 
-    private static object? GetProperty(object target, string name)
+    internal static object? GetProperty(object target, string name)
     {
         try
         {
@@ -183,7 +216,7 @@ public static class CadMenuInstaller
         }
     }
 
-    private static object? TryInvoke(object target, string name, params object[] args)
+    internal static object? TryInvoke(object target, string name, params object[] args)
     {
         try
         {
@@ -195,7 +228,7 @@ public static class CadMenuInstaller
         }
     }
 
-    private static void TrySetProperty(object target, string name, object value)
+    internal static void TrySetProperty(object target, string name, object value)
     {
         try
         {

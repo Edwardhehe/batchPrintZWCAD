@@ -651,7 +651,10 @@ public sealed class RectangleBatchPlotForm : Form
                 _style.Items.Add(value);
             }
         }
-        SelectOption(_device, AcadPlotterInstaller.PreferredPdfPlotter, _settings.LastPlotDevice, "PDF");
+        var devicePrefs = string.IsNullOrWhiteSpace(_settings.DefaultPlotDevice)
+            ? new[] { AcadPlotterInstaller.PreferredPdfPlotter, _settings.LastPlotDevice, "PDF" }
+            : new[] { _settings.DefaultPlotDevice, AcadPlotterInstaller.PreferredPdfPlotter, _settings.LastPlotDevice, "PDF" };
+        SelectOption(_device, devicePrefs);
         SelectOption(_style, _settings.LastStyleSheet, "monochrome");
     }
 
