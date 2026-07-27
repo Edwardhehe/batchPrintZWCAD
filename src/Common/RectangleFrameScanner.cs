@@ -1593,7 +1593,7 @@ public static class RectangleFrameScanner
     /// 算法：
     ///   1. 按面积降序排列（先处理大的）
     ///   2. 去重：两个矩形边界相同 或 高度重叠（>90%），只保留第一个
-    ///   3. 去嵌套：小矩形完全被大矩形包含且面积差 >1.5 倍，移除小的
+    ///   3. 去嵌套：小矩形完全被大矩形包含时移除小的，避免同一区域重复打印
     /// </summary>
     private static List<LocalRectangle> FilterRectangles(IEnumerable<LocalRectangle> source)
     {
@@ -1614,12 +1614,13 @@ public static class RectangleFrameScanner
             unique.Add(rectangle);
         }
 
-        // 去嵌套：如果一个矩形容纳另一个且面积明显更大，移除小的
+        // 去嵌套：任何候选打印框只要被另一个候选框完整包含，就舍弃内部框。
+        // 外框已经覆盖该打印区域，不能再让内框生成第二个打印任务。
         return unique
             .Where(candidate => !unique.Any(container =>
                 !ReferenceEquals(container, candidate)
-                && Area(container) >= Area(candidate) * 1.5  // 容积面积 > 候选 × 1.5
-                && Contains(container, candidate)))           // 完全包含
+                && Area(container) > Area(candidate)
+                && Contains(container, candidate)))
             .ToList();
     }
 
@@ -1696,7 +1697,7 @@ public static class RectangleFrameScanner
 
     /// <summary>
     /// 将缓存的局部坐标矩形通过变换矩阵转到世界坐标。
-    /// 根据四角点重新计算包围盒，保持 ActualWidth/ActualHeight 不变。
+    /// 根据变换后的四角点重新计算包围盒和实际边长，块缩放必须反映到纸张比例识别。
     /// </summary>
     private static LocalRectangle TransformCachedRect(LocalRectangle localRect, Matrix3d xform)
     {
@@ -1722,8 +1723,12 @@ public static class RectangleFrameScanner
         var maxY = Math.Max(Math.Max(p0.Y, p1.Y), Math.Max(p2.Y, p3.Y));
 
         var result = LocalRectangle.FromPoints(minX, minY, maxX, maxY);
-        result.ActualWidth = localRect.ActualWidth;
-        result.ActualHeight = localRect.ActualHeight;
+        // ActualWidth/ActualHeight 必须使用世界坐标边长，不能沿用块定义内尺寸。
+        // 例如块内 A3 图框为 52500×37125、参照缩放 0.8 后应按 42000×29700 识别为 1:100。
+        var side01 = p0.DistanceTo(p1);
+        var side12 = p1.DistanceTo(p2);
+        result.ActualWidth = Math.Max(side01, side12);
+        result.ActualHeight = Math.Min(side01, side12);
         result.CornerPoints = new[] { p0.X, p0.Y, p1.X, p1.Y, p2.X, p2.Y, p3.X, p3.Y };
         return result;
     }

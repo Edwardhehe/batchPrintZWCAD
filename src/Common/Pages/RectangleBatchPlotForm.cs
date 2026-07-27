@@ -287,7 +287,13 @@ public sealed class RectangleBatchPlotForm : Form
         {
             column.SortMode = DataGridViewColumnSortMode.Programmatic;
         }
-        _grid.DataBindingComplete += (_, _) => ConfigurePaperCells();
+        _grid.DataBindingComplete += (_, _) =>
+        {
+            if (!_updating)
+            {
+                ConfigurePaperCells();
+            }
+        };
         _grid.ColumnHeaderMouseClick += GridColumnHeaderMouseClick;
         _grid.CellValueChanged += GridCellValueChanged;
         _grid.CurrentCellDirtyStateChanged += (_, _) =>
@@ -379,11 +385,11 @@ public sealed class RectangleBatchPlotForm : Form
 
     private void LoadRows(IReadOnlyList<RectangleFrameScanner.Result> results)
     {
-        _rows.Clear();
+        var rows = new List<Row>(results.Count);
         foreach (var result in results)
         {
             var option = result.PaperOptions[0];
-            _rows.Add(new Row
+            rows.Add(new Row
             {
                 Job = result.Job,
                 Options = result.PaperOptions,
@@ -391,11 +397,7 @@ public sealed class RectangleBatchPlotForm : Form
             });
         }
 
-        _displayRows.Clear();
-        foreach (var row in _rows)
-        {
-            _displayRows.Add(row);
-        }
+        ReplaceBindingListContents(_rows, rows);
         _viewSortedByHeader = false;
         _viewSortColumnIndex = -1;
         SortRows();
@@ -597,23 +599,18 @@ public sealed class RectangleBatchPlotForm : Form
             .Distinct()
             .ToList();
         var allRows = _rows.ToList();
-        _updating = true;
-        _rows.Clear();
+        var sortedRows = new List<Row>(allRows.Count);
         foreach (var spaceName in layoutOrder)
         {
             var group = allRows
                 .Where(r => string.Equals(r.Job.SpaceName, spaceName, StringComparison.Ordinal))
                 .ToList();
-            var sorted = SortSpatially(group, horizontalFirst);
-            foreach (var row in sorted)
-            {
-                _rows.Add(row);
-            }
+            sortedRows.AddRange(SortSpatially(group, horizontalFirst));
         }
-        _updating = false;
+
+        ReplaceBindingListContents(_rows, sortedRows);
         RefreshDisplayRows();
         RefreshFileNames();
-        ConfigurePaperCells();
         UpdateVisuals();
     }
 
@@ -634,13 +631,44 @@ public sealed class RectangleBatchPlotForm : Form
 
     private void RefreshDisplayRows()
     {
-        _displayRows.Clear();
-        foreach (var row in _rows)
+        var wasUpdating = _updating;
+        _updating = true;
+        _grid.SuspendLayout();
+        try
         {
-            _displayRows.Add(row);
+            ReplaceBindingListContents(_displayRows, _rows);
         }
+        finally
+        {
+            _grid.ResumeLayout();
+            _updating = wasUpdating;
+        }
+
         ConfigurePaperCells();
         _grid.Refresh();
+    }
+
+    /// <summary>
+    /// 一次性替换绑定列表内容，只在结束时发送一次 Reset。
+    /// 大图纸有数百个矩形框时，逐行 Add 会让 DataGridView 每次都触发 DataBindingComplete，
+    /// 并重复配置此前所有纸张下拉单元格，形成明显的 O(n²) 界面卡顿。
+    /// </summary>
+    private static void ReplaceBindingListContents<T>(BindingList<T> target, IEnumerable<T> values)
+    {
+        target.RaiseListChangedEvents = false;
+        try
+        {
+            target.Clear();
+            foreach (var value in values)
+            {
+                target.Add(value);
+            }
+        }
+        finally
+        {
+            target.RaiseListChangedEvents = true;
+            target.ResetBindings();
+        }
     }
 
     private void GridColumnHeaderMouseClick(object? sender, DataGridViewCellMouseEventArgs e)
