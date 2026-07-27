@@ -166,7 +166,16 @@ public sealed partial class BatchPlotCommands
                 ? doc.Name
                 : doc.Database.Filename;
 
-            using var form = new SinglePlotForm(sourceFile, width, height, candidates);
+            var settings = AppSettingsStore.Load();
+            var styles = PlotStyleManager.GetAvailableCtbStyles();
+            var (deviceName, defaultStyleSheet) = ResolveSinglePlotOptions(settings, styles);
+            using var form = new SinglePlotForm(
+                sourceFile,
+                width,
+                height,
+                candidates,
+                styles,
+                defaultStyleSheet);
             if (ShowModalDialog(form) != DialogResult.OK)
             {
                 return;
@@ -174,9 +183,7 @@ public sealed partial class BatchPlotCommands
 
             var paper = form.SelectedPaper;
             var outputPath = form.OutputPath;
-
-            var settings = AppSettingsStore.Load();
-            var (deviceName, styleSheet) = ResolveSinglePlotOptions(settings);
+            var styleSheet = form.SelectedStyle;
             var layoutName = LayoutManager.Current.CurrentLayout;
             var isPaperSpace = !doc.Database.TileMode;
             var baseName = Path.GetFileNameWithoutExtension(sourceFile);
@@ -250,7 +257,9 @@ public sealed partial class BatchPlotCommands
     /// 选择单张打印使用的 PDF 打印机和打印样式表。
     /// 优先使用捆绑的 LA_pdf 打印机和 monochrome.ctb 样式。
     /// </summary>
-    private static (string DeviceName, string StyleSheet) ResolveSinglePlotOptions(AppSettings settings)
+    private static (string DeviceName, string StyleSheet) ResolveSinglePlotOptions(
+        AppSettings settings,
+        IReadOnlyList<string> styles)
     {
         using var plotSettings = new PlotSettings(true);
         var validator = PlotSettingsValidator.Current;
@@ -264,11 +273,6 @@ public sealed partial class BatchPlotCommands
             ?? devices.FirstOrDefault(value => value.IndexOf("PDF", StringComparison.OrdinalIgnoreCase) >= 0)
             ?? throw new InvalidOperationException("没有找到可用的 PDF 打印机。");
 
-        var styles = validator.GetPlotStyleSheetList()
-            .Cast<object>()
-            .Select(value => value?.ToString() ?? "")
-            .Where(value => value.EndsWith(".ctb", StringComparison.OrdinalIgnoreCase))
-            .ToList();
         var style = FindPlotOption(styles, settings.LastStyleSheet)
             ?? styles.FirstOrDefault(value => value.IndexOf("monochrome", StringComparison.OrdinalIgnoreCase) >= 0)
             ?? "";
@@ -277,7 +281,7 @@ public sealed partial class BatchPlotCommands
 
     private static void SaveLastPlotOptions(AppSettings settings, string deviceName, string styleSheet)
     {
-        // 单张打印没有独立样式下拉框，仍然把实际使用的设备/CTB 写回统一设置，供其它模块下次默认选中。
+        // 单张打印选中的 CTB 与其它打印入口共用一份设置，下次打开任意打印窗口都会默认沿用。
         settings.LastPlotDevice = deviceName;
         settings.LastStyleSheet = styleSheet;
         AppSettingsStore.Save(settings);

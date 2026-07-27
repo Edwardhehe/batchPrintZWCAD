@@ -14,6 +14,8 @@ public sealed class SinglePlotForm : Form
     private readonly TextBox _outputPath = new();
     private readonly Label _areaLabel = new();
     private readonly Label _scaleLabel = new();
+    private readonly ComboBox _styleCombo = new();
+    private Button _styleSettingsButton = null!;
     private readonly CheckBox _leaveMargin = new();
     private readonly ComboBox _marginInput = new();
 
@@ -28,6 +30,7 @@ public sealed class SinglePlotForm : Form
     }
 
     public string OutputPath => _outputPath.Text;
+    public string SelectedStyle => _styleCombo.SelectedItem?.ToString() ?? "";
     public bool LeavePaperMargin => _leaveMargin.Checked;
     public double PaperMarginMm => BatchPlotForm.ReadMarginValue(_marginInput);
 
@@ -38,21 +41,28 @@ public sealed class SinglePlotForm : Form
         string sourceFile,
         double width,
         double height,
-        IReadOnlyList<PaperDetection> candidates)
+        IReadOnlyList<PaperDetection> candidates,
+        IReadOnlyList<string> styles,
+        string selectedStyle)
     {
         _candidates = candidates.Count > 0
             ? candidates
             : throw new ArgumentException("至少需要一个纸张候选项。", nameof(candidates));
 
-        InitializeComponents(sourceFile, width, height);
+        InitializeComponents(sourceFile, width, height, styles, selectedStyle);
     }
 
-    private void InitializeComponents(string sourceFile, double width, double height)
+    private void InitializeComponents(
+        string sourceFile,
+        double width,
+        double height,
+        IReadOnlyList<string> styles,
+        string selectedStyle)
     {
         Text = "单张打印";
-        UiLayout.ConfigureForm(this, 660, 330, 620, 300);
+        UiLayout.ConfigureForm(this, 660, 370, 620, 340);
         // 单张打印压缩为必要信息和操作区域，避免字段之间出现大块空白。
-        ClientSize = new Size(UiLayout.Scale(660), UiLayout.Scale(300));
+        ClientSize = new Size(UiLayout.Scale(660), UiLayout.Scale(340));
         FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
         ShowInTaskbar = false;
 
@@ -60,15 +70,16 @@ public sealed class SinglePlotForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 7,
+            RowCount = 8,
             Padding = new Padding(UiLayout.Scale(12))
         };
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(32))); // 区域
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(32))); // 比例
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(40))); // 纸张
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(40))); // 输出
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(40))); // 打印样式
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(32))); // 留白
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));              // 间距
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));                 // 间距
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(40))); // 按钮
 
         // 第一行：打印区域
@@ -162,6 +173,43 @@ public sealed class SinglePlotForm : Form
         outputRow.Controls.Add(browseButton, 2, 0);
         root.Controls.Add(outputRow, 0, 3);
 
+        // 第五行：打印样式。选择值会由调用方写回共享设置，并实际传给预览/打印引擎。
+        var styleRow = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 3,
+            RowCount = 1
+        };
+        // 单张打印也使用显式单行高度，避免 CAD 宿主把居中文字布局到不可见的默认行高中央。
+        styleRow.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        styleRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(96)));
+        styleRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        styleRow.ColumnStyles.Add(new ColumnStyle(
+            SizeType.Absolute,
+            UiLayout.ButtonWidth("设置", 56) + UiLayout.Scale(8)));
+        styleRow.Controls.Add(new Label
+        {
+            Text = "打印样式:",
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleLeft
+        }, 0, 0);
+        _styleCombo.Dock = DockStyle.Fill;
+        _styleCombo.DropDownStyle = ComboBoxStyle.DropDownList;
+        _styleCombo.Margin = new Padding(0, UiLayout.Scale(5), UiLayout.Scale(8), UiLayout.Scale(5));
+        _styleCombo.Items.AddRange(styles.Cast<object>().ToArray());
+        SelectExactOrContaining(_styleCombo, selectedStyle, "monochrome");
+        _styleSettingsButton = UiLayout.CreateButton("设置", 56);
+        _styleSettingsButton.Dock = DockStyle.Fill;
+        _styleSettingsButton.Margin = new Padding(0, UiLayout.Scale(4), 0, UiLayout.Scale(4));
+        _styleSettingsButton.Enabled = _styleCombo.SelectedIndex >= 0;
+        _styleSettingsButton.Click += (_, _) =>
+            PlotStyleManager.EditSelectedStyle(this, _styleCombo.SelectedItem?.ToString());
+        _styleCombo.SelectedIndexChanged += (_, _) =>
+            _styleSettingsButton.Enabled = _styleCombo.SelectedIndex >= 0;
+        styleRow.Controls.Add(_styleCombo, 1, 0);
+        styleRow.Controls.Add(_styleSettingsButton, 2, 0);
+        root.Controls.Add(styleRow, 0, 4);
+
         _leaveMargin.Text = "周边留白，短边两侧各";
         _leaveMargin.AutoSize = true;
         _leaveMargin.Checked = false;
@@ -174,11 +222,11 @@ public sealed class SinglePlotForm : Form
         marginRow.Controls.Add(_marginInput);
         marginRow.Controls.Add(new Label { Text = "mm", AutoSize = true, Margin = new Padding(3, UiLayout.Scale(7), 0, 0) });
         // 单张打印的预览和正式输出都读取这个值，保证留白效果一致。
-        root.Controls.Add(marginRow, 0, 4);
+        root.Controls.Add(marginRow, 0, 5);
 
-        // 第六行弹性空白（上面已有 RowStyles 定义）
+        // 第七行弹性空白（上面已有 RowStyles 定义）
 
-        // 第七行：操作按钮（预览 / 打印 / 取消）
+        // 第八行：操作按钮（预览 / 打印 / 取消）
         var buttons = new FlowLayoutPanel
         {
             Dock = DockStyle.Bottom,
@@ -201,11 +249,33 @@ public sealed class SinglePlotForm : Form
         buttons.Controls.Add(printButton);
         buttons.Controls.Add(previewButton);
         buttons.Controls.Add(cancel);
-        root.Controls.Add(buttons, 0, 6);
+        root.Controls.Add(buttons, 0, 7);
 
         AcceptButton = printButton;
         CancelButton = cancel;
         Controls.Add(root);
+    }
+
+    private static void SelectExactOrContaining(ComboBox combo, params string[] preferred)
+    {
+        foreach (var expected in preferred.Where(value => !string.IsNullOrWhiteSpace(value)))
+        {
+            for (var i = 0; i < combo.Items.Count; i++)
+            {
+                var value = combo.Items[i]?.ToString() ?? "";
+                if (string.Equals(value, expected, StringComparison.OrdinalIgnoreCase)
+                    || value.IndexOf(expected, StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    combo.SelectedIndex = i;
+                    return;
+                }
+            }
+        }
+
+        if (combo.Items.Count > 0)
+        {
+            combo.SelectedIndex = 0;
+        }
     }
 
     private static string BuildDefaultPath(string sourceFile)

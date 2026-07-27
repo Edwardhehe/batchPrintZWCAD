@@ -51,6 +51,7 @@ public sealed class RectangleBatchPlotForm : Form
     private readonly ComboBox _outputFormatCombo = new();
     private readonly ComboBox _savePathModeCombo = new();
     private readonly ComboBox _style = new();
+    private Button _styleSettingsButton = null!;
     private readonly CheckBox _mergePdf = new();
     private readonly CheckBox _leaveMargin = new();
     private readonly ComboBox _marginInput = new();
@@ -134,13 +135,16 @@ public sealed class RectangleBatchPlotForm : Form
             Margin = Padding.Empty,
             Padding = Padding.Empty
         };
+        // CAD 宿主中未声明 RowStyle 的单行面板可能保留默认高度，导致 Fill 控件文字落到裁剪区外。
+        // 显式限定为当前可见行高，保证输出标签、“设置”和“开始打印”始终完整显示。
+        outputRow.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
         outputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(52)));
         outputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         outputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.ButtonWidth("浏览...", 84) + UiLayout.Scale(8)));
         outputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(72)));
         outputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(98)));
         outputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(42)));
-        outputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(100)));
+        outputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(172)));
         outputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.ButtonWidth("开始打印", 98)));
         outputRow.Controls.Add(LabelFor("输出"), 0, 0);
         _outputDirectory.Dock = DockStyle.Fill;
@@ -191,12 +195,22 @@ public sealed class RectangleBatchPlotForm : Form
         _leaveMargin.Checked = _settings.LeavePaperMargin;
         _leaveMargin.AutoSize = true;
         _leaveMargin.Anchor = AnchorStyles.Left | AnchorStyles.Top;
-        _leaveMargin.Margin = new Padding(UiLayout.Scale(4), UiLayout.Scale(7), 0, 0);
+        _leaveMargin.Margin = new Padding(UiLayout.Scale(4), UiLayout.Scale(7), UiLayout.Scale(4), 0);
         BatchPlotForm.InitMarginCombo(_marginInput, UiLayout.Scale(58), _settings.PaperMarginMm);
         _marginInput.Enabled = _leaveMargin.Checked;
+        // 与同一行的保存路径下拉框使用相同上边距，保证高 DPI 下两个输入框顶边对齐。
+        _marginInput.Margin = new Padding(0, UiLayout.Scale(3), 0, 0);
         _leaveMargin.CheckedChanged += (_, _) => _marginInput.Enabled = _leaveMargin.Checked;
         _leaveMargin.Text = "留白";
-        var marginPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = Padding.Empty };
+        var marginPanel = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight,
+            WrapContents = false,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty
+        };
         marginPanel.Controls.Add(_leaveMargin);
         marginPanel.Controls.Add(_marginInput);
         marginPanel.Controls.Add(new Label { Text = "mm", AutoSize = true, Margin = new Padding(2, UiLayout.Scale(7), 0, 0) });
@@ -215,10 +229,36 @@ public sealed class RectangleBatchPlotForm : Form
         _style.DropDownStyle = ComboBoxStyle.DropDownList;
         _style.Height = UiLayout.ButtonHeight();
         _style.Dock = DockStyle.Fill;
-        _style.Margin = new Padding(0, UiLayout.Scale(3), UiLayout.Scale(8), 0);
+        _style.Margin = new Padding(0, UiLayout.Scale(3), UiLayout.Scale(4), 0);
         // 用户手动切换 CTB 后立即写入设置，图框块/矩形框/单张打印都会读取同一份上次选择。
-        _style.SelectionChangeCommitted += (_, _) => SaveCurrentPlotOptions();
-        outputRow.Controls.Add(_style, 6, 0);
+        _style.SelectionChangeCommitted += (_, _) =>
+        {
+            SaveCurrentPlotOptions();
+            _styleSettingsButton.Enabled = _style.SelectedIndex >= 0 && !IsDwgOutput;
+        };
+        _styleSettingsButton = UiLayout.CreateButton("设置", 56);
+        // 保留统一按钮高度并只横向拉伸，避免紧凑行在不同 DPI 下把文字区域压扁。
+        _styleSettingsButton.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+        _styleSettingsButton.Margin = new Padding(0, UiLayout.Scale(2), 0, 0);
+        _styleSettingsButton.Click += (_, _) =>
+            PlotStyleManager.EditSelectedStyle(this, _style.SelectedItem?.ToString());
+        tips.SetToolTip(_styleSettingsButton, "打开当前选中的 CTB 打印样式进行设置。");
+        var stylePanel = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 1,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty
+        };
+        stylePanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        stylePanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        stylePanel.ColumnStyles.Add(new ColumnStyle(
+            SizeType.Absolute,
+            UiLayout.ButtonWidth("设置", 56)));
+        stylePanel.Controls.Add(_style, 0, 0);
+        stylePanel.Controls.Add(_styleSettingsButton, 1, 0);
+        outputRow.Controls.Add(stylePanel, 6, 0);
 
         _printButton = UiLayout.CreateButton("开始打印", 98);
         _printButton.Margin = new Padding(0, UiLayout.Scale(2), 0, 0);
@@ -1483,12 +1523,9 @@ public sealed class RectangleBatchPlotForm : Form
             "DWF6 ePlot.pc5",
             "ZWPLOT_DWF.pc5",
             "M_DWF.pc5");
-        foreach (var item in validator.GetPlotStyleSheetList())
+        foreach (var style in PlotStyleManager.GetAvailableCtbStyles())
         {
-            if (item is string value && value.EndsWith(".ctb", StringComparison.OrdinalIgnoreCase))
-            {
-                _style.Items.Add(value);
-            }
+            _style.Items.Add(style);
         }
         SelectOption(_style, _settings.LastStyleSheet, "monochrome");
         UpdateOutputFormatUi();
@@ -1660,6 +1697,7 @@ public sealed class RectangleBatchPlotForm : Form
 
         var plotOutput = !IsDwgOutput;
         _style.Enabled = plotOutput;
+        _styleSettingsButton.Enabled = plotOutput && _style.SelectedIndex >= 0;
         _leaveMargin.Enabled = plotOutput;
         _marginInput.Enabled = plotOutput && _leaveMargin.Checked;
         _mergePdf.Enabled = IsPdfOutput;

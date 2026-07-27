@@ -36,6 +36,7 @@ public sealed class BatchPlotForm : Form
     private readonly ComboBox _outputFormatCombo = new();
     private readonly ComboBox _savePathModeCombo = new();
     private readonly ComboBox _styleCombo = new();
+    private Button _styleSettingsButton = null!;
     private readonly CheckBox _mergePdfCheckBox = new();
     private readonly CheckBox _leaveMarginCheckBox = new();
     private readonly ComboBox _marginInput = new();
@@ -125,6 +126,9 @@ public sealed class BatchPlotForm : Form
             Margin = Padding.Empty,
             Padding = new Padding(0, UiLayout.Scale(2), 0, 0)
         };
+        // 必须显式约束单行高度。部分 CAD 宿主会让未声明 RowStyle 的行保留默认高度，
+        // 垂直居中的标签和 Fill 按钮文字因此落到父容器裁剪区外，只剩输入框或按钮底色可见。
+        settingsRow.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
         var pathRow = new FlowLayoutPanel
         {
             Dock = DockStyle.Fill,
@@ -139,7 +143,7 @@ public sealed class BatchPlotForm : Form
         settingsRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(74)));
         settingsRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(116)));
         settingsRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(36)));
-        settingsRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(130)));
+        settingsRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(194)));
         settingsRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.ButtonWidth("开始打印", 86) + UiLayout.Scale(8)));
 
         Button MakeButton(string text, int width)
@@ -182,8 +186,9 @@ public sealed class BatchPlotForm : Form
         _printButton.Text = "开始打印";
         _printButton.Width = UiLayout.ButtonWidth(_printButton.Text, 104);
         _printButton.Height = UiLayout.ButtonHeight();
-        _printButton.Dock = DockStyle.Fill;
-        _printButton.Margin = new Padding(UiLayout.Scale(8), UiLayout.Scale(2), 0, UiLayout.Scale(6));
+        // 保留统一按钮高度，只做横向拉伸；Fill 配合上下边距会在紧凑行中压扁文字区域。
+        _printButton.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+        _printButton.Margin = new Padding(UiLayout.Scale(8), UiLayout.Scale(2), 0, 0);
         _printButton.BackColor = Color.FromArgb(0, 120, 215);
         _printButton.ForeColor = Color.White;
         _printButton.FlatStyle = FlatStyle.Flat;
@@ -217,10 +222,36 @@ public sealed class BatchPlotForm : Form
         _savePathModeCombo.SelectionChangeCommitted += (_, _) => ApplySelectedSavePathMode();
 
         _styleCombo.Dock = DockStyle.Fill;
-        _styleCombo.Margin = new Padding(0, UiLayout.Scale(3), 0, UiLayout.Scale(8));
+        _styleCombo.Margin = new Padding(0, UiLayout.Scale(3), UiLayout.Scale(4), UiLayout.Scale(8));
         _styleCombo.DropDownStyle = ComboBoxStyle.DropDownList;
         // 用户手动切换 CTB 后立即保存，保证其它打印入口下次默认沿用上一次选择。
-        _styleCombo.SelectionChangeCommitted += (_, _) => SaveCurrentSettings();
+        _styleCombo.SelectionChangeCommitted += (_, _) =>
+        {
+            SaveCurrentSettings();
+            _styleSettingsButton.Enabled = _styleCombo.SelectedIndex >= 0 && !IsDwgOutput;
+        };
+        _styleSettingsButton = UiLayout.CreateButton("设置", 56);
+        _styleSettingsButton.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+        _styleSettingsButton.Margin = new Padding(0, UiLayout.Scale(2), 0, 0);
+        _styleSettingsButton.Click += (_, _) =>
+            PlotStyleManager.EditSelectedStyle(this, _styleCombo.SelectedItem?.ToString());
+        tips.SetToolTip(_styleSettingsButton, "打开当前选中的 CTB 打印样式进行设置。");
+        var stylePanel = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 1,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty
+        };
+        // 嵌套单行面板同样显式占满可见行，避免“设置”按钮文字在 ZWCAD 中被垂直裁掉。
+        stylePanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        stylePanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        stylePanel.ColumnStyles.Add(new ColumnStyle(
+            SizeType.Absolute,
+            UiLayout.ButtonWidth("设置", 56)));
+        stylePanel.Controls.Add(_styleCombo, 0, 0);
+        stylePanel.Controls.Add(_styleSettingsButton, 1, 0);
 
         _mergePdfCheckBox.Text = "合并 PDF";
         _mergePdfCheckBox.AutoSize = true;
@@ -262,7 +293,7 @@ public sealed class BatchPlotForm : Form
         settingsRow.Controls.Add(MakeLabel("输出格式:"), 3, 0);
         settingsRow.Controls.Add(_outputFormatCombo, 4, 0);
         settingsRow.Controls.Add(MakeLabel("CTB:"), 5, 0);
-        settingsRow.Controls.Add(_styleCombo, 6, 0);
+        settingsRow.Controls.Add(stylePanel, 6, 0);
         settingsRow.Controls.Add(_printButton, 7, 0);
 
         top.Controls.Add(actionRow, 0, 0);
@@ -285,6 +316,7 @@ public sealed class BatchPlotForm : Form
         _plotOnlyControls.AddRange(new Control[]
         {
             _styleCombo,
+            _styleSettingsButton,
             _leaveMarginCheckBox,
             _marginInput
         });
@@ -444,12 +476,9 @@ public sealed class BatchPlotForm : Form
             _pngPlotDevice = FindPngPlotDevice(devices, installedPngPlotter);
             _jpgPlotDevice = FindJpgPlotDevice(devices, installedJpgPlotter);
             _dwfPlotDevice = FindDwfPlotDevice(devices, installedDwfPlotter);
-            foreach (var styleItem in validator.GetPlotStyleSheetList())
+            foreach (var style in PlotStyleManager.GetAvailableCtbStyles())
             {
-                if (styleItem is string style && style.EndsWith(".ctb", StringComparison.OrdinalIgnoreCase))
-                {
-                    _styleCombo.Items.Add(style);
-                }
+                _styleCombo.Items.Add(style);
             }
 
             SelectExactOrContaining(_styleCombo, _settings.LastStyleSheet, "monochrome");
@@ -1939,6 +1968,7 @@ public sealed class BatchPlotForm : Form
         {
             control.Enabled = plotOutput;
         }
+        _styleSettingsButton.Enabled = plotOutput && _styleCombo.SelectedIndex >= 0;
         _mergePdfCheckBox.Enabled = IsPdfOutput;
         _marginInput.Enabled = plotOutput && _leaveMarginCheckBox.Checked;
 
