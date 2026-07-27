@@ -4,6 +4,7 @@ using System.Windows.Forms;
 #if AUTOCAD
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.DatabaseServices;
+using Autodesk.AutoCAD.PlottingServices;
 #else
 using ZwSoft.ZwCAD.ApplicationServices;
 using ZwSoft.ZwCAD.DatabaseServices;
@@ -25,6 +26,7 @@ public sealed class SettingsForm : Form
     private readonly CheckBox _addSequenceWhenPdfExists = new();
     private readonly ComboBox _pdfFileNameSeparator = new();
     private readonly CheckBox _openExternalDwgForPlot = new();
+    private readonly ComboBox _defaultDevice = new();
     private readonly NumericUpDown _directoryIndexWidth = new();
     private readonly NumericUpDown _directoryNumberWidth = new();
     private readonly NumericUpDown _directoryTitleWidth = new();
@@ -98,7 +100,7 @@ public sealed class SettingsForm : Form
     private TabPage BuildGeneralTab()
     {
         var page = new TabPage("常规");
-        var table = CreateSettingsTable(9);
+        var table = CreateSettingsTable(10);
 
         _rememberOutput.Text = "记住上次输出目录";
         _rememberOutput.AutoSize = true;
@@ -143,13 +145,20 @@ public sealed class SettingsForm : Form
 
         AddRow(table, 0, "", _rememberOutput);
         AddRow(table, 1, "默认输出子文件夹", _outputSubfolder);
-        AddRow(table, 2, "", _autoScan);
-        AddRow(table, 3, "纸张匹配容差(mm)", _paperTolerance);
-        AddRow(table, 4, "", _allowPaperNameFallback);
-        AddRow(table, 5, "", _showProgress);
-        AddRow(table, 6, "", _addSequenceWhenPdfExists);
-        AddRow(table, 7, "PDF文件名连接符", _pdfFileNameSeparator);
-        AddRow(table, 8, "", _openExternalDwgForPlot);
+
+        _defaultDevice.DropDownStyle = ComboBoxStyle.DropDownList;
+        _defaultDevice.Dock = DockStyle.Left;
+        _defaultDevice.Width = UiLayout.Scale(280);
+        LoadPlotDevices();
+        AddRow(table, 2, "默认打印机", _defaultDevice);
+
+        AddRow(table, 3, "", _autoScan);
+        AddRow(table, 4, "纸张匹配容差(mm)", _paperTolerance);
+        AddRow(table, 5, "", _allowPaperNameFallback);
+        AddRow(table, 6, "", _showProgress);
+        AddRow(table, 7, "", _addSequenceWhenPdfExists);
+        AddRow(table, 8, "PDF文件名连接符", _pdfFileNameSeparator);
+        AddRow(table, 9, "", _openExternalDwgForPlot);
         page.Controls.Add(table);
         return page;
     }
@@ -233,6 +242,30 @@ public sealed class SettingsForm : Form
         table.Controls.Add(control, 1, row);
     }
 
+#if AUTOCAD
+    private void LoadPlotDevices()
+    {
+        _defaultDevice.Items.Clear();
+        _defaultDevice.Items.Add("(不强制指定)");
+        try
+        {
+            foreach (var item in PlotSettingsValidator.Current.GetPlotDeviceList())
+            {
+                if (item is string device && !string.IsNullOrWhiteSpace(device))
+                    _defaultDevice.Items.Add(device);
+            }
+        }
+        catch { }
+        _defaultDevice.SelectedIndex = 0;
+    }
+#else
+    private void LoadPlotDevices()
+    {
+        _defaultDevice.Items.Add("(不可用)");
+        _defaultDevice.Enabled = false;
+    }
+#endif
+
     private void LoadSettings()
     {
         Apply(AppSettingsStore.Load());
@@ -249,6 +282,7 @@ public sealed class SettingsForm : Form
         _addSequenceWhenPdfExists.Checked = settings.AddSequenceWhenPdfExists;
         SelectPdfFileNameSeparator(settings.PdfFileNameSeparator);
         _openExternalDwgForPlot.Checked = settings.OpenExternalDwgForPlot;
+        SelectComboValue(_defaultDevice, settings.DefaultPlotDevice);
         _directoryIndexWidth.Value = Clamp(_directoryIndexWidth, settings.DirectoryIndexWidth);
         _directoryNumberWidth.Value = Clamp(_directoryNumberWidth, settings.DirectoryNumberWidth);
         _directoryTitleWidth.Value = Clamp(_directoryTitleWidth, settings.DirectoryTitleWidth);
@@ -283,6 +317,7 @@ public sealed class SettingsForm : Form
         current.ShowPlotProgress = _showProgress.Checked;
         current.AddSequenceWhenPdfExists = _addSequenceWhenPdfExists.Checked;
         current.PdfFileNameSeparator = ReadPdfFileNameSeparator();
+        current.DefaultPlotDevice = _defaultDevice.SelectedItem?.ToString() == "(不强制指定)" ? "" : _defaultDevice.SelectedItem?.ToString() ?? "";
         current.OpenExternalDwgForPlot = _openExternalDwgForPlot.Checked;
         current.DirectoryIndexWidth = (double)_directoryIndexWidth.Value;
         current.DirectoryNumberWidth = (double)_directoryNumberWidth.Value;
@@ -324,6 +359,20 @@ public sealed class SettingsForm : Form
         {
             _pdfFileNameSeparator.SelectedIndex = 0;
         }
+    }
+
+    private static void SelectComboValue(ComboBox combo, string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) { combo.SelectedIndex = 0; return; }
+        for (var i = 0; i < combo.Items.Count; i++)
+        {
+            if (string.Equals(combo.Items[i]?.ToString(), value, StringComparison.Ordinal))
+            {
+                combo.SelectedIndex = i;
+                return;
+            }
+        }
+        combo.SelectedIndex = 0;
     }
 
     private void LoadTextStyles()

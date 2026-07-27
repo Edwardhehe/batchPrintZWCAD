@@ -35,6 +35,10 @@ public sealed class BatchPlotForm : Form
     private readonly ComboBox _deviceCombo = new();
     private readonly ComboBox _styleCombo = new();
     private readonly CheckBox _mergePdfCheckBox = new();
+    private readonly ComboBox _shadeCombo = new();
+    private readonly CheckBox _lineweightsCheck = new();
+    private readonly CheckBox _plotStylesCheck = new();
+    private readonly CheckBox _resultPopupCheck = new();
     private readonly Button _printButton = new();
     private readonly Label _statusLabel = new();
     private readonly List<string> _logLines = new();
@@ -77,14 +81,15 @@ public sealed class BatchPlotForm : Form
         var top = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
-            Height = UiLayout.ActionPanelHeight(),
             ColumnCount = 1,
-            RowCount = 3,
+            RowCount = 4,
+            Height = UiLayout.ActionPanelHeight() + UiLayout.ButtonHeight(),
             Padding = new Padding(UiLayout.Scale(10), UiLayout.Scale(8), UiLayout.Scale(10), UiLayout.Scale(6)),
             BackColor = SystemColors.Control
         };
         top.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.ActionButtonRowsHeight()));
         top.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.ButtonHeight() + UiLayout.Scale(10)));
+        top.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.ButtonHeight() + UiLayout.Scale(4)));
         top.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.ButtonHeight() + UiLayout.Scale(4)));
 
         var actionRow = new FlowLayoutPanel
@@ -277,6 +282,60 @@ public sealed class BatchPlotForm : Form
 
         top.Controls.Add(actionRow, 0, 0);
         top.Controls.Add(settingsRow, 0, 1);
+
+        // 打印选项行
+        var optionsRow = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight,
+            WrapContents = false,
+            AutoScroll = true,
+            Margin = Padding.Empty,
+            Padding = new Padding(UiLayout.Scale(10), UiLayout.Scale(2), UiLayout.Scale(10), UiLayout.Scale(2))
+        };
+
+        var shadeLabel = new Label
+        {
+            Text = "着色视口:",
+            AutoSize = true,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Margin = new Padding(0, UiLayout.Scale(5), UiLayout.Scale(4), 0)
+        };
+        _shadeCombo.DropDownStyle = ComboBoxStyle.DropDownList;
+        _shadeCombo.Width = UiLayout.Scale(100);
+        _shadeCombo.Margin = new Padding(0, UiLayout.Scale(2), UiLayout.Scale(14), 0);
+        _shadeCombo.Items.AddRange(new object[] { "按显示", "线框", "消隐", "渲染" });
+        _shadeCombo.SelectedIndex = 0;
+        SetTip(_shadeCombo, "着色视口打印方式。");
+
+        _lineweightsCheck.Text = "打印线宽";
+        _lineweightsCheck.AutoSize = true;
+        _lineweightsCheck.Checked = true;
+        _lineweightsCheck.TextAlign = ContentAlignment.MiddleLeft;
+        _lineweightsCheck.Margin = new Padding(0, UiLayout.Scale(5), UiLayout.Scale(10), 0);
+        SetTip(_lineweightsCheck, "是否按图层线宽打印。");
+
+        _plotStylesCheck.Text = "打印样式";
+        _plotStylesCheck.AutoSize = true;
+        _plotStylesCheck.Checked = true;
+        _plotStylesCheck.TextAlign = ContentAlignment.MiddleLeft;
+        _plotStylesCheck.Margin = new Padding(0, UiLayout.Scale(5), UiLayout.Scale(10), 0);
+        SetTip(_plotStylesCheck, "是否使用 CTB 打印样式。");
+
+        _resultPopupCheck.Text = "打印后弹窗";
+        _resultPopupCheck.AutoSize = true;
+        _resultPopupCheck.Checked = true;
+        _resultPopupCheck.TextAlign = ContentAlignment.MiddleLeft;
+        _resultPopupCheck.Margin = new Padding(0, UiLayout.Scale(5), UiLayout.Scale(10), 0);
+        SetTip(_resultPopupCheck, "打印完成后是否弹出结果提示窗口。不弹出也不写日志。");
+
+        optionsRow.Controls.Add(shadeLabel);
+        optionsRow.Controls.Add(_shadeCombo);
+        optionsRow.Controls.Add(_lineweightsCheck);
+        optionsRow.Controls.Add(_plotStylesCheck);
+        optionsRow.Controls.Add(_resultPopupCheck);
+        top.Controls.Add(optionsRow, 0, 2);
+
         pathRow.Controls.Add(new Label
         {
             Text = "保存路径快捷:",
@@ -288,7 +347,7 @@ public sealed class BatchPlotForm : Form
         pathRow.Controls.Add(currentFolderButton);
         pathRow.Controls.Add(currentPdfButton);
         pathRow.Controls.Add(specifiedFolderButton);
-        top.Controls.Add(pathRow, 0, 2);
+        top.Controls.Add(pathRow, 0, 3);
 
         UiLayout.StyleGrid(_grid, Font);
         AddColumns();
@@ -387,12 +446,23 @@ public sealed class BatchPlotForm : Form
                 }
             }
 
-            SelectPlotDevice(_deviceCombo, _settings.LastPlotDevice);
+            SelectPlotDevice(_deviceCombo, _settings.LastPlotDevice, _settings);
             SelectExactOrContaining(_styleCombo, _settings.LastStyleSheet, "monochrome");
             if (_styleCombo.SelectedIndex < 0 && _styleCombo.Items.Count > 0)
             {
                 _styleCombo.SelectedIndex = 0;
             }
+
+            _shadeCombo.SelectedIndex = _settings.ShadePlotType switch
+            {
+                "Wireframe" => 1,
+                "Hidden" => 2,
+                "Rendered" => 3,
+                _ => 0
+            };
+            _lineweightsCheck.Checked = _settings.PlotWithLineweights;
+            _plotStylesCheck.Checked = _settings.PlotWithPlotStyles;
+            _resultPopupCheck.Checked = _settings.ShowPrintResultPopup;
         }
         catch (Exception ex)
         {
@@ -400,8 +470,14 @@ public sealed class BatchPlotForm : Form
         }
     }
 
-    private static void SelectPlotDevice(ComboBox combo, string lastValue)
+    private static void SelectPlotDevice(ComboBox combo, string lastValue, AppSettings settings)
     {
+        if (!string.IsNullOrWhiteSpace(settings.DefaultPlotDevice)
+            && TrySelectExactOrContaining(combo, settings.DefaultPlotDevice))
+        {
+            return;
+        }
+
         if (TrySelectExactOrContaining(combo, AcadPlotterInstaller.PreferredPdfPlotter))
         {
             return;
@@ -413,6 +489,8 @@ public sealed class BatchPlotForm : Form
         }
 
         SelectExactOrContaining(combo, "", "PDF");
+        if (combo.SelectedIndex < 0 && combo.Items.Count > 0)
+            combo.SelectedIndex = 0;
     }
 
     private static void SelectExactOrContaining(ComboBox combo, string exactValue, string fallbackContains)
@@ -709,6 +787,8 @@ public sealed class BatchPlotForm : Form
     {
         var sorted = _jobs
             .OrderByDescending(x => x.SortPriority)
+            .ThenByDescending(x => x.MinY)
+            .ThenBy(x => x.MinX)
             .ThenBy(x => x.DrawingNumber, NaturalStringComparer.Instance)
             .ThenBy(x => x.Title, StringComparer.CurrentCultureIgnoreCase)
             .ToList();
@@ -1378,18 +1458,20 @@ public sealed class BatchPlotForm : Form
                 }
             }
 
-            _lastLogPath = BatchPlotLogger.SaveRunLog(_logLines);
-            var summary = mergePdf
-                ? mergedSuccessfully
-                    ? $"打印并合并完成: 共 {printed} 张。\n合并文件: {_mergedOutputPath}\n日志: {_lastLogPath}"
-                    : $"打印或合并失败，未生成新的合并 PDF。\n成功打印 {printed} 张，失败 {failed.Count} 项。\n日志: {_lastLogPath}"
-                : $"打印完成: 成功 {printed} 张，失败 {failed.Count} 张。\n日志: {_lastLogPath}";
-            if (failed.Count > 0)
+            if (_settings.ShowPrintResultPopup)
             {
-                summary += "\n\n失败项:\n" + string.Join("\n", failed);
+                _lastLogPath = BatchPlotLogger.SaveRunLog(_logLines);
+                var summary = mergePdf
+                    ? mergedSuccessfully
+                        ? $"打印并合并完成: 共 {printed} 张。\n合并文件: {_mergedOutputPath}\n日志: {_lastLogPath}"
+                        : $"打印或合并失败，未生成新的合并 PDF。\n成功打印 {printed} 张，失败 {failed.Count} 项。\n日志: {_lastLogPath}"
+                    : $"打印完成: 成功 {printed} 张，失败 {failed.Count} 张。\n日志: {_lastLogPath}";
+                if (failed.Count > 0)
+                {
+                    summary += "\n\n失败项:\n" + string.Join("\n", failed);
+                }
+                MessageBox.Show(summary, "批量打印", MessageBoxButtons.OK, failed.Count > 0 ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
             }
-
-            MessageBox.Show(summary, "批量打印", MessageBoxButtons.OK, failed.Count > 0 ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
 
             if ((!mergePdf && printed > 0) || mergedSuccessfully)
             {
@@ -1649,14 +1731,16 @@ public sealed class BatchPlotForm : Form
                 }
             }
 
-            _lastLogPath = BatchPlotLogger.SaveRunLog(_logLines);
-            var summary = $"打印完成: 成功 {printed} 张，失败 {failed.Count} 张。\n日志: {_lastLogPath}";
-            if (failed.Count > 0)
+            if (_settings.ShowPrintResultPopup)
             {
-                summary += "\n\n失败项:\n" + string.Join("\n", failed);
+                _lastLogPath = BatchPlotLogger.SaveRunLog(_logLines);
+                var summary = $"打印完成: 成功 {printed} 张，失败 {failed.Count} 张。\n日志: {_lastLogPath}";
+                if (failed.Count > 0)
+                {
+                    summary += "\n\n失败项:\n" + string.Join("\n", failed);
+                }
+                MessageBox.Show(summary, "批量打印", MessageBoxButtons.OK, failed.Count > 0 ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
             }
-
-            MessageBox.Show(summary, "批量打印", MessageBoxButtons.OK, failed.Count > 0 ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
 
             if (printed > 0)
             {
@@ -1707,6 +1791,10 @@ public sealed class BatchPlotForm : Form
         _settings.LastOutputDirectory = _outputDirectory.Text;
         _settings.LastPlotDevice = _deviceCombo.SelectedItem?.ToString() ?? "";
         _settings.LastStyleSheet = _styleCombo.SelectedItem?.ToString() ?? "";
+        _settings.ShadePlotType = _shadeCombo.SelectedIndex switch { 1 => "Wireframe", 2 => "Hidden", 3 => "Rendered", _ => "AsDisplayed" };
+        _settings.PlotWithLineweights = _lineweightsCheck.Checked;
+        _settings.PlotWithPlotStyles = _plotStylesCheck.Checked;
+        _settings.ShowPrintResultPopup = _resultPopupCheck.Checked;
         _settings.AutoScanCurrentDrawing = false;
         AppSettingsStore.Save(_settings);
     }

@@ -8,6 +8,7 @@ public sealed class AppSettings
 {
     public string LastOutputDirectory { get; set; } = "";
     public string LastPlotDevice { get; set; } = "";
+    public string DefaultPlotDevice { get; set; } = "";
     public string LastStyleSheet { get; set; } = "";
     public bool RememberLastOutputDirectory { get; set; } = true;
     public string DefaultOutputSubfolder { get; set; } = "PDF";
@@ -26,6 +27,14 @@ public sealed class AppSettings
     public double DirectoryRowHeight { get; set; } = 650;
     public double DirectoryTextHeightRatio { get; set; } = 0.42;
     public string DirectoryTextStyleName { get; set; } = "";
+
+    // 打印选项 - 着色视口
+    public string ShadePlotType { get; set; } = "AsDisplayed";
+
+    // 打印选项 - 复选框
+    public bool PlotWithLineweights { get; set; } = true;
+    public bool PlotWithPlotStyles { get; set; } = true;
+    public bool ShowPrintResultPopup { get; set; } = true;
 }
 
 public static class AppSettingsStore

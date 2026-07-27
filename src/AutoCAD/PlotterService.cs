@@ -73,15 +73,15 @@ public static class PlotterService
                 {
                     if (group.Key == "__CURRENT__")
                     {
-                        PlotDocumentJobs(currentDocument, groupJobs, deviceName, styleSheet, beforeJob, results);
+                        PlotDocumentJobs(currentDocument, groupJobs, deviceName, styleSheet, beforeJob, results, settings);
                     }
                     else if (group.Key.StartsWith("__DB__:", StringComparison.OrdinalIgnoreCase))
                     {
-                        PlotSideDatabaseJobs(groupJobs, groupJobs[0].SourceFile, deviceName, styleSheet, beforeJob, results);
+                        PlotSideDatabaseJobs(groupJobs, groupJobs[0].SourceFile, deviceName, styleSheet, beforeJob, results, settings);
                     }
                     else
                     {
-                        PlotOpenedDocumentJobs(groupJobs, groupJobs[0].SourceFile, deviceName, styleSheet, beforeJob, results);
+                        PlotOpenedDocumentJobs(groupJobs, groupJobs[0].SourceFile, deviceName, styleSheet, beforeJob, results, settings);
                     }
                 }
                 catch (Exception ex)
@@ -129,7 +129,7 @@ public static class PlotterService
                 RefreshJobsFromDatabase(doc.Database, new[] { job });
                 ActivateLayout(doc.Database, job);
                 PrepareEditorViewForPlot(doc, job);
-                PreviewDatabase(doc.Database, doc.Name, job, deviceName, styleSheet, doc);
+                PreviewDatabase(doc.Database, doc.Name, job, deviceName, styleSheet, doc, new AppSettings());
             }
         }
         finally
@@ -163,7 +163,7 @@ public static class PlotterService
         string deviceName,
         string styleSheet,
         Action<PlotJob>? beforeJob,
-        List<PlotJobResult> results)
+        List<PlotJobResult> results, AppSettings appSettings)
     {
         var doc = FindOpenDocument(sourceFile);
         var shouldClose = doc == null;
@@ -171,7 +171,7 @@ public static class PlotterService
 
         try
         {
-            PlotDocumentJobs(doc, jobs, deviceName, styleSheet, beforeJob, results);
+            PlotDocumentJobs(doc, jobs, deviceName, styleSheet, beforeJob, results, appSettings);
         }
         finally
         {
@@ -188,7 +188,7 @@ public static class PlotterService
         string deviceName,
         string styleSheet,
         Action<PlotJob>? beforeJob,
-        List<PlotJobResult> results)
+        List<PlotJobResult> results, AppSettings appSettings)
     {
         CadApp.DocumentManager.MdiActiveDocument = doc;
 
@@ -206,7 +206,7 @@ public static class PlotterService
                 {
                     ActivateLayout(doc.Database, job);
                     PrepareEditorViewForPlot(doc, job);
-                    PlotDatabase(doc.Database, doc.Name, job, deviceName, styleSheet, doc);
+                    PlotDatabase(doc.Database, doc.Name, job, deviceName, styleSheet, doc, appSettings);
                 }
 
                 results.Add(new PlotJobResult { Job = job });
@@ -224,7 +224,7 @@ public static class PlotterService
         string deviceName,
         string styleSheet,
         Action<PlotJob>? beforeJob,
-        List<PlotJobResult> results)
+        List<PlotJobResult> results, AppSettings appSettings)
     {
         using var db = new Database(false, true);
         db.ReadDwgFile(sourceFile, FileOpenMode.OpenForReadAndAllShare, true, "");
@@ -237,7 +237,7 @@ public static class PlotterService
             try
             {
                 beforeJob?.Invoke(job);
-                PlotDatabase(db, Path.GetFileName(sourceFile), job, deviceName, styleSheet, null);
+                PlotDatabase(db, Path.GetFileName(sourceFile), job, deviceName, styleSheet, null, appSettings);
                 results.Add(new PlotJobResult { Job = job });
             }
             catch (Exception ex)
@@ -247,7 +247,7 @@ public static class PlotterService
         }
     }
 
-    private static void PlotDatabase(Database db, string documentName, PlotJob job, string deviceName, string styleSheet, Document? plotDocument)
+    private static void PlotDatabase(Database db, string documentName, PlotJob job, string deviceName, string styleSheet, Document? plotDocument, AppSettings appSettings)
     {
         if (string.IsNullOrWhiteSpace(deviceName))
         {
@@ -263,7 +263,7 @@ public static class PlotterService
             using var tr = db.TransactionManager.StartTransaction();
             var layout = FindLayoutForJob(tr, db, job);
             var window = GetPlotWindow(job, plotDocument);
-            using var plot = CreateValidatedPlot(layout, job, window, deviceName, styleSheet);
+            using var plot = CreateValidatedPlot(layout, job, window, deviceName, styleSheet, appSettings);
 
             PrepareOutputFile(job.OutputPath);
             RunPlot(plot.Info, documentName, job.OutputPath, job.DrawingNumber);
@@ -283,7 +283,7 @@ public static class PlotterService
         PlotJob job,
         Extents2d window,
         string deviceName,
-        string styleSheet)
+        string styleSheet, AppSettings appSettings)
     {
         var validator = PlotSettingsValidator.Current;
         var media = ChooseMedia(validator, layout, deviceName, job);
@@ -296,7 +296,7 @@ public static class PlotterService
             try
             {
                 settings.CopyFrom(layout);
-                ConfigurePlotSettings(validator, settings, deviceName, styleSheet, media, rotation, window);
+                ConfigurePlotSettings(validator, settings, deviceName, styleSheet, media, rotation, window, appSettings);
 
                 var info = new PlotInfo
                 {
@@ -339,7 +339,7 @@ public static class PlotterService
         string styleSheet,
         MediaChoice media,
         PlotRotation rotation,
-        Extents2d window)
+        Extents2d window, AppSettings appSettings)
     {
         try
         {
@@ -373,6 +373,23 @@ public static class PlotterService
         {
             validator.SetCurrentStyleSheet(settings, styleSheet);
         }
+
+        // 着色视口选项
+        try
+        {
+            settings.ShadePlot = (Autodesk.AutoCAD.DatabaseServices.PlotSettingsShadePlotType)(appSettings.ShadePlotType switch
+            {
+                "Wireframe" => (int)Autodesk.AutoCAD.DatabaseServices.ShadePlotType.Wireframe,
+                "Hidden"    => (int)Autodesk.AutoCAD.DatabaseServices.ShadePlotType.Hidden,
+                "Rendered"  => (int)Autodesk.AutoCAD.DatabaseServices.ShadePlotType.Rendered,
+                _           => (int)Autodesk.AutoCAD.DatabaseServices.ShadePlotType.AsDisplayed
+            });
+        }
+        catch { }
+
+        // 打印选项（通过反射设置，Core API 可能无直接属性）
+        try { SetPlotBool(settings, "PlotWithLineweights", appSettings.PlotWithLineweights); } catch { }
+        try { SetPlotBool(settings, "PlotWithPlotStyles", appSettings.PlotWithPlotStyles); } catch { }
     }
 
     private static MediaChoice ChooseMedia(PlotSettingsValidator validator, Layout layout, string deviceName, PlotJob job)
@@ -835,7 +852,7 @@ public static class PlotterService
         };
     }
 
-    private static void PreviewDatabase(Database db, string documentName, PlotJob job, string deviceName, string styleSheet, Document plotDocument)
+    private static void PreviewDatabase(Database db, string documentName, PlotJob job, string deviceName, string styleSheet, Document plotDocument, AppSettings appSettings)
     {
         WaitForPlotIdle();
 
@@ -846,7 +863,7 @@ public static class PlotterService
             using var tr = db.TransactionManager.StartTransaction();
             var layout = FindLayoutForJob(tr, db, job);
             var window = GetPlotWindow(job, plotDocument);
-            using var plot = CreateValidatedPlot(layout, job, window, deviceName, styleSheet);
+            using var plot = CreateValidatedPlot(layout, job, window, deviceName, styleSheet, appSettings);
             RunPreview(plot.Info, documentName);
             tr.Commit();
             WaitForPlotIdle();
@@ -1177,5 +1194,19 @@ public static class PlotterService
                 }
             }
         }
+    }
+
+    private static void SetPlotBool(object target, string propertyName, bool value)
+    {
+        try
+        {
+            var pi = target.GetType().GetProperty(propertyName,
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+            if (pi != null)
+            {
+                pi.SetValue(target, value);
+            }
+        }
+        catch { }
     }
 }

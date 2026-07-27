@@ -203,10 +203,51 @@ public static class TitleBlockScanner
 
         tr.Commit();
         LogScanWarnings(sourceName, warnings);
-        return DeduplicateOverlappingJobs(jobs)
-            .OrderBy(x => x.DrawingNumber, NaturalStringComparer.Instance)
-            .ThenBy(x => Path.GetFileName(x.SourceFile), StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        return SortByRowThenColumn(jobs);
+    }
+
+    private static List<PlotJob> SortByRowThenColumn(List<PlotJob> jobs)
+    {
+        var deduped = DeduplicateOverlappingJobs(jobs);
+        if (deduped.Count <= 1)
+            return deduped;
+
+        // 计算行容差：取所有图框中位数高度的一半（至少 0.5mm）
+        var heights = deduped.Select(j => Math.Abs(j.MaxY - j.MinY)).Where(h => h > 0).ToList();
+        var medianHeight = heights.OrderBy(h => h).ElementAt(heights.Count / 2);
+        var rowTolerance = Math.Max(medianHeight * 0.5, 0.5);
+
+        // 先按 Y 降序 X 升序粗排
+        var sorted = deduped.OrderByDescending(j => j.MinY).ThenBy(j => j.MinX).ToList();
+
+        // 分行为组：相邻 Y 差超过容差才换行
+        var rows = new List<List<PlotJob>>();
+        var currentRow = new List<PlotJob> { sorted[0] };
+        double currentRowY = sorted[0].MinY;
+
+        for (int i = 1; i < sorted.Count; i++)
+        {
+            if (Math.Abs(sorted[i].MinY - currentRowY) > rowTolerance)
+            {
+                rows.Add(currentRow);
+                currentRow = new List<PlotJob>();
+                currentRowY = sorted[i].MinY;
+            }
+            currentRow.Add(sorted[i]);
+        }
+        rows.Add(currentRow);
+
+        // 每行内按 X 升序（左到右），行间从上到下
+        var result = new List<PlotJob>();
+        foreach (var row in rows)
+        {
+            result.AddRange(row.OrderBy(j => j.MinX));
+        }
+
+        for (int i = 0; i < result.Count; i++)
+            result[i].SortPriority = result.Count - i;
+
+        return result;
     }
 
     private static List<PlotJob> DeduplicateOverlappingJobs(List<PlotJob> jobs)
