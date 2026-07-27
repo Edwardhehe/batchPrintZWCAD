@@ -1,5 +1,6 @@
 using System;
 using System.Reflection;
+using System.Runtime.InteropServices;
 #if ACAD_CORE
 using CadApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
 #else
@@ -13,28 +14,79 @@ public static class CadMenuInstaller
     private const string MenuName = "批量打印";
     private const string LegacyMenuName = "ZW批量打印";
 
+#if ACAD_CORE
+    // Core SDK 的 Core.Application 没有 MenuBar/MenuGroups，
+    // 通过 COM P/Invoke 获取运行中的 AutoCAD Application 对象来访问菜单接口
+
+    [DllImport("ole32.dll")]
+    private static extern int CLSIDFromProgID([MarshalAs(UnmanagedType.LPWStr)] string lpszProgID,
+        out Guid pclsid);
+
+    [DllImport("ole32.dll")]
+    private static extern int GetActiveObject(ref Guid rclsid, IntPtr pvReserved,
+        [MarshalAs(UnmanagedType.IUnknown)] out object ppunk);
+
+    private static object? GetAcadComApplication()
+    {
+        try
+        {
+            int hr = CLSIDFromProgID("AutoCAD.Application", out Guid clsid);
+            if (hr < 0)
+            {
+                return null;
+            }
+            hr = GetActiveObject(ref clsid, IntPtr.Zero, out object app);
+            if (hr < 0)
+            {
+                return null;
+            }
+            return app;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+#endif
+
     public static void Install(bool force = false)
     {
         try
         {
             ShowMenuBar();
 
+            object? menuBar = null;
+            object? menuGroups = null;
+
+            try
+            {
 #if ACAD_CORE
-            WriteMessage("\n批量打印插件已加载。AutoCAD 2025+ Core 版请使用 ZBP_SHOW_PANEL 命令打开主界面。");
-            return;
+                object? acadComApp = GetAcadComApplication();
+                if (acadComApp != null)
+                {
+                    menuBar = GetProperty(acadComApp, "MenuBar");
+                    menuGroups = GetProperty(acadComApp, "MenuGroups");
+                }
 #else
-            var menuBar = CadApp.MenuBar;
-            var menuGroups = CadApp.MenuGroups;
+                menuBar = CadApp.MenuBar;
+                menuGroups = CadApp.MenuGroups;
+#endif
+            }
+            catch
+            {
+                // 静默失败，下面统一处理 null
+            }
+
             if (menuBar == null || menuGroups == null)
             {
-                WriteMessage("\n批量打印插件已加载，但当前 CAD 未暴露菜单栏接口。");
+                WriteMessage("\n批量打印插件已加载。当前 CAD 未暴露菜单栏接口，请使用 ZBP_SHOW_PANEL 命令打开主界面。");
                 return;
             }
 
             var menuGroup = InvokeItem(menuGroups, 0);
             if (menuGroup == null)
             {
-                WriteMessage("\n批量打印插件已加载，但未取得默认菜单组。");
+                WriteMessage("\n批量打印插件已加载。未取得默认菜单组，请使用 ZBP_SHOW_PANEL 命令打开主界面。");
                 return;
             }
 
@@ -57,14 +109,14 @@ public static class CadMenuInstaller
             var menus = GetProperty(menuGroup, "Menus");
             if (menus == null)
             {
-                WriteMessage("\n批量打印插件已加载，但未取得菜单集合。");
+                WriteMessage("\n批量打印插件已加载。未取得菜单集合，请使用 ZBP_SHOW_PANEL 命令打开主界面。");
                 return;
             }
 
             var menu = TryInvoke(menus, "Add", MenuName);
             if (menu == null)
             {
-                WriteMessage("\n批量打印插件已加载，但菜单创建失败。");
+                WriteMessage("\n批量打印插件已加载。菜单创建失败，请使用 ZBP_SHOW_PANEL 命令打开主界面。");
                 return;
             }
 
@@ -85,7 +137,6 @@ public static class CadMenuInstaller
             TryInvoke(menu, "InsertInMenuBar", menuCount);
 
             WriteMessage("\n批量打印菜单已加载。");
-#endif
         }
         catch (Exception ex)
         {
@@ -171,7 +222,7 @@ public static class CadMenuInstaller
         return TryInvoke(collection, "Item", index);
     }
 
-    private static object? GetProperty(object target, string name)
+    internal static object? GetProperty(object target, string name)
     {
         try
         {
@@ -183,7 +234,7 @@ public static class CadMenuInstaller
         }
     }
 
-    private static object? TryInvoke(object target, string name, params object[] args)
+    internal static object? TryInvoke(object target, string name, params object[] args)
     {
         try
         {
@@ -195,7 +246,7 @@ public static class CadMenuInstaller
         }
     }
 
-    private static void TrySetProperty(object target, string name, object value)
+    internal static void TrySetProperty(object target, string name, object value)
     {
         try
         {
