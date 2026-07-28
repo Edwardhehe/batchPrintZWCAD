@@ -1,11 +1,14 @@
 ﻿param(
-    [string]$Version = "1.14"
+    [string]$Version = "1.14.1",
+    [string]$ZwcadOutput,
+    [string]$LegacyAcadOutput,
+    [string]$CoreAcadOutput
 )
 
 $ErrorActionPreference = "Stop"
 
 if ($Version -notmatch '^\d+\.\d+(?:\.\d+)?$') {
-    throw "Version must look like 1.14 or 1.14.0."
+    throw "Version must look like 1.14.1 or 1.15."
 }
 
 $root = Split-Path -Parent $PSScriptRoot
@@ -13,6 +16,24 @@ $releaseBase = Join-Path $root "release"
 $releaseName = "v$Version"
 $releaseRoot = Join-Path $releaseBase $releaseName
 $stagingRoot = Join-Path $releaseBase ("._{0}-{1}" -f $releaseName, $PID)
+
+function Resolve-BuildOutput {
+    param(
+        [string]$Candidate,
+        [Parameter(Mandatory = $true)][string]$DefaultRelativePath
+    )
+
+    # CAD 锁定常规 bin 目录时，允许发布流程显式使用同一仓库内的全新重建输出。
+    if ([string]::IsNullOrWhiteSpace($Candidate)) {
+        return Join-Path $root $DefaultRelativePath
+    }
+
+    if ([System.IO.Path]::IsPathRooted($Candidate)) {
+        return [System.IO.Path]::GetFullPath($Candidate)
+    }
+
+    return [System.IO.Path]::GetFullPath((Join-Path $root $Candidate))
+}
 
 if (Test-Path -LiteralPath $releaseRoot) {
     throw "Release already exists: $releaseRoot"
@@ -84,9 +105,9 @@ function Add-ReleasePackage {
 }
 
 try {
-    $zwcadOutput = Join-Path $root 'bin'
-    $legacyAcadOutput = Join-Path $root 'bin-acad'
-    $coreAcadOutput = Join-Path $root 'bin-acad2025-2027'
+    $zwcadOutput = Resolve-BuildOutput -Candidate $ZwcadOutput -DefaultRelativePath 'bin'
+    $legacyAcadOutput = Resolve-BuildOutput -Candidate $LegacyAcadOutput -DefaultRelativePath 'bin-acad'
+    $coreAcadOutput = Resolve-BuildOutput -Candidate $CoreAcadOutput -DefaultRelativePath 'bin-acad2025-2027'
 
     Add-ReleasePackage `
         -FolderName 'ZWCAD' `

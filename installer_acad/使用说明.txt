@@ -1,4 +1,4 @@
-AutoCAD 批量打印插件 v1.14
+AutoCAD 批量打印插件 v1.14.1
 
 支持版本：
 - AcadBatchPlot.dll：AutoCAD 2015 ~ 2024，共用同一个 DLL（.NET Framework 4.8）。
