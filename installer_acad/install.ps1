@@ -138,7 +138,6 @@ if ($isCorePackage) {
     }
     Write-Host "AutoCAD 2025-2027 will load this plugin from the ApplicationPlugins bundle next time."
     Write-Host ""
-    Read-Host "Press Enter to exit"
     exit
 }
 
@@ -216,4 +215,3 @@ if (Test-Path $plottersDir) {
 }
 Write-Host "AutoCAD will load this plugin automatically next time."
 Write-Host ""
-Read-Host "Press Enter to exit"

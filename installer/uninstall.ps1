@@ -42,4 +42,3 @@ if ($deletedFiles) {
 }
 Write-Host "User data is kept in AppData\\Roaming\\ZwcadBatchPlot."
 Write-Host ""
-Read-Host "Press Enter to exit"

@@ -66,4 +66,3 @@ if (Test-Path (Join-Path $InstallDir "Plotters\LA_pdf.pc5")) {
 }
 Write-Host "ZWCAD will load this plugin automatically next time."
 Write-Host ""
-Read-Host "Press Enter to exit"
