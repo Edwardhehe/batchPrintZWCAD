@@ -37,6 +37,7 @@ public sealed partial class BatchPlotCommands
         string? customPmpPath = null;
         PmpCustomPaper.Registration? customPaperRegistration = null;
         var isArbitraryPaper = false;
+        var forceCustomPaperReload = false;
         try
         {
             var first = editor.GetPoint(new PromptPointOptions("\n选择图纸外框第一个角点: "));
@@ -130,18 +131,24 @@ public sealed partial class BatchPlotCommands
 
                     customPaperRegistration = PmpCustomPaper.RegisterCustomPaper(customPmpPath, paperW, paperH)
                         ?? throw new InvalidOperationException("LA_pdf.pmp 注册任意纸张失败。");
+                    forceCustomPaperReload = customPaperRegistration.WasAdded;
 #if AUTOCAD
-                    if (!AcadPlotterInstaller.EnsurePmpAttachment(
-                            installedPlotter,
-                            customPmpPath,
-                            forceRewrite: customPaperRegistration.WasAdded,
-                            out var attachmentMessage))
+                    // AutoCAD 2027 的 PIA2 会缓存设备介质。已有同尺寸纸张返回 WasAdded=false，
+                    // 但当前会话仍可能没有枚举到它；单张打印必须照样重写关联并强制刷新。
+                    forceCustomPaperReload |=
+                        AcadPlotterInstaller.RequiresRefreshForReusedCustomPaper(installedPlotter);
+                    var attachment = AcadPlotterInstaller.EnsureActivePdfPmpAttachment(
+                        installedPlotter,
+                        customPmpPath,
+                        forceRewrite: forceCustomPaperReload);
+                    if (!attachment.Success)
                     {
-                        throw new InvalidOperationException("LA_pdf.pc3 关联当前 PMP 失败：" + attachmentMessage);
+                        throw new InvalidOperationException("LA_pdf.pc3 关联当前 PMP 失败：" + attachment.Message);
                     }
-                    editor.WriteMessage("\nAutoCAD 打印机关联刷新: " + attachmentMessage);
+                    forceCustomPaperReload |= attachment.Changed;
+                    editor.WriteMessage("\nAutoCAD 打印机关联刷新: " + attachment.Message);
 #endif
-                    editor.WriteMessage($"\n自定义纸张注册: pmp={customPmpPath}, paperName={customPaperRegistration.PaperName}, wasAdded={customPaperRegistration.WasAdded}, paperW={paperW:0.######}, paperH={paperH:0.######}");
+                    editor.WriteMessage($"\n自定义纸张注册: pmp={customPmpPath}, paperName={customPaperRegistration.PaperName}, wasAdded={customPaperRegistration.WasAdded}, forceReload={forceCustomPaperReload}, paperW={paperW:0.######}, paperH={paperH:0.######}");
                 }
                 catch (Exception ex)
                 {
@@ -217,7 +224,8 @@ public sealed partial class BatchPlotCommands
                 PaperMarginMm = form.PaperMarginMm,
                 RequireExactPaperSize = isArbitraryPaper,
                 UseExactWindowScale = isArbitraryPaper,
-                CustomPaperWasAdded = customPaperRegistration?.WasAdded == true
+                // 此字段控制 PlotterService 的设备介质重载；PIA2 复用已有纸张时也必须为 true。
+                CustomPaperWasAdded = forceCustomPaperReload
             };
 
             if (form.IsPreview)

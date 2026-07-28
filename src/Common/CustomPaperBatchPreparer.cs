@@ -130,18 +130,29 @@ public static class CustomPaperBatchPreparer
             ?? throw new InvalidOperationException(
                 $"{pmpFileName} 批量注册 {outputKind} 正负留白纸张失败，已停止打印，避免回退到错误纸张。");
         var anyAdded = registrations.Any(registration => registration.WasAdded);
+        var forceDeviceReload = anyAdded;
         var attachmentMessage = "";
 
 #if AUTOCAD
         // PDF 的跨版本 PC3 需要现有兼容层修正 PMP 关联。DWF PC3 继承其原生驱动，
         // 不能套用 DWG To PDF 的驱动路径；它只需保持安装时建立的 LA_dwf.pmp 关联。
-        if (isPdfDevice && !AcadPlotterInstaller.EnsurePmpAttachment(
+        if (isPdfDevice)
+        {
+            // 2027 即使复用 PMP 中已有尺寸，也必须让实际被 AutoCAD 解析到的同名 PC3
+            // 指向本版本 PMP；否则迁移目录中的旧 PC3 会继续读取 AutoCAD 2024 的纸张。
+            forceDeviceReload |=
+                AcadPlotterInstaller.RequiresRefreshForReusedCustomPaper(installedPlotter);
+            var attachment = AcadPlotterInstaller.EnsureActivePdfPmpAttachment(
                 installedPlotter,
                 installedPmp,
-                forceRewrite: anyAdded,
-                out attachmentMessage))
-        {
-            throw new InvalidOperationException("LA_pdf.pc3 关联批量 PMP 失败: " + attachmentMessage);
+                forceRewrite: forceDeviceReload);
+            if (!attachment.Success)
+            {
+                throw new InvalidOperationException("LA_pdf.pc3 关联批量 PMP 失败: " + attachment.Message);
+            }
+
+            forceDeviceReload |= attachment.Changed;
+            attachmentMessage = attachment.Message;
         }
 #endif
 
@@ -154,9 +165,10 @@ public static class CustomPaperBatchPreparer
             job.CustomPaperWasAdded = false;
         }
 
-        if (anyAdded)
+        if (forceDeviceReload)
         {
-            // 介质目录按模型/布局分别缓存；每类空间只让第一张触发一次重载，后续纸张直接使用刷新后的目录。
+            // 介质目录按模型/布局分别缓存；每类空间只让第一张触发一次重载。
+            // 除新增纸张外，2027 复用纸张和实际 PC3 关联被修正时也必须进入此路径。
             foreach (var firstJob in customJobs.GroupBy(job => job.IsPaperSpace).Select(group => group.First()))
             {
                 firstJob.CustomPaperWasAdded = true;

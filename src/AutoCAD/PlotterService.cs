@@ -723,15 +723,21 @@ public static class PlotterService
     private static string BuildMediaCatalogCacheKey(string deviceName, bool modelType)
     {
         var plottersDirectory = AcadPlotterInstaller.GetPlottersDirectory();
-        var devicePath = string.IsNullOrWhiteSpace(plottersDirectory)
-            ? ""
-            : Path.Combine(plottersDirectory, deviceName);
-        var pmpPath = string.IsNullOrWhiteSpace(plottersDirectory)
-            ? ""
-            : Path.Combine(
+        // 2027 迁移旧配置后可能同时存在多个同名 PC3。缓存必须跟踪 AutoCAD
+        // 实际解析到的完整路径及其真实关联 PMP，不能只指纹化程序假定的根目录副本。
+        var devicePath = AcadPlotterInstaller.ResolveActivePlotterPath(deviceName);
+        if (string.IsNullOrWhiteSpace(devicePath) && !string.IsNullOrWhiteSpace(plottersDirectory))
+            devicePath = Path.Combine(plottersDirectory, deviceName);
+
+        var pmpPath = AcadPlotterInstaller.ReadAttachedPmpPath(devicePath);
+        if (string.IsNullOrWhiteSpace(pmpPath) && !string.IsNullOrWhiteSpace(plottersDirectory))
+        {
+            pmpPath = Path.Combine(
                 plottersDirectory,
                 "PMP Files",
                 Path.GetFileNameWithoutExtension(deviceName) + ".pmp");
+        }
+
         return string.Join("|", deviceName, modelType ? "M" : "P", GetFileFingerprint(devicePath), GetFileFingerprint(pmpPath));
     }
 

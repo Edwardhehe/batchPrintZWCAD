@@ -7,6 +7,7 @@ using System.Reflection;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using PiaNO;
+using Autodesk.AutoCAD.PlottingServices;
 #if ACAD_CORE
 using CadApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
 #else
@@ -34,6 +35,14 @@ public static class AcadPlotterInstaller
         public string Message { get; set; } = "";
     }
 
+    public sealed class PmpAttachmentResult
+    {
+        public bool Success { get; set; }
+        public bool Changed { get; set; }
+        public string ActivePlotterPath { get; set; } = "";
+        public string Message { get; set; } = "";
+    }
+
     public static InstallResult InstallBundledPlotter()
     {
         var result = new InstallResult();
@@ -54,9 +63,15 @@ public static class AcadPlotterInstaller
                 if (IsValidPlotterFile(generatedPc3) && IsValidPlotterFile(generatedPmp))
                 {
                     EnsurePmpAttachment(generatedPc3, generatedPmp, forceRewrite: false, out _);
+                    var activeAttachment = EnsureActivePdfPmpAttachment(
+                        generatedPc3,
+                        generatedPmp,
+                        forceRewrite: false);
                     result.SourceFound = true;
-                    result.Installed = true;
-                    result.Message = "LA_pdf 打印机配置已存在，已保留现有 PC3/PMP。";
+                    result.Installed = activeAttachment.Success;
+                    result.Message = activeAttachment.Success
+                        ? "LA_pdf 打印机配置已存在；" + activeAttachment.Message
+                        : "LA_pdf 实际打印机关联失败: " + activeAttachment.Message;
                     return result;
                 }
 
@@ -109,8 +124,14 @@ public static class AcadPlotterInstaller
             if (IsValidPlotterFile(targetPc3) && IsValidPlotterFile(targetPmp))
             {
                 EnsurePmpAttachment(targetPc3, targetPmp, forceRewrite: false, out _);
-                result.Installed = true;
-                result.Message = "LA_pdf 打印机配置已存在，已保留现有 PC3/PMP。";
+                var activeAttachment = EnsureActivePdfPmpAttachment(
+                    targetPc3,
+                    targetPmp,
+                    forceRewrite: false);
+                result.Installed = activeAttachment.Success;
+                result.Message = activeAttachment.Success
+                    ? "LA_pdf 打印机配置已存在；" + activeAttachment.Message
+                    : "LA_pdf 实际打印机关联失败: " + activeAttachment.Message;
                 return result;
             }
 
@@ -368,6 +389,145 @@ public static class AcadPlotterInstaller
     }
 
     /// <summary>
+    /// AutoCAD 2027 的 PIA2 会长期缓存 PC3/PMP 的介质目录。
+    /// 单张打印复用 PMP 中已有的任意纸张时，即使文件没有新增节点，也必须重写关联并刷新设备；
+    /// 2019 虽然也是 PIA2，但不需要承担 2027 的额外刷新开销。
+    /// </summary>
+    public static bool RequiresRefreshForReusedCustomPaper(string pc3Path)
+    {
+        if (!IsPia2PlotterFile(pc3Path))
+            return false;
+
+        var acadVersion = GetSystemVariableString("ACADVER");
+        var match = System.Text.RegularExpressions.Regex.Match(acadVersion, @"(?<version>\d+(?:\.\d+)?)");
+        return match.Success
+               && double.TryParse(
+                   match.Groups["version"].Value,
+                   NumberStyles.Float,
+                   CultureInfo.InvariantCulture,
+                   out var release)
+               && release >= 26d;
+    }
+
+    /// <summary>
+    /// 解析 AutoCAD 按设备名实际加载的 PC3 完整路径。
+    /// 2027 迁移旧配置后可能出现多个同名 LA_pdf.pc3；打印 API 只接收设备名时，
+    /// 不能再假设实际设备就是 ROAMABLEROOTPREFIX\Plotters 下的同名文件。
+    /// </summary>
+    public static string ResolveActivePlotterPath(string deviceName)
+    {
+        if (string.IsNullOrWhiteSpace(deviceName))
+            return "";
+
+        try
+        {
+            using var config = PlotConfigManager.SetCurrentConfig(Path.GetFileName(deviceName));
+            var resolved = config?.FullPath ?? "";
+            if (!string.IsNullOrWhiteSpace(resolved) && File.Exists(resolved))
+                return Path.GetFullPath(resolved);
+        }
+        catch
+        {
+            // 设备列表尚未刷新时回退到当前配置目录，随后由调用方刷新并重试打印。
+        }
+
+        var plottersDirectory = GetAutoCadPlotterDirectory();
+        return string.IsNullOrWhiteSpace(plottersDirectory)
+            ? ""
+            : Path.Combine(plottersDirectory, Path.GetFileName(deviceName));
+    }
+
+    /// <summary>
+    /// 读取 PC3 当前关联的 PMP。介质缓存必须跟踪实际加载 PC3 的 PMP，
+    /// 不能用推测目录的时间戳代替，否则同名 PC3 会让缓存长期保存错误介质目录。
+    /// </summary>
+    public static string ReadAttachedPmpPath(string pc3Path)
+    {
+        if (!IsValidPlotterFile(pc3Path))
+            return "";
+
+        try
+        {
+            var raw = File.ReadAllText(pc3Path);
+            if (TryReadPia3Json(raw, out var root))
+                return root["data"]?["meta"]?["user_defined_model_pathname"]?.Value<string>() ?? "";
+
+            return new PlotterConfiguration(pc3Path).ModelPath ?? "";
+        }
+        catch
+        {
+            return "";
+        }
+    }
+
+    /// <summary>
+    /// 同时修正程序维护的 PC3 与 AutoCAD 实际解析到的同名 PC3。
+    /// 只允许修改当前 CAD 用户配置根目录内、文件名为 LA_pdf.pc3 的插件自有配置，
+    /// 不删除重复文件，也不改 PrinterConfigPath 等用户全局设置。
+    /// </summary>
+    public static PmpAttachmentResult EnsureActivePdfPmpAttachment(
+        string configuredPc3Path,
+        string pmpPath,
+        bool forceRewrite)
+    {
+        var result = new PmpAttachmentResult();
+        try
+        {
+            var activePath = ResolveActivePlotterPath(PreferredPdfPlotter);
+            result.ActivePlotterPath = activePath;
+            var targets = new[] { configuredPc3Path, activePath }
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Select(Path.GetFullPath)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (targets.Count == 0)
+            {
+                result.Message = "未找到 LA_pdf.pc3。";
+                return result;
+            }
+
+            var currentCadRoot = GetSystemVariableString("ROAMABLEROOTPREFIX");
+            foreach (var target in targets)
+            {
+                if (!string.Equals(
+                        Path.GetFileName(target),
+                        PreferredPdfPlotter,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    result.Message = "拒绝修改非 LA_pdf.pc3 文件: " + target;
+                    return result;
+                }
+
+                if (!IsPathInsideDirectory(target, currentCadRoot))
+                {
+                    result.Message = "AutoCAD 实际加载的 LA_pdf.pc3 不在当前 CAD 用户配置目录，已停止修改: " + target;
+                    return result;
+                }
+
+                var before = File.Exists(target) ? File.ReadAllBytes(target) : Array.Empty<byte>();
+                if (!EnsurePmpAttachment(target, pmpPath, forceRewrite, out var targetMessage))
+                {
+                    result.Message = target + ": " + targetMessage;
+                    return result;
+                }
+
+                var after = File.ReadAllBytes(target);
+                result.Changed |= !before.SequenceEqual(after);
+            }
+
+            result.Success = true;
+            result.Message =
+                $"实际PC3={activePath}; PMP={Path.GetFullPath(pmpPath)}; 已同步={result.Changed}";
+            return result;
+        }
+        catch (Exception ex)
+        {
+            result.Message = ex.Message;
+            return result;
+        }
+    }
+
+    /// <summary>
     /// 确认 LA_pdf.pc3/PMP 指向当前 PMP。
     /// forceRewrite 用于 PMP 新增纸张后重写配置，从而使 AutoCAD 放弃已加载的设备缓存。
     /// 只更新 PMP 关联字段，不重建纸张节点、不修改驱动或其他打印机设置。
@@ -389,8 +549,20 @@ public static class AcadPlotterInstaller
         {
             var fullPmpPath = Path.GetFullPath(pmpPath);
             var expectedBase = Path.GetFileNameWithoutExtension(fullPmpPath);
-            var plottersDirectory = Path.GetDirectoryName(pc3Path) ?? "";
-            var sourceDriverPath = ReadDriverPath(Path.Combine(plottersDirectory, "DWG To PDF.pc3"));
+            // 实际加载的 LA_pdf.pc3 可能位于 2027 迁移生成的嵌套目录，并保留着 2024 驱动。
+            // 驱动来源必须跟随本次权威 PMP 所在的当前 CAD Plotters 根目录，不能取 PC3 的旧同级文件。
+            var pmpDirectory = Path.GetDirectoryName(fullPmpPath) ?? "";
+            var authoritativePlottersDirectory =
+                string.Equals(Path.GetFileName(pmpDirectory), "PMP Files", StringComparison.OrdinalIgnoreCase)
+                    ? Path.GetDirectoryName(pmpDirectory) ?? ""
+                    : "";
+            var sourceDriverPath = ReadDriverPath(
+                Path.Combine(authoritativePlottersDirectory, "DWG To PDF.pc3"));
+            if (string.IsNullOrWhiteSpace(sourceDriverPath))
+            {
+                var plottersDirectory = Path.GetDirectoryName(pc3Path) ?? "";
+                sourceDriverPath = ReadDriverPath(Path.Combine(plottersDirectory, "DWG To PDF.pc3"));
+            }
             var raw = File.ReadAllText(pc3Path);
             if (TryReadPia3Json(raw, out var root))
             {
@@ -494,6 +666,25 @@ public static class AcadPlotterInstaller
                 Path.GetFullPath(left),
                 Path.GetFullPath(right),
                 StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool IsPathInsideDirectory(string path, string directory)
+    {
+        if (string.IsNullOrWhiteSpace(path) || string.IsNullOrWhiteSpace(directory))
+            return false;
+
+        try
+        {
+            var fullPath = Path.GetFullPath(path);
+            var fullDirectory = Path.GetFullPath(directory)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                + Path.DirectorySeparatorChar;
+            return fullPath.StartsWith(fullDirectory, StringComparison.OrdinalIgnoreCase);
         }
         catch
         {
@@ -1331,10 +1522,13 @@ public static class AcadPlotterInstaller
 
     private static string GetAutoCadPlotterDirectory()
     {
-        var printerConfigDir = GetSystemVariableString("PrinterConfigDir");
-        if (!string.IsNullOrWhiteSpace(printerConfigDir))
+        // AutoCAD 的打印机目录来自“选项→文件→打印机配置搜索路径”，不是系统变量。
+        // 通过只读 COM 首选项获取，不写回、不改变用户搜索路径；Core Console 无 COM 时再回退。
+        var printerConfigPath = ReadPrinterConfigPathFromPreferences();
+        foreach (var configuredPath in ExpandPrinterConfigPaths(printerConfigPath))
         {
-            return printerConfigDir;
+            if (Directory.Exists(configuredPath))
+                return configuredPath;
         }
 
         var roamableRoot = GetSystemVariableString("ROAMABLEROOTPREFIX");
@@ -1344,6 +1538,75 @@ public static class AcadPlotterInstaller
         }
 
         return "";
+    }
+
+    private static string ReadPrinterConfigPathFromPreferences()
+    {
+        try
+        {
+            var acadApplication = typeof(CadApp).InvokeMember(
+                "AcadApplication",
+                BindingFlags.GetProperty | BindingFlags.Static | BindingFlags.Public,
+                null,
+                null,
+                null);
+            if (acadApplication == null)
+                return "";
+
+            var preferences = acadApplication.GetType().InvokeMember(
+                "Preferences",
+                BindingFlags.GetProperty,
+                null,
+                acadApplication,
+                null);
+            if (preferences == null)
+                return "";
+
+            var files = preferences.GetType().InvokeMember(
+                "Files",
+                BindingFlags.GetProperty,
+                null,
+                preferences,
+                null);
+            if (files == null)
+                return "";
+
+            return files.GetType().InvokeMember(
+                       "PrinterConfigPath",
+                       BindingFlags.GetProperty,
+                       null,
+                       files,
+                       null)?.ToString()
+                   ?? "";
+        }
+        catch
+        {
+            return "";
+        }
+    }
+
+    private static IEnumerable<string> ExpandPrinterConfigPaths(string configuredPaths)
+    {
+        if (string.IsNullOrWhiteSpace(configuredPaths))
+            yield break;
+
+        var roamableRoot = GetSystemVariableString("ROAMABLEROOTPREFIX");
+        foreach (var raw in configuredPaths.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var path = raw.Trim().Trim('"');
+            if (!string.IsNullOrWhiteSpace(roamableRoot))
+            {
+                path = System.Text.RegularExpressions.Regex.Replace(
+                    path,
+                    "%RoamableRootFolder%",
+                    _ => roamableRoot,
+                    System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            }
+
+            path = Environment.ExpandEnvironmentVariables(path);
+            if (!string.IsNullOrWhiteSpace(path))
+                yield return path;
+        }
     }
 
     private static string GetSystemVariableString(string name)
