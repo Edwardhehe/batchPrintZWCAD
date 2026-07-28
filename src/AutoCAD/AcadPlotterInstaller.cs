@@ -48,63 +48,6 @@ public static class AcadPlotterInstaller
         var result = new InstallResult();
         try
         {
-            var targetRootFromCad = GetAutoCadPlotterDirectory();
-            // 所有 AutoCAD 版本都先读取当前用户配置目录的 DWG To PDF.pc3，
-            // 由文件本身决定生成 PIA2 还是 PIA3，不按插件目标版本硬编码格式。
-            if (!string.IsNullOrWhiteSpace(targetRootFromCad))
-            {
-                result.TargetPlotterDirectory = targetRootFromCad;
-                var generatedPmpDir = Path.Combine(targetRootFromCad, "PMP Files");
-                Directory.CreateDirectory(targetRootFromCad);
-                Directory.CreateDirectory(generatedPmpDir);
-
-                var generatedPc3 = Path.Combine(targetRootFromCad, PreferredPdfPlotter);
-                var generatedPmp = Path.Combine(generatedPmpDir, PreferredPmp);
-                if (IsValidPlotterFile(generatedPc3) && IsValidPlotterFile(generatedPmp))
-                {
-                    EnsurePmpAttachment(generatedPc3, generatedPmp, forceRewrite: false, out _);
-                    var activeAttachment = EnsureActivePdfPmpAttachment(
-                        generatedPc3,
-                        generatedPmp,
-                        forceRewrite: false);
-                    result.SourceFound = true;
-                    result.Installed = activeAttachment.Success;
-                    result.Message = activeAttachment.Success
-                        ? "LA_pdf 打印机配置已存在；" + activeAttachment.Message
-                        : "LA_pdf 实际打印机关联失败: " + activeAttachment.Message;
-                    return result;
-                }
-
-                if (TryInstallFromCurrentDwgToPdf(targetRootFromCad, generatedPc3, generatedPmp, out var generatedMessage))
-                {
-                    result.SourceFound = true;
-                    result.Installed = true;
-                    result.Message = generatedMessage;
-                    return result;
-                }
-            }
-
-            var sourceRoot = FindBundledPlotterRoot();
-            if (string.IsNullOrWhiteSpace(sourceRoot))
-            {
-                result.Message = "未找到随插件附带的 LA_pdf 打印机配置。";
-                return result;
-            }
-
-            result.SourceFound = true;
-
-            // 读用户机器 DWG To PDF.pc3 判断 PIA 版本，选对应资源
-            var piaSub = ShouldPreferBundledPia2Plotter()
-                ? "PIA2"
-                : PmpPiaConverter.IsCadPia3Compatible() ? "PIA3" : "PIA2";
-            var sourcePc3 = Path.Combine(sourceRoot, piaSub, PreferredPdfPlotter);
-            var sourcePmp = Path.Combine(sourceRoot, piaSub, "PMP Files", PreferredPmp);
-            if (!File.Exists(sourcePc3) || !File.Exists(sourcePmp))
-            {
-                result.Message = $"LA_pdf 打印机配置不完整，需要 {piaSub}/{PreferredPdfPlotter} 和 {piaSub}/PMP Files/{PreferredPmp}。";
-                return result;
-            }
-
             var targetRoot = GetAutoCadPlotterDirectory();
             if (string.IsNullOrWhiteSpace(targetRoot))
             {
@@ -116,55 +59,49 @@ public static class AcadPlotterInstaller
             var targetPmpDir = Path.Combine(targetRoot, "PMP Files");
             Directory.CreateDirectory(targetRoot);
             Directory.CreateDirectory(targetPmpDir);
-
             var targetPc3 = Path.Combine(targetRoot, PreferredPdfPlotter);
             var targetPmp = Path.Combine(targetPmpDir, PreferredPmp);
 
-            // PMP 可能包含用户或本插件动态注册的纸张，已有有效配置时不得覆盖。
-            if (IsValidPlotterFile(targetPc3) && IsValidPlotterFile(targetPmp))
-            {
-                EnsurePmpAttachment(targetPc3, targetPmp, forceRewrite: false, out _);
-                var activeAttachment = EnsureActivePdfPmpAttachment(
+            // 不转换、不合并既有 LA PIA。每次都从随包 PIA2 基准重新生成，
+            // 只读取当前 CAD 自带绘图仪的驱动路径，并覆盖插件自有 LA_pdf。
+            if (!TryInstallForcedPia2PdfPlotter(
+                    targetRoot,
                     targetPc3,
                     targetPmp,
-                    forceRewrite: false);
-                result.Installed = activeAttachment.Success;
-                result.Message = activeAttachment.Success
-                    ? "LA_pdf 打印机配置已存在；" + activeAttachment.Message
-                    : "LA_pdf 实际打印机关联失败: " + activeAttachment.Message;
-                return result;
-            }
-
-            if (ShouldPreferBundledPia2Plotter())
+                    out var installMessage))
             {
-                // PIA2 也优先以当前用户配置目录的 DWG To PDF.pc3 为母版；
-                // 随包文件只在当前配置确实缺失时兜底。
-                var currentDwgToPdf = Path.Combine(targetRoot, "DWG To PDF.pc3");
-                var pia2Seed = IsPia2PlotterFile(currentDwgToPdf) ? currentDwgToPdf : sourcePc3;
-                InstallPia2FromCurrentDwgToPdf(pia2Seed, targetPc3, targetPmp);
-                result.Installed = File.Exists(targetPc3) && File.Exists(targetPmp);
-                result.Message = result.Installed
-                    ? "LA_pdf plotter has been generated from the PIA2 seed."
-                    : "LA_pdf plotter generation failed.";
+                result.Message = installMessage;
                 return result;
             }
+            const bool pia2WasWritten = true;
 
-            // 已有有效文件且版本匹配 → 跳过
-            if (InstalledPlotterFilesMatch(sourcePc3, targetPc3, sourcePmp, targetPmp, targetRoot))
+            result.SourceFound = true;
+            if (!IsReadablePia2PlotterFile(targetPc3)
+                || !IsReadablePia2PlotterFile(targetPmp))
             {
-                result.Installed = true;
-                result.Message = "LA_pdf 打印机配置已存在且有效。";
+                result.Message = "LA_pdf 生成后不是 PIA2，已停止安装。";
                 return result;
             }
 
-            File.Copy(sourcePc3, targetPc3, overwrite: true);
-            File.Copy(sourcePmp, targetPmp, overwrite: true);
-            NormalizeInstalledPlotterFiles(targetRoot, targetPc3, targetPmp);
+            if (!EnsurePmpAttachment(
+                    targetPc3,
+                    targetPmp,
+                    forceRewrite: pia2WasWritten,
+                    out var attachmentMessage))
+            {
+                result.Message = "LA_pdf PIA2 关联失败: " + attachmentMessage;
+                return result;
+            }
 
-            result.Installed = File.Exists(targetPc3) && File.Exists(targetPmp);
-            result.Message = result.Installed
-                ? "LA_pdf 打印机配置已可用。"
-                : "LA_pdf 打印机配置未复制。";
+            var activeAttachment = EnsureActivePdfPmpAttachment(
+                targetPc3,
+                targetPmp,
+                forceRewrite: pia2WasWritten);
+            result.Installed = activeAttachment.Success;
+            result.Message = activeAttachment.Success
+                ? "LA_pdf 已由随包模板重新生成并固定为 PIA2；"
+                  + activeAttachment.Message
+                : "LA_pdf 实际打印机关联失败: " + activeAttachment.Message;
             return result;
         }
         catch (Exception ex)
@@ -176,29 +113,17 @@ public static class AcadPlotterInstaller
 
     public static string InstallPngPlotter()
     {
-        return InstallRasterPlotter(
-            PreferredPngPlotter,
-            PreferredPngPmp,
-            new[] { "PublishToWeb PNG.pc3" },
-            name => name.IndexOf("PNG", StringComparison.OrdinalIgnoreCase) >= 0
-                    && name.IndexOf("Transparent", StringComparison.OrdinalIgnoreCase) < 0);
+        return InstallRasterPlotter(PreferredPngPlotter, PreferredPngPmp);
     }
 
     public static string InstallJpgPlotter()
     {
-        return InstallRasterPlotter(
-            PreferredJpgPlotter,
-            PreferredJpgPmp,
-            new[] { "PublishToWeb JPG.pc3" },
-            name => name.IndexOf("JPG", StringComparison.OrdinalIgnoreCase) >= 0
-                    || name.IndexOf("JPEG", StringComparison.OrdinalIgnoreCase) >= 0);
+        return InstallRasterPlotter(PreferredJpgPlotter, PreferredJpgPmp);
     }
 
     private static string InstallRasterPlotter(
         string targetPlotterName,
-        string targetPmpName,
-        IEnumerable<string> preferredNames,
-        Func<string, bool> fallbackPredicate)
+        string targetPmpName)
     {
         try
         {
@@ -214,54 +139,20 @@ public static class AcadPlotterInstaller
             var targetPc3 = Path.Combine(targetRoot, targetPlotterName);
             var targetPmp = Path.Combine(targetPmpDirectory, targetPmpName);
 
-            var sources = Directory.EnumerateFiles(targetRoot, "*.pc3", SearchOption.AllDirectories)
-                .Where(path => !string.Equals(
-                    Path.GetFileName(path),
-                    targetPlotterName,
-                    StringComparison.OrdinalIgnoreCase))
-                .ToList();
-            foreach (var preferredName in preferredNames)
-            {
-                var preferredSource = sources.FirstOrDefault(path =>
-                    string.Equals(Path.GetFileName(path), preferredName, StringComparison.OrdinalIgnoreCase));
-                if (!string.IsNullOrWhiteSpace(preferredSource))
-                {
-                    return GenerateRasterPlotter(preferredSource, targetPc3, targetPmp, targetPlotterName);
-                }
-            }
-
-            var fallbackSource = sources.FirstOrDefault(path => fallbackPredicate(Path.GetFileName(path)));
-            return string.IsNullOrWhiteSpace(fallbackSource)
-                ? ""
-                : GenerateRasterPlotter(fallbackSource, targetPc3, targetPmp, targetPlotterName);
+            var metadataSource = FindReadOnlyMetadataSource(targetRoot, targetPlotterName);
+            return TryWriteLaPia2PairFromTemplate(
+                       targetPlotterName,
+                       targetPc3,
+                       targetPmp,
+                       metadataSource,
+                       out _)
+                ? targetPlotterName
+                : "";
         }
         catch
         {
             return "";
         }
-    }
-
-    private static string GenerateRasterPlotter(
-        string sourcePc3,
-        string targetPc3,
-        string targetPmp,
-        string targetPlotterName)
-    {
-        // 栅格 PC3 必须继承 PNG/JPG 自身的驱动与图像参数；仅将软件纸张写入独立 PMP。
-        // 目标仅为本插件的 LA_png/LA_jpg，不读取或改写用户其他绘图器设置。
-        var raw = File.ReadAllText(sourcePc3);
-        if (TryReadPia3Json(raw, out var pia3Root))
-        {
-            InstallPia3RasterFromSource(pia3Root, targetPc3, targetPmp);
-        }
-        else
-        {
-            InstallPia2RasterFromSource(sourcePc3, targetPc3, targetPmp, ReadDriverPath(sourcePc3));
-        }
-
-        return IsValidPlotterFile(targetPc3) && IsValidPlotterFile(targetPmp)
-            ? targetPlotterName
-            : "";
     }
 
     public static void RefreshPlotterDevices()
@@ -322,33 +213,15 @@ public static class AcadPlotterInstaller
             Directory.CreateDirectory(targetRoot);
             Directory.CreateDirectory(targetPmpDir);
 
-            // LA_dwf.pmp 会在 DWF 正留白时动态写入扩大后的纸张，已有有效配置必须保留。
-            if (IsValidPlotterFile(targetPc3) && IsValidPlotterFile(targetPmp))
-            {
-                return PreferredDwfPlotter;
-            }
-
-            var sourcePc3 = Directory.GetFiles(targetRoot, "*.pc3")
-                .Where(path => !string.Equals(Path.GetFileName(path), PreferredDwfPlotter, StringComparison.OrdinalIgnoreCase))
-                .OrderBy(path => string.Equals(Path.GetFileName(path), "DWF6 ePlot.pc3", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
-                .FirstOrDefault(path => Path.GetFileName(path).IndexOf("DWF", StringComparison.OrdinalIgnoreCase) >= 0
-                                        && Path.GetFileName(path).IndexOf("DWFx", StringComparison.OrdinalIgnoreCase) < 0);
-            if (string.IsNullOrWhiteSpace(sourcePc3))
-            {
-                return File.Exists(targetPc3) ? PreferredDwfPlotter : "";
-            }
-
-            var raw = File.ReadAllText(sourcePc3);
-            if (TryReadPia3Json(raw, out var pia3Root))
-            {
-                InstallPia3FromCurrentDwgToPdf(pia3Root, targetPc3, targetPmp);
-            }
-            else
-            {
-                InstallPia2FromSource(sourcePc3, targetPc3, targetPmp, "");
-            }
-
-            return File.Exists(targetPc3) && File.Exists(targetPmp) ? PreferredDwfPlotter : "";
+            var sourcePc3 = FindReadOnlyMetadataSource(targetRoot, PreferredDwfPlotter);
+            return TryWriteLaPia2PairFromTemplate(
+                       PreferredDwfPlotter,
+                       targetPc3,
+                       targetPmp,
+                       sourcePc3,
+                       out _)
+                ? PreferredDwfPlotter
+                : "";
         }
         catch
         {
@@ -473,6 +346,21 @@ public static class AcadPlotterInstaller
         var result = new PmpAttachmentResult();
         try
         {
+            if (!string.Equals(
+                    Path.GetFileName(configuredPc3Path),
+                    PreferredPdfPlotter,
+                    StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(
+                    Path.GetFileName(pmpPath),
+                    PreferredPmp,
+                    StringComparison.OrdinalIgnoreCase)
+                || !IsReadablePia2PlotterFile(configuredPc3Path)
+                || !IsReadablePia2PlotterFile(pmpPath))
+            {
+                result.Message = "仅允许用 PIA2 LA_pdf.pc3/LA_pdf.pmp 同步 LA 系列配置。";
+                return result;
+            }
+
             var activePath = ResolveActivePlotterPath(PreferredPdfPlotter);
             result.ActivePlotterPath = activePath;
             var targets = new[] { configuredPc3Path, activePath }
@@ -505,7 +393,23 @@ public static class AcadPlotterInstaller
                 }
 
                 var before = File.Exists(target) ? File.ReadAllBytes(target) : Array.Empty<byte>();
-                if (!EnsurePmpAttachment(target, pmpPath, forceRewrite, out var targetMessage))
+                var targetWasReplaced = false;
+                if (!string.Equals(
+                        Path.GetFullPath(target),
+                        Path.GetFullPath(configuredPc3Path),
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    // AutoCAD 可能解析到迁移目录中的旧同名 LA_pdf。
+                    // 不检查也不转换旧内容，直接用刚生成的 PIA2 LA_pdf 替换该插件自有副本。
+                    File.Copy(configuredPc3Path, target, overwrite: true);
+                    targetWasReplaced = true;
+                }
+
+                if (!EnsurePmpAttachment(
+                        target,
+                        pmpPath,
+                        forceRewrite || targetWasReplaced,
+                        out var targetMessage))
                 {
                     result.Message = target + ": " + targetMessage;
                     return result;
@@ -539,9 +443,23 @@ public static class AcadPlotterInstaller
         out string message)
     {
         message = "";
-        if (!IsValidPlotterFile(pc3Path) || !IsValidPlotterFile(pmpPath))
+        if (!string.Equals(
+                Path.GetFileName(pc3Path),
+                PreferredPdfPlotter,
+                StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(
+                Path.GetFileName(pmpPath),
+                PreferredPmp,
+                StringComparison.OrdinalIgnoreCase))
         {
-            message = "LA_pdf.pc3 或 LA_pdf.pmp 不存在/无效。";
+            message = "仅允许更新 LA_pdf.pc3/LA_pdf.pmp 的关联字段。";
+            return false;
+        }
+
+        if (!IsReadablePia2PlotterFile(pc3Path)
+            || !IsReadablePia2PlotterFile(pmpPath))
+        {
+            message = "LA_pdf.pc3 或 LA_pdf.pmp 不是可读取的 PIA2 文件。";
             return false;
         }
 
@@ -563,28 +481,6 @@ public static class AcadPlotterInstaller
                 var plottersDirectory = Path.GetDirectoryName(pc3Path) ?? "";
                 sourceDriverPath = ReadDriverPath(Path.Combine(plottersDirectory, "DWG To PDF.pc3"));
             }
-            var raw = File.ReadAllText(pc3Path);
-            if (TryReadPia3Json(raw, out var root))
-            {
-                if (!EnsurePia3MetaFile(
-                        pc3Path, root, fullPmpPath, expectedBase, sourceDriverPath, forceRewrite, out message))
-                    return false;
-
-                var pmpRaw = File.ReadAllText(pmpPath);
-                if (!TryReadPia3Json(pmpRaw, out var pmpRoot))
-                {
-                    message = "LA_pdf.pc3 为 PIA3，但 LA_pdf.pmp 不是对应的 PIA3 格式。";
-                    return false;
-                }
-
-                if (!EnsurePia3MetaFile(
-                        pmpPath, pmpRoot, fullPmpPath, expectedBase, sourceDriverPath, forceRewrite, out message))
-                    return false;
-
-                message = $"PMP={fullPmpPath}; 驱动继承自当前 DWG To PDF.pc3";
-                return true;
-            }
-
             EnsurePia2MetaFile(pc3Path, fullPmpPath, expectedBase, sourceDriverPath, forceRewrite);
             EnsurePia2MetaFile(pmpPath, fullPmpPath, expectedBase, sourceDriverPath, forceRewrite);
             message = $"PMP={fullPmpPath}; 驱动继承自当前 DWG To PDF.pc3";
@@ -595,43 +491,6 @@ public static class AcadPlotterInstaller
             message = ex.Message;
             return false;
         }
-    }
-
-    private static bool EnsurePia3MetaFile(
-        string path,
-        JObject root,
-        string pmpPath,
-        string expectedBase,
-        string sourceDriverPath,
-        bool forceRewrite,
-        out string message)
-    {
-        message = "";
-        var meta = root["data"]?["meta"] as JObject;
-        if (meta == null)
-        {
-            message = Path.GetFileName(path) + " 缺少 PIA3 meta 节点。";
-            return false;
-        }
-
-        var currentPath = meta["user_defined_model_pathname"]?.Value<string>() ?? "";
-        var currentBase = meta["user_defined_model_basename"]?.Value<string>() ?? "";
-        var currentDriver = meta["driver_pathname"]?.Value<string>() ?? "";
-        var driverDiffers = !string.IsNullOrWhiteSpace(sourceDriverPath)
-            && !string.Equals(currentDriver, sourceDriverPath, StringComparison.OrdinalIgnoreCase);
-        var needsWrite = forceRewrite
-            || !PathsEqual(currentPath, pmpPath)
-            || !string.Equals(currentBase, expectedBase, StringComparison.OrdinalIgnoreCase)
-            || driverDiffers;
-        if (!needsWrite)
-            return true;
-
-        meta["user_defined_model_pathname"] = pmpPath;
-        meta["user_defined_model_basename"] = expectedBase;
-        if (!string.IsNullOrWhiteSpace(sourceDriverPath))
-            meta["driver_pathname"] = sourceDriverPath;
-        File.WriteAllText(path, "PIAFILEVERSION_3.0,json\n" + root.ToString(Formatting.Indented));
-        return true;
     }
 
     private static void EnsurePia2MetaFile(
@@ -692,43 +551,299 @@ public static class AcadPlotterInstaller
         }
     }
 
-    private static bool ShouldPreferBundledPia2Plotter()
-    {
-#if ACAD_CORE
-        return false;
-#else
-        return true;
-#endif
-    }
-
-    private static bool TryInstallFromCurrentDwgToPdf(string plottersDirectory, string targetPc3, string targetPmp, out string message)
+    /// <summary>
+    /// 以随包 PIA2 为唯一结构来源生成 LA 文件；当前 CAD PC3 只读取驱动路径，
+    /// 不读取、不复制、不转换既有 LA PIA，也不写回 DWG To PDF/PublishToWeb/DWF。
+    /// </summary>
+    private static bool TryWriteLaPia2PairFromTemplate(
+        string deviceName,
+        string targetPc3,
+        string targetPmp,
+        string metadataSourcePc3,
+        out string message)
     {
         message = "";
+        if (!IsSupportedLaPlotter(deviceName))
+        {
+            message = "拒绝生成非 LA 系列绘图仪。";
+            return false;
+        }
+
+        var templatePc3 = GetBundledPia2Template(deviceName, out var templatePmp);
+        if (!IsReadablePia2PlotterFile(templatePc3)
+            || !IsReadablePia2PlotterFile(templatePmp))
+        {
+            message = "缺少或无法读取随包 PIA2 模板: " + deviceName;
+            return false;
+        }
+
+        var sourceDriverPath = ReadDriverPath(metadataSourcePc3);
+        if (string.IsNullOrWhiteSpace(sourceDriverPath))
+        {
+            message = "无法从当前 CAD 自带绘图仪读取驱动路径，已停止替换 LA 配置。";
+            return false;
+        }
+
+        var token = Guid.NewGuid().ToString("N");
+        var tempPc3 = targetPc3 + ".new-" + token;
+        var tempPmp = targetPmp + ".new-" + token;
+        var backupPc3 = targetPc3 + ".backup-" + token;
+        var backupPmp = targetPmp + ".backup-" + token;
+
         try
         {
-            var sourcePc3 = Path.Combine(plottersDirectory, "DWG To PDF.pc3");
-            if (!File.Exists(sourcePc3))
-            {
-                message = "未找到当前 AutoCAD 的 DWG To PDF.pc3。";
-                return false;
-            }
+            // PC3/PMP 的全部结构和纸张表均以资源文件为准，不在代码中重新生成。
+            File.Copy(templatePc3, tempPc3, overwrite: true);
+            File.Copy(templatePmp, tempPmp, overwrite: true);
 
-            var raw = File.ReadAllText(sourcePc3);
-            if (TryReadPia3Json(raw, out var pia3Root))
-            {
-                InstallPia3FromCurrentDwgToPdf(pia3Root, targetPc3, targetPmp);
-                message = "LA_pdf 打印机配置已按当前 AutoCAD DWG To PDF 生成。";
-                return true;
-            }
+            // 资源模板中的低版本硬编码路径不能带入用户环境；
+            // 只修正驱动路径、PMP 完整路径和 basename。
+            EnsurePia2MetaFile(
+                tempPc3,
+                Path.GetFullPath(targetPmp),
+                Path.GetFileNameWithoutExtension(targetPmp),
+                sourceDriverPath,
+                forceRewrite: true);
+            EnsurePia2MetaFile(
+                tempPmp,
+                Path.GetFullPath(targetPmp),
+                Path.GetFileNameWithoutExtension(targetPmp),
+                sourceDriverPath,
+                forceRewrite: true);
 
-            InstallPia2FromCurrentDwgToPdf(sourcePc3, targetPc3, targetPmp);
-            message = "LA_pdf 打印机配置已按当前 AutoCAD DWG To PDF 生成。";
+            if (!IsReadablePia2PlotterFile(tempPc3)
+                || !IsReadablePia2PlotterFile(tempPmp)
+                || !HasCompleteBundledMediaCatalog(deviceName, tempPmp))
+                throw new InvalidDataException("临时 LA PC3/PMP 未通过完整 PIA2 解析校验。");
+
+            if (File.Exists(targetPc3))
+                File.Copy(targetPc3, backupPc3, overwrite: true);
+            if (File.Exists(targetPmp))
+                File.Copy(targetPmp, backupPmp, overwrite: true);
+            File.Copy(tempPc3, targetPc3, overwrite: true);
+            File.Copy(tempPmp, targetPmp, overwrite: true);
+
+            if (!IsReadablePia2PlotterFile(targetPc3)
+                || !IsReadablePia2PlotterFile(targetPmp)
+                || !HasCompleteBundledMediaCatalog(deviceName, targetPmp))
+                throw new InvalidDataException("最终 LA PC3/PMP 未通过完整 PIA2 解析校验。");
+
+            message = $"LA {deviceName} 已直接由固定 PIA2 模板生成。";
             return true;
         }
         catch (Exception ex)
         {
-            message = "按当前 AutoCAD DWG To PDF 生成 LA_pdf 失败，已尝试随包兜底：" + ex.Message;
+            try
+            {
+                if (File.Exists(backupPc3))
+                    File.Copy(backupPc3, targetPc3, overwrite: true);
+                if (File.Exists(backupPmp))
+                    File.Copy(backupPmp, targetPmp, overwrite: true);
+            }
+            catch
+            {
+                // 恢复失败时仍停止，不得转而修改用户的系统绘图仪。
+            }
+
+            message = "LA PIA2 模板生成失败，已停止且未修改其他绘图仪: " + ex.Message;
             return false;
+        }
+        finally
+        {
+            DeleteTemporaryFile(tempPc3);
+            DeleteTemporaryFile(tempPmp);
+            DeleteTemporaryFile(backupPc3);
+            DeleteTemporaryFile(backupPmp);
+        }
+    }
+
+    /// <summary>
+    /// 新安装同样只以随包 PIA2 为结构来源，当前 DWG To PDF.pc3 仅提供驱动路径。
+    /// </summary>
+    private static bool TryInstallForcedPia2PdfPlotter(
+        string plottersDirectory,
+        string targetPc3,
+        string targetPmp,
+        out string message)
+    {
+        var sourcePc3 = Path.Combine(plottersDirectory, "DWG To PDF.pc3");
+        return TryWriteLaPia2PairFromTemplate(
+            PreferredPdfPlotter,
+            targetPc3,
+            targetPmp,
+            sourcePc3,
+            out message);
+    }
+
+    private static bool IsSupportedLaPlotter(string deviceName)
+    {
+        return string.Equals(deviceName, PreferredPdfPlotter, StringComparison.OrdinalIgnoreCase)
+               || string.Equals(deviceName, PreferredPngPlotter, StringComparison.OrdinalIgnoreCase)
+               || string.Equals(deviceName, PreferredJpgPlotter, StringComparison.OrdinalIgnoreCase)
+               || string.Equals(deviceName, PreferredDwfPlotter, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string GetBundledPia2Template(string deviceName, out string pmpPath)
+    {
+        pmpPath = "";
+        var sourceRoot = FindBundledPlotterRoot();
+        if (string.IsNullOrWhiteSpace(sourceRoot))
+            return "";
+
+        var pc3Path = Path.Combine(sourceRoot, "PIA2", deviceName);
+        pmpPath = Path.Combine(
+            sourceRoot,
+            "PIA2",
+            "PMP Files",
+            Path.GetFileNameWithoutExtension(deviceName) + ".pmp");
+        return pc3Path;
+    }
+
+    /// <summary>
+    /// 验证生成结果仍完整包含资源模板的全部基准介质。
+    /// </summary>
+    private static bool HasCompleteBundledMediaCatalog(string deviceName, string targetPmp)
+    {
+        if (!IsSupportedLaPlotter(deviceName))
+            return false;
+
+        _ = GetBundledPia2Template(deviceName, out var templatePmp);
+        if (!TryReadPia2MediaDimensions(templatePmp, out var required)
+            || !TryReadPia2MediaDimensions(targetPmp, out var actual)
+            || required.Count == 0)
+        {
+            return false;
+        }
+
+        return required.All(expected =>
+            actual.Any(candidate =>
+                Math.Abs(candidate.Width - expected.Width) <= 0.01d
+                && Math.Abs(candidate.Height - expected.Height) <= 0.01d));
+    }
+
+    private static bool TryReadPia2MediaDimensions(
+        string pmpPath,
+        out List<(double Width, double Height)> result)
+    {
+        result = new List<(double Width, double Height)>();
+        if (!IsReadablePia2PlotterFile(pmpPath))
+            return false;
+
+        try
+        {
+            var config = new PlotterConfiguration(pmpPath);
+            var descriptions = config["udm"]?["media"]?["description"];
+            if (descriptions == null)
+                return false;
+
+            foreach (var description in descriptions.ChildNodes)
+            {
+                if (!description.NodeMap.TryGetValue("caps_type", out var capsType)
+                    || !string.Equals(capsType, "2", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var width = ReadPia2Number(description, "media_bounds_urx");
+                var height = ReadPia2Number(description, "media_bounds_ury");
+                if (width > 0d && height > 0d)
+                    result.Add((width, height));
+            }
+
+            return true;
+        }
+        catch
+        {
+            result.Clear();
+            return false;
+        }
+    }
+
+    private static bool IsReadablePia2PlotterFile(string path)
+    {
+        if (!IsPia2PlotterFile(path))
+            return false;
+
+        try
+        {
+            _ = new PlotterConfiguration(path);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static string FindReadOnlyMetadataSource(string plottersDirectory, string deviceName)
+    {
+        if (string.IsNullOrWhiteSpace(plottersDirectory) || !Directory.Exists(plottersDirectory))
+            return "";
+
+        if (string.Equals(deviceName, PreferredPdfPlotter, StringComparison.OrdinalIgnoreCase))
+            return Path.Combine(plottersDirectory, "DWG To PDF.pc3");
+
+        var sources = Directory.EnumerateFiles(plottersDirectory, "*.pc3", SearchOption.AllDirectories)
+            .Where(path => !Path.GetFileName(path).StartsWith("LA_", StringComparison.OrdinalIgnoreCase));
+        if (string.Equals(deviceName, PreferredPngPlotter, StringComparison.OrdinalIgnoreCase))
+        {
+            return sources.FirstOrDefault(path =>
+                       string.Equals(
+                           Path.GetFileName(path),
+                           "PublishToWeb PNG.pc3",
+                           StringComparison.OrdinalIgnoreCase))
+                   ?? "";
+        }
+
+        if (string.Equals(deviceName, PreferredJpgPlotter, StringComparison.OrdinalIgnoreCase))
+        {
+            return sources.FirstOrDefault(path =>
+                       string.Equals(
+                           Path.GetFileName(path),
+                           "PublishToWeb JPG.pc3",
+                           StringComparison.OrdinalIgnoreCase))
+                   ?? "";
+        }
+
+        return sources
+                   .OrderBy(path =>
+                       string.Equals(
+                           Path.GetFileName(path),
+                           "DWF6 ePlot.pc3",
+                           StringComparison.OrdinalIgnoreCase)
+                           ? 0
+                           : 1)
+                   .FirstOrDefault(path =>
+                       Path.GetFileName(path).IndexOf("DWF", StringComparison.OrdinalIgnoreCase) >= 0
+                       && Path.GetFileName(path).IndexOf("DWFx", StringComparison.OrdinalIgnoreCase) < 0)
+               ?? "";
+    }
+
+    private static double ReadPia2Number(PiaNode node, string key)
+    {
+        return node.NodeMap.TryGetValue(key, out var value)
+               && double.TryParse(
+                   value,
+                   NumberStyles.Float,
+                   CultureInfo.InvariantCulture,
+                   out var number)
+            ? number
+            : 0d;
+    }
+
+    private static void DeleteTemporaryFile(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return;
+
+        try
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+        catch
+        {
+            // 临时文件清理由系统后续回收；不得因此回写或删除用户绘图仪配置。
         }
     }
 
@@ -1486,15 +1601,13 @@ public static class AcadPlotterInstaller
         foreach (var root in GetCandidateBaseDirectories())
         {
             var candidate = Path.Combine(root, "Plotters");
-            if (File.Exists(Path.Combine(candidate, "PIA2", PreferredPdfPlotter))
-                || File.Exists(Path.Combine(candidate, "PIA3", PreferredPdfPlotter)))
+            if (File.Exists(Path.Combine(candidate, "PIA2", PreferredPdfPlotter)))
             {
                 return candidate;
             }
 
             candidate = Path.Combine(root, "resources", "acad", "Plotters");
-            if (File.Exists(Path.Combine(candidate, "PIA2", PreferredPdfPlotter))
-                || File.Exists(Path.Combine(candidate, "PIA3", PreferredPdfPlotter)))
+            if (File.Exists(Path.Combine(candidate, "PIA2", PreferredPdfPlotter)))
             {
                 return candidate;
             }

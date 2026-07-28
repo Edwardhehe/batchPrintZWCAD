@@ -369,8 +369,9 @@ SinglePlotCore() 中 candidates.Count == 0
 | 自定义比例对话框 | `CustomScaleForm` — [`Pages/CustomScaleForm.cs`](src/Common/Pages/CustomScaleForm.cs) |
 | PMP 注册（入口） | `PmpCustomPaper.RegisterCustomPaper()` — [`PmpCustomPaper.cs`](src/Common/PmpCustomPaper.cs) |
 | PMP 清理 | `PmpCustomPaper.RemoveCustomPaper()` — [`PmpCustomPaper.cs`](src/Common/PmpCustomPaper.cs) |
-| PIA 版本检测 | `PmpPiaConverter.IsCadPia3Compatible()` — [`PmpPiaConverter.cs`](src/Common/PmpPiaConverter.cs) |
-| PIA 3→2 转换 | `PmpPiaConverter.ConvertToPia2()` — [`PmpPiaConverter.cs`](src/Common/PmpPiaConverter.cs) |
+| PIA 格式策略 | 所有 AutoCAD 版本统一使用随包、已验证的 LA PIA2 模板 |
+| 模板纸张基准 | PDF/DWF 各 85 个毫米规格；PNG/JPG 各 170 个横竖像素介质 |
+| 既有 LA 处理 | 不读取、不转换、不合并，直接用模板覆盖；任意尺寸由本次打印重新注册 |
 | PC3 关联刷新 | `AcadPlotterInstaller.EnsurePmpAttachment()` — 平台特有 |
 
 ---
@@ -473,7 +474,7 @@ PlotterService.PlotMany(Jobs, deviceName, styleSheet, settings)
 
 #### AutoCAD 栅格设备
 
-AutoCAD 的 `PublishToWeb PNG.pc3` / `PublishToWeb JPG.pc3` 仅作为驱动和图像参数模板。安装器基于它们生成插件自有的 `LA_png.pc3` / `LA_jpg.pc3`，并生成对应的 PIA2 或 PIA3 PMP。标准 A4～A0 及加长规格共有 85 个毫米规格，每个规格写入横、竖两个像素介质，共 170 个介质项。
+AutoCAD 的 `PublishToWeb PNG.pc3` / `PublishToWeb JPG.pc3` 只读，仅提供当前 CAD 的驱动路径。安装器始终以随包、已验证的 PIA2 模板生成插件自有的 `LA_png.pc3` / `LA_jpg.pc3` 及 PIA2 PMP。标准 A4～A0 及加长规格共有 85 个毫米规格，每个规格写入横、竖两个像素介质，共 170 个介质项。
 
 AutoCAD 栅格驱动要求 `PlotPaperUnit.Pixels`。业务层仍以毫米识别图框和纸张，`PlotterService` 读取设备 DPI 后执行双向换算：
 
@@ -614,7 +615,7 @@ AutoCAD Core 版本额外使用 `#if ACAD_CORE` 子条件处理 `CadApp.ShowModa
 | 命名空间 | `Autodesk.AutoCAD.*` | `ZwSoft.ZwCAD.*` |
 | 绘图仪配置 | 插件自有 `LA_pdf/LA_png/LA_jpg/LA_dwf.pc3` | 插件自有 `LA_pdf/LA_png/LA_jpg/LA_dwf.pc5`（基于模板改写 PMP 路径） |
 | PNG/JPG 设备策略 | 只使用 `LA_png/LA_jpg`，CAD 自带设备仅用于生成配置 | 只使用 `LA_png/LA_jpg`，CAD 自带设备仅作为 PC5 驱动模板 |
-| 栅格纸张来源 | 安装时生成 PIA2/PIA3 PMP，毫米规格转换为像素介质 | 使用插件随包 PMP 纸张表并关联到插件自有 PC5 |
+| 栅格纸张来源 | 固定 PIA2 模板，毫米规格转换为像素介质 | 使用插件随包 PMP 纸张表并关联到插件自有 PC5 |
 | 栅格纸张单位 | `Pixels`；根据设备 DPI 与毫米互换 | `Millimeters`；业务层按毫米选择规格 |
 | 设备列表刷新 | `PlotConfigManager` 刷新全局设备列表 | 临时 `PlotSettings` 调用 `RefreshLists()` |
 | 打印纸张匹配 | 复杂权重排序, 支持旋转, 多候选 | `MediaSelection` 简化匹配 |
@@ -672,7 +673,7 @@ AutoCAD Core 版本额外使用 `#if ACAD_CORE` 子条件处理 `CadApp.ShowModa
 │   │   ├── AppSettingsStore.cs         ← 设置持久化 (JSON), 含文件名连接符/字段合法性检查
 │   │   ├── PdfDocumentService.cs       ← PDF 合并 (PdfSharp)
 │   │   ├── PmpCustomPaper.cs           ← PMP 自定义纸张注册/删除 (PIA3 JSON / PIA2 / ZWCAD INI)
-│   │   ├── PmpPiaConverter.cs          ← PIA 版本检测 + PIA 3→2 转换
+│   │   ├── PmpPiaConverter.cs          ← 历史兼容工具（LA 安装链路不调用）
 │   │   ├── DwgSplitService.cs          ← DWG 拆分 (模型空间WBLOCK / 布局空间复制)
 │   │   ├── DirectoryTableGenerator.cs  ← 图纸目录表生成: 在CAD中绘制表格 + 框选单元格尺寸
 │   │   ├── TemporarySequenceOverlay.cs ← 打印序号标注: 红框+数字，点击高亮，增量更新
@@ -708,7 +709,7 @@ AutoCAD Core 版本额外使用 `#if ACAD_CORE` 子条件处理 `CadApp.ShowModa
 │   │
 │   ├── AutoCAD/                     ← AutoCAD 专用实现
 │   │   ├── PlotterService.cs        ← 打印引擎: 多格式输出、栅格 DPI/像素换算、结果签名验证
-│   │   ├── AcadPlotterInstaller.cs  ← 安装 LA_pdf/png/jpg/dwf.pc3，生成 PIA2/PIA3 栅格 PMP
+│   │   ├── AcadPlotterInstaller.cs  ← 用固定 PIA2 模板安装 LA_pdf/png/jpg/dwf.pc3
 │   │   └── AutoloadManager.cs       ← 自动加载: 注册表写入/卸载
 │   │
 │   └── ZWCAD/                       ← ZWCAD 专用实现（接口同名，平台适配）
@@ -719,13 +720,13 @@ AutoCAD Core 版本额外使用 `#if ACAD_CORE` 子条件处理 `CadApp.ShowModa
 │           └── AssemblyInfo.cs
 │
 ├── resources/
-│   ├── acad/Plotters/               ← AutoCAD PDF 基础配置及 PIA 兼容资源
-│   │   ├── PIA3/                    ← PIA 3.0 JSON 格式 (AutoCAD 2024+)
+│   ├── acad/Plotters/               ← AutoCAD LA 系列 PIA 模板
+│   │   ├── PIA3/                    ← 历史格式样本，不参与生成或安装
 │   │   │   ├── LA_pdf.pc3
 │   │   │   └── PMP Files/LA_pdf.pmp
-│   │   ├── PIA2/                    ← PIA 2.0 压缩格式 (AutoCAD 2019-2023)
-│   │   │   ├── LA_pdf.pc3
-│   │   │   └── PMP Files/LA_pdf.pmp
+│   │   ├── PIA2/                    ← 所有 AutoCAD 版本统一使用的 LA 模板
+│   │   │   ├── LA_pdf/png/jpg/dwf.pc3
+│   │   │   └── PMP Files/LA_pdf/png/jpg/dwf.pmp
 │   │   └── README.md
 │   └── zwcad/Plotters/              ← ZWCAD 基础 PC5/PMP 资源；PMP 同时作为栅格纸张表模板
 │       ├── LA_pdf.pc5
