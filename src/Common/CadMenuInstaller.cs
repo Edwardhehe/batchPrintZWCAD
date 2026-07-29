@@ -17,6 +17,11 @@ namespace ZwcadBatchPlot;
 public static class CadMenuInstaller
 {
     private const string MenuName = "LA批量打印";
+#if ZWCAD
+    private const string PreferredMenuGroupName = "ZWCAD";
+#else
+    private const string PreferredMenuGroupName = "ACAD";
+#endif
 
     /// <summary>
     /// 安装或刷新批量打印菜单。
@@ -48,8 +53,9 @@ public static class CadMenuInstaller
                 return;
             }
 
-            // 优先按名称获取菜单组，失败后按索引 0 获取（兼容中望CAD 和 AutoCAD）
-            var menuGroup = InvokeItem(menuGroups, "ACAD") ?? InvokeItem(menuGroups, 0);
+            // 优先按平台主菜单组名称获取；名称不可用时兼容回退到首个菜单组。
+            var menuGroup = InvokeItem(menuGroups, PreferredMenuGroupName)
+                ?? InvokeItem(menuGroups, 0);
             if (menuGroup == null)
             {
 #if ZWCAD
@@ -58,26 +64,33 @@ public static class CadMenuInstaller
                 return;
             }
 
-            // 菜单已存在时的处理
-            var existing = FindNamedItem(menuBar, MenuName);
-            if (existing != null)
-            {
-                if (!force)
-                {
-                    TrySetProperty(existing, "Visible", true);
-                    return;
-                }
-
-                TryInvoke(existing, "Delete");
-            }
-
-            // 获取菜单集合，创建新菜单
             var menus = GetProperty(menuGroup, "Menus");
             if (menus == null)
             {
 #if ZWCAD
                 WriteMessage("\n批量打印插件已加载，但未取得菜单集合。");
 #endif
+                return;
+            }
+
+            // 普通安装只恢复已显示菜单；需要重建时单次清理菜单栏及菜单组残留。
+            var existing = FindNamedItem(menuBar, MenuName);
+            if (existing != null && !force)
+            {
+                TrySetProperty(existing, "Visible", true);
+                return;
+            }
+
+            if (existing != null)
+                TryInvoke(existing, "Delete");
+
+            var residual = FindNamedItem(menus, MenuName);
+            if (residual != null)
+                TryInvoke(residual, "Delete");
+
+            if (FindNamedItem(menus, MenuName) != null)
+            {
+                WriteMessage("\n批量打印菜单残留清理失败，已停止重建。");
                 return;
             }
 
@@ -111,9 +124,15 @@ public static class CadMenuInstaller
             AddMenuItem(menu, "打开配置目录", cmdPrefix + "ZBP_OPEN_CONFIG ");
             AddMenuItem(menu, "刷新菜单", cmdPrefix + "ZBP_RELOAD_MENU ");
 
-            // 将菜单插入菜单栏末尾
+            // 插入后必须确认菜单栏确实返回同名菜单，避免把 NETLOAD 成功误报为菜单成功。
             var menuCount = Convert.ToInt32(GetProperty(menuBar, "Count") ?? 0);
             TryInvoke(menu, "InsertInMenuBar", menuCount);
+            if (FindNamedItem(menuBar, MenuName) == null)
+            {
+                TryInvoke(menu, "Delete");
+                WriteMessage("\n批量打印插件已加载，但菜单未能插入菜单栏。");
+                return;
+            }
 
 #if ZWCAD
             WriteMessage("\n批量打印菜单已加载。");

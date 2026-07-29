@@ -57,8 +57,8 @@ function Copy-ReleaseTree {
 
     $sourceItems = Get-ChildItem -LiteralPath $sourceRoot -Recurse -Force
     foreach ($sourceItem in $sourceItems) {
-        # 发布包保留运行时依赖和绘图仪资源，但不携带调试符号及运行日志。
-        if (-not $sourceItem.PSIsContainer -and @('.pdb', '.log') -contains $sourceItem.Extension) {
+        # 发布包保留运行时依赖和绘图仪资源，但不携带调试符号、运行日志或 CAD 崩溃记录。
+        if (-not $sourceItem.PSIsContainer -and @('.pdb', '.log', '.err') -contains $sourceItem.Extension) {
             continue
         }
 
