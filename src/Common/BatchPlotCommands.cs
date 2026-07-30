@@ -44,7 +44,7 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
         AcadPlotterInstaller.InstallPngPlotter();
         AcadPlotterInstaller.InstallJpgPlotter();
         AcadPlotterInstaller.RefreshPlotterDevices();
-        CadMenuInstaller.Install(force: true);
+        CadMenuInstaller.Install();
     }
 
     public void Terminate()
@@ -169,7 +169,7 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
     public void ShowSettingsLegacy() => ShowSettings();
 
     [CommandMethod("ZBP_RELOAD_MENU")]
-    public void ReloadMenu() => CadMenuInstaller.Install(force: true);
+    public void ReloadMenu() => CadMenuInstaller.Install();
 
     [CommandMethod("_ZBP_INTERNAL_RELOAD_MENU")]
     public void ReloadMenuLegacy() => ReloadMenu();

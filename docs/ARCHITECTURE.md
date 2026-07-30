@@ -668,7 +668,7 @@ AutoCAD Core 版本额外使用 `#if ACAD_CORE` 子条件处理 `CadApp.ShowModa
 │   │   ├── PaperSizeDetector.cs        ← 纸张尺寸检测: A0~A3标准/加长 + GuessScale (非标图纸比例推测)
 │   │   ├── CadTextExtractor.cs         ← 文字提取: 属性/文字/多行文字, XCLIP 过滤, 三级优先级
 │   │   ├── CadTextUpdater.cs           ← 文字回写: 将图号图名写回DWG
-│   │   ├── CadMenuInstaller.cs         ← 菜单栏安装: 创建"批量打印"菜单
+│   │   ├── CadMenuInstaller.cs         ← 菜单栏安装: 复用/创建"LA批量打印"菜单并原地重建菜单项
 │   │   ├── TitleBlockLibraryStore.cs    ← 图框库持久化 (JSON 原子写入)
 │   │   ├── AppSettingsStore.cs         ← 设置持久化 (JSON), 含文件名连接符/字段合法性检查
 │   │   ├── PdfDocumentService.cs       ← PDF 合并 (PdfSharp)

@@ -11,11 +11,16 @@ using CadApp = Autodesk.AutoCAD.ApplicationServices.Application;
 namespace ZwcadBatchPlot;
 
 /// <summary>
-/// CAD 菜单安装器（兼容中望CAD / AutoCAD / AutoCAD Core），
-/// 通过 COM 反射操作菜单系统，实现菜单的创建、删除、更新。
+/// CAD 菜单安装器（兼容中望CAD / AutoCAD / AutoCAD Core）。
+/// 通过 COM 反射操作菜单系统；重复加载时复用同名菜单并原地重建菜单项，
+/// 避免“菜单组中存在弹出菜单”和菜单栏重复插入导致的 COM 异常。
 /// </summary>
 public static class CadMenuInstaller
 {
+    /// <summary>
+    /// 批打印菜单名称。CAD 宿主在同一菜单组中不允许同名弹出菜单，
+    /// 链式动态加载或重复 NETLOAD 时直接 Add 同名菜单会触发 COM 异常。
+    /// </summary>
     private const string MenuName = "LA批量打印";
 #if ZWCAD
     private const string PreferredMenuGroupName = "ZWCAD";
@@ -25,11 +30,9 @@ public static class CadMenuInstaller
 
     /// <summary>
     /// 安装或刷新批量打印菜单。
-    /// 首次调用时创建菜单及所有子项；菜单已存在时默认仅设为可见，
-    /// 传入 force=true 则先删除再重建。
+    /// 支持重复调用：菜单已存在时复用并清空重建菜单项；不存在时创建新菜单。
     /// </summary>
-    /// <param name="force">是否强制重建菜单</param>
-    public static void Install(bool force = false)
+    public static void Install()
     {
         try
         {
@@ -73,28 +76,7 @@ public static class CadMenuInstaller
                 return;
             }
 
-            // 普通安装只恢复已显示菜单；需要重建时单次清理菜单栏及菜单组残留。
-            var existing = FindNamedItem(menuBar, MenuName);
-            if (existing != null && !force)
-            {
-                TrySetProperty(existing, "Visible", true);
-                return;
-            }
-
-            if (existing != null)
-                TryInvoke(existing, "Delete");
-
-            var residual = FindNamedItem(menus, MenuName);
-            if (residual != null)
-                TryInvoke(residual, "Delete");
-
-            if (FindNamedItem(menus, MenuName) != null)
-            {
-                WriteMessage("\n批量打印菜单残留清理失败，已停止重建。");
-                return;
-            }
-
-            var menu = TryInvoke(menus, "Add", MenuName);
+            var menu = GetOrCreateMenu(menus);
             if (menu == null)
             {
 #if ZWCAD
@@ -103,33 +85,43 @@ public static class CadMenuInstaller
                 return;
             }
 
-            // 中望CAD 命令前需加 ^C^C 取消当前命令
-#if ZWCAD
-            const string cmdPrefix = "^C^C";
-#else
-            const string cmdPrefix = "";
-#endif
-
-            // 添加打印功能菜单项
-            AddMenuItem(menu, "新增图框", cmdPrefix + "ZBP_ADD_TITLE_BLOCK ");
-            AddMenuItem(menu, "图框库管理", cmdPrefix + "ZBP_MANAGE_LIBRARY ");
-            AddMenuItem(menu, "批量打印(选图框块)", cmdPrefix + "ZBP_SHOW_PANEL ");
-            AddMenuItem(menu, "批量打印(选矩形框)", cmdPrefix + "ZBP_RECTANGLE_BATCH_PLOT ");
-            AddMenuItem(menu, "单张打印", cmdPrefix + "ZBP_SINGLE_PLOT ");
-            AddSeparator(menu);
-            // 添加工具类菜单项
-            AddMenuItem(menu, "设置", cmdPrefix + "ZBP_SETTINGS ");
-            AddMenuItem(menu, "安装自动加载", cmdPrefix + "ZBP_INSTALL_AUTOLOAD ");
-            AddMenuItem(menu, "卸载自动加载", cmdPrefix + "ZBP_UNINSTALL_AUTOLOAD ");
-            AddMenuItem(menu, "打开配置目录", cmdPrefix + "ZBP_OPEN_CONFIG ");
-            AddMenuItem(menu, "刷新菜单", cmdPrefix + "ZBP_RELOAD_MENU ");
-
-            // 插入后必须确认菜单栏确实返回同名菜单，避免把 NETLOAD 成功误报为菜单成功。
-            var menuCount = Convert.ToInt32(GetProperty(menuBar, "Count") ?? 0);
-            TryInvoke(menu, "InsertInMenuBar", menuCount);
-            if (FindNamedItem(menuBar, MenuName) == null)
+            // 复用旧菜单时先清空旧菜单项，再按当前代码重建完整菜单。
+            // 以进入时的 Count 为上界，避免删除失败造成死循环。
+            var oldCount = Convert.ToInt32(GetProperty(menu, "Count") ?? 0);
+            for (var i = 0; i < oldCount; i++)
             {
-                TryInvoke(menu, "Delete");
+                var first = TryInvoke(menu, "Item", 0);
+                if (first == null)
+                {
+                    break;
+                }
+
+                TryInvoke(first, "Delete");
+            }
+
+            // 打印功能菜单项
+            AddMenuItem(menu, "新增图框", "ZBP_ADD_TITLE_BLOCK");
+            AddMenuItem(menu, "图框库管理", "ZBP_MANAGE_LIBRARY");
+            AddMenuItem(menu, "批量打印(选图框块)", "ZBP_SHOW_PANEL");
+            AddMenuItem(menu, "批量打印(选矩形框)", "ZBP_RECTANGLE_BATCH_PLOT");
+            AddMenuItem(menu, "单张打印", "ZBP_SINGLE_PLOT");
+            AddSeparator(menu);
+            // 工具类菜单项
+            AddMenuItem(menu, "设置", "ZBP_SETTINGS");
+            AddMenuItem(menu, "安装自动加载", "ZBP_INSTALL_AUTOLOAD");
+            AddMenuItem(menu, "卸载自动加载", "ZBP_UNINSTALL_AUTOLOAD");
+            AddMenuItem(menu, "打开配置目录", "ZBP_OPEN_CONFIG");
+            AddMenuItem(menu, "刷新菜单", "ZBP_RELOAD_MENU");
+
+            // 已在菜单栏上的弹出菜单不能重复插入，否则部分 CAD 宿主会抛出 COM 反射异常。
+            if (!IsMenuOnMenuBar(menu))
+            {
+                var menuBarCount = Convert.ToInt32(GetProperty(menuBar, "Count") ?? 0);
+                TryInvoke(menu, "InsertInMenuBar", menuBarCount + 1);
+            }
+
+            if (!IsMenuOnMenuBar(menu))
+            {
                 WriteMessage("\n批量打印插件已加载，但菜单未能插入菜单栏。");
                 return;
             }
@@ -141,6 +133,63 @@ public static class CadMenuInstaller
         catch (Exception ex)
         {
             WriteMessage("\n批量打印菜单加载失败: " + ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// 获取已存在的批打印菜单；不存在时创建后再返回。
+    /// 只有确认不存在同名菜单时才调用 Add，避免“菜单组中存在弹出菜单”异常。
+    /// </summary>
+    private static object? GetOrCreateMenu(object menus)
+    {
+        var menu = TryGetMenu(menus);
+        if (menu != null)
+        {
+            return menu;
+        }
+
+        return TryInvoke(menus, "Add", MenuName);
+    }
+
+    /// <summary>
+    /// 尝试按名称从菜单集合中查找批打印菜单；找不到或宿主 COM 查询失败时返回 null。
+    /// </summary>
+    private static object? TryGetMenu(object menus)
+    {
+        try
+        {
+            return menus.GetType().InvokeMember("Item", BindingFlags.InvokeMethod, null, menus, new object[] { MenuName });
+        }
+        catch (TargetInvocationException)
+        {
+            // COM 反射会把宿主内部异常包装为 TargetInvocationException；按名称查询失败等价于菜单不存在。
+            return null;
+        }
+        catch (ArgumentException)
+        {
+            // 部分宿主在 Item(name) 找不到对象时直接抛 ArgumentException。
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 判断菜单是否已经插入到 CAD 菜单栏；状态不可读时按未插入处理。
+    /// </summary>
+    private static bool IsMenuOnMenuBar(object menu)
+    {
+        try
+        {
+            return Convert.ToBoolean(menu.GetType().InvokeMember("OnMenuBar", BindingFlags.GetProperty, null, menu, null));
+        }
+        catch (TargetInvocationException)
+        {
+            // OnMenuBar 在部分宿主或特定菜单状态下可能不可读。
+            return false;
+        }
+        catch (ArgumentException)
+        {
+            // 兼容 COM 属性不存在或宿主返回参数异常的情况。
+            return false;
         }
     }
 
@@ -161,10 +210,10 @@ public static class CadMenuInstaller
     /// <summary>
     /// 向菜单末尾追加一个菜单项。
     /// </summary>
-    private static void AddMenuItem(object menu, string label, string command)
+    private static void AddMenuItem(object menu, string label, string commandName)
     {
         var count = Convert.ToInt32(GetProperty(menu, "Count") ?? 0);
-        TryInvoke(menu, "AddMenuItem", count, label, command);
+        TryInvoke(menu, "AddMenuItem", count, label, CreateMenuMacro(commandName));
     }
 
     /// <summary>
@@ -177,24 +226,12 @@ public static class CadMenuInstaller
     }
 
     /// <summary>
-    /// 在集合中按名称查找项。遍历集合的每个元素，
-    /// 通过 Name 属性进行大小写不敏感匹配。
+    /// 生成菜单宏：两次 ESC(0x03) 取消当前命令（等价 ^C^C），“_”前缀保证按英文命令名调用。
     /// </summary>
-    private static object? FindNamedItem(object collection, string name)
+    private static string CreateMenuMacro(string commandName)
     {
-        var count = Convert.ToInt32(GetProperty(collection, "Count") ?? 0);
-        for (var i = 0; i < count; i++)
-        {
-            var item = InvokeItem(collection, i);
-            if (item == null)
-                continue;
-
-            var itemName = GetProperty(item, "Name")?.ToString();
-            if (string.Equals(itemName, name, StringComparison.OrdinalIgnoreCase))
-                return item;
-        }
-
-        return null;
+        const char esc = (char)3;
+        return new string(esc, 2) + "_" + commandName + " ";
     }
 
     /// <summary>
@@ -277,20 +314,6 @@ public static class CadMenuInstaller
         catch
         {
             return null;
-        }
-    }
-
-    /// <summary>
-    /// 通过反射设置对象的实例属性值，失败时静默忽略。
-    /// </summary>
-    private static void TrySetProperty(object target, string name, object value)
-    {
-        try
-        {
-            target.GetType().InvokeMember(name, BindingFlags.SetProperty, null, target, new[] { value });
-        }
-        catch
-        {
         }
     }
 
