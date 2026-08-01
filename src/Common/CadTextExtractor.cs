@@ -44,6 +44,107 @@ public static class CadTextExtractor
         return btr.Name;
     }
 
+    /// <summary>
+    /// 取块参照当前可见的第一层嵌套块名（动态块可见性状态对应的内层块）。
+    /// 非动态块或无可见嵌套块时返回 false。
+    /// </summary>
+    public static bool TryGetVisibleNestedBlockName(Transaction tr, BlockReference blockRef, out string innerBlockName)
+    {
+        innerBlockName = "";
+        try
+        {
+            if (!blockRef.IsDynamicBlock)
+            {
+                return false;
+            }
+        }
+        catch
+        {
+            return false;
+        }
+
+        var definitionId = blockRef.BlockTableRecord;
+        if (definitionId.IsNull)
+        {
+            return false;
+        }
+
+        var bestName = "";
+        var bestArea = 0d;
+        var definition = (BlockTableRecord)tr.GetObject(definitionId, OpenMode.ForRead);
+        foreach (ObjectId id in definition)
+        {
+            if (tr.GetObject(id, OpenMode.ForRead, false) is not BlockReference nested)
+            {
+                continue;
+            }
+
+            bool visible;
+            try
+            {
+                visible = nested.Visible;
+            }
+            catch
+            {
+                visible = true;
+            }
+
+            if (!visible)
+            {
+                continue;
+            }
+
+            var nestedName = GetBlockName(nested, tr);
+            if (string.IsNullOrWhiteSpace(nestedName))
+            {
+                continue;
+            }
+
+            // 可见嵌套块通常只有一个；有多个时与录入侧一致，取面积最大的。
+            var area = Math.Abs(nested.BlockTransform[0, 0] * nested.BlockTransform[1, 1]);
+            if (bestName.Length == 0 || area > bestArea)
+            {
+                bestArea = area;
+                bestName = nestedName;
+            }
+        }
+
+        innerBlockName = bestName;
+        return bestName.Length > 0;
+    }
+
+    /// <summary>
+    /// 判断图框库/任务中的块名是否与图纸中的块参照匹配。
+    /// 块名可能是“外层+内层”复合名（动态块可见性尺寸），此时要求参照的外层名一致
+    /// 且当前可见内层块名一致；不含 '+' 的纯名只比对外层名。
+    /// </summary>
+    public static bool BlockNameMatches(string storedName, BlockReference blockRef, Transaction tr)
+    {
+        if (string.IsNullOrWhiteSpace(storedName))
+        {
+            return false;
+        }
+
+        var outerName = GetBlockName(blockRef, tr);
+        if (string.Equals(storedName, outerName, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        // 复合名拆分以第一个 '+' 为界：外层名含 '+' 时无法良定义拆分，按不匹配处理。
+        var plusIndex = storedName.IndexOf('+');
+        if (plusIndex <= 0 || plusIndex >= storedName.Length - 1)
+        {
+            return false;
+        }
+
+        var outerPart = storedName.Substring(0, plusIndex);
+        var innerPart = storedName.Substring(plusIndex + 1);
+        return string.Equals(outerPart, outerName, StringComparison.OrdinalIgnoreCase)
+            && TryGetVisibleNestedBlockName(tr, blockRef, out var innerName)
+            && string.Equals(innerPart, innerName, StringComparison.OrdinalIgnoreCase);
+    }
+
     public static OwnerTextCache BuildOwnerTextCache(Transaction tr, BlockTableRecord owner)
     {
         return BuildOwnerTextCache(tr, owner, null);

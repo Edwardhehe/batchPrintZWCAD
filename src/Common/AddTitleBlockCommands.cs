@@ -68,19 +68,39 @@ public sealed partial class BatchPlotCommands
                 blockTransform = blockRef.BlockTransform;
 
                 // 动态块通过可见性状态切换不同尺寸
-                // 入库时应使用当前可见的内层嵌套块的名称和变换矩阵
+                // 入库块名使用“外层块名+内层可见嵌套块名”复合名，变换矩阵取内层嵌套块的
                 if (TryGetVisibleNestedBlock(tr, blockRef, out var innerName, out var innerTransform))
                 {
                     nestedBlockName = innerName;
-                    blockName = innerName;
+                    blockName = blockName + "+" + innerName;
                     blockTransform = innerTransform * blockRef.BlockTransform;
-                    AddBlockLog($"Dynamic block detected: outer={CadTextExtractor.GetBlockName(blockRef, tr)}, inner={innerName}");
+                    AddBlockLog($"Dynamic block detected: outer={CadTextExtractor.GetBlockName(blockRef, tr)}, inner={innerName}, stored={blockName}");
                 }
 
                 tr.Commit();
             }
 
             AddBlockLog("Selected block: " + blockName);
+
+            // 同名图框已入库时先确认：用户选“是”才继续后续框选流程，保存时覆盖原记录。
+            var existingLibrary = TitleBlockLibraryStore.Load();
+            if (existingLibrary.Blocks.Any(x =>
+                    string.Equals(x.BlockName, blockName, StringComparison.OrdinalIgnoreCase)))
+            {
+                var overwrite = MessageBox.Show(
+                    $"图框库中已存在同名图框: {blockName}\n是否重新录入？\n选择“是”将覆盖原有图框设置。",
+                    "批量打印",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question,
+                    MessageBoxDefaultButton.Button2);
+                if (overwrite != DialogResult.Yes)
+                {
+                    AddBlockLog("Duplicate block name; user chose not to overwrite.");
+                    editor.WriteMessage($"\n已取消录入，图框库中的 {blockName} 保持不变。");
+                    return;
+                }
+            }
+
             inverse = blockTransform.Inverse();
 
             // 外框按块内所有 Polyline + Line 的外包盒自动识别；

@@ -72,7 +72,7 @@ public static class TitleBlockScanner
         var blockTable = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
 
         var libraryBlockNames = new HashSet<string>(
-            library.Blocks.Select(x => x.BlockName).Where(name => !string.IsNullOrWhiteSpace(name)),
+            library.Blocks.SelectMany(x => ExpandLibraryNameParts(x.BlockName)).Where(name => !string.IsNullOrWhiteSpace(name)),
             StringComparer.OrdinalIgnoreCase);
 
         var matchIndex = 0;
@@ -132,7 +132,7 @@ public static class TitleBlockScanner
                 if (definition == null)
                 {
                     definition = ResolveNestedLibraryMatch(
-                        tr, blockRef, library, out var nestedTransform);
+                        tr, blockRef, blockName, library, out var nestedTransform);
                     if (definition != null)
                     {
                         effectiveBlockTransform = nestedTransform * blockRef.BlockTransform;
@@ -216,10 +216,18 @@ public static class TitleBlockScanner
                 // 不取包围盒，和矩形框扫描的 CornerPoints 同理：4 角 × WCS→DCS 只取一次包围盒
                 var wcsCorners = ComputeWcsCorners(coordinateMode, referenceFrame, blockRef.BlockTransform);
 
+                var detectionOptions = PaperSizeDetector.CreateTitleBlockBatchOptions(effectivePaperToleranceMm, !layout.ModelType);
+                // 图框录入时已要求设置固定纸张：识别候选中物理尺寸与录入纸张一致的优先，
+                // 避免把图框零头误差识别成动态加长纸而偏离图框库纸张。
+                if (definition.PaperWidthMm > 0 && definition.PaperHeightMm > 0)
+                {
+                    detectionOptions.PreferredPaperWidthMm = definition.PaperWidthMm;
+                    detectionOptions.PreferredPaperHeightMm = definition.PaperHeightMm;
+                }
                 var detectedPaper = PaperSizeDetector.Detect(
                     width,
                     height,
-                    PaperSizeDetector.CreateTitleBlockBatchOptions(effectivePaperToleranceMm, !layout.ModelType));
+                    detectionOptions);
                 var paper = ApplyFixedPaper(definition, detectedPaper);
                 string title;
                 string number;
@@ -759,9 +767,33 @@ public static class TitleBlockScanner
     /// When a top-level block reference doesn't directly match the library, recursively
     /// search nested blocks up to 6 levels deep for a visible inner block that matches.
     /// </summary>
+    /// <summary>
+    /// 图框库块名可能是“外层+内层”复合名：文字缓存按外层参照名过滤，
+    /// 需要完整名和各分段都能命中，因此把复合名拆开后一起返回。
+    /// </summary>
+    private static IEnumerable<string> ExpandLibraryNameParts(string? blockName)
+    {
+        var fullName = blockName ?? "";
+        if (string.IsNullOrWhiteSpace(fullName))
+        {
+            yield break;
+        }
+
+        yield return fullName;
+        foreach (var part in fullName.Split('+'))
+        {
+            var trimmed = part.Trim();
+            if (trimmed.Length > 0)
+            {
+                yield return trimmed;
+            }
+        }
+    }
+
     private static TitleBlockDefinition? ResolveNestedLibraryMatch(
         Transaction tr,
         BlockReference outerRef,
+        string outerBlockName,
         TitleBlockLibrary library,
         out Matrix3d nestedTransform)
     {
@@ -774,13 +806,14 @@ public static class TitleBlockScanner
         }
 
         var definition = (BlockTableRecord)tr.GetObject(definitionId, OpenMode.ForRead);
-        return ResolveNestedLibraryMatchRecursive(tr, definition, Matrix3d.Identity, library, out nestedTransform, new HashSet<ObjectId>(), 0);
+        return ResolveNestedLibraryMatchRecursive(tr, definition, Matrix3d.Identity, outerBlockName, library, out nestedTransform, new HashSet<ObjectId>(), 0);
     }
 
     private static TitleBlockDefinition? ResolveNestedLibraryMatchRecursive(
         Transaction tr,
         BlockTableRecord definition,
         Matrix3d accumulatedTransform,
+        string outerBlockName,
         TitleBlockLibrary library,
         out Matrix3d nestedTransform,
         ISet<ObjectId> visited,
@@ -814,7 +847,12 @@ public static class TitleBlockScanner
                 continue;
             }
 
-            var match = library.Blocks.FirstOrDefault(x =>
+            // 新版“外层+内层”复合名只在第一层嵌套匹配，优先于旧版图框库的纯内层名记录。
+            var match = depth == 0 && !string.IsNullOrWhiteSpace(outerBlockName)
+                ? library.Blocks.FirstOrDefault(x =>
+                    string.Equals(x.BlockName, outerBlockName + "+" + nestedName, StringComparison.OrdinalIgnoreCase))
+                : null;
+            match ??= library.Blocks.FirstOrDefault(x =>
                 string.Equals(x.BlockName, nestedName, StringComparison.OrdinalIgnoreCase));
             if (match != null)
             {
@@ -827,7 +865,7 @@ public static class TitleBlockScanner
             {
                 var nestedDef = (BlockTableRecord)tr.GetObject(nested.BlockTableRecord, OpenMode.ForRead);
                 var innerTransform = nested.BlockTransform * accumulatedTransform;
-                var deeper = ResolveNestedLibraryMatchRecursive(tr, nestedDef, innerTransform, library, out var deeperTransform, visited, depth + 1);
+                var deeper = ResolveNestedLibraryMatchRecursive(tr, nestedDef, innerTransform, outerBlockName, library, out var deeperTransform, visited, depth + 1);
                 if (deeper != null)
                 {
                     nestedTransform = deeperTransform;

@@ -244,7 +244,7 @@ public static class CadTextUpdater
             }
 
             return tr.GetObject(id, OpenMode.ForRead, false) is BlockReference blockRef
-                && string.Equals(CadTextExtractor.GetBlockName(blockRef, tr), job.BlockName, StringComparison.OrdinalIgnoreCase)
+                && CadTextExtractor.BlockNameMatches(job.BlockName, blockRef, tr)
                 ? blockRef
                 : null;
         }
@@ -289,7 +289,7 @@ public static class CadTextUpdater
             .Cast<ObjectId>()
             .Select(id => tr.GetObject(id, OpenMode.ForRead, false))
             .OfType<BlockReference>()
-            .Where(blockRef => string.Equals(CadTextExtractor.GetBlockName(blockRef, tr), job.BlockName, StringComparison.OrdinalIgnoreCase))
+            .Where(blockRef => CadTextExtractor.BlockNameMatches(job.BlockName, blockRef, tr))
             .ToList();
 
         var coordinateMode = GetCoordinateMode(definition);
