@@ -50,8 +50,18 @@ public sealed class FieldBoxSelectDialog : Form
     public LocalRectangle Info1Region { get; private set; } = new();
     public LocalRectangle Info2Region { get; private set; } = new();
 
+    // 纸张设置（合并原独立纸张选择界面）：默认按打印范围自动识别，可手动修改。
+    private readonly ComboBox _paperName = new();
+    private readonly NumericUpDown _paperWidth = new();
+    private readonly NumericUpDown _paperHeight = new();
+
+    public string PaperName => _paperName.Text.Trim();
+    public double PaperWidthMm => (double)_paperWidth.Value;
+    public double PaperHeightMm => (double)_paperHeight.Value;
+
     public FieldBoxSelectDialog(Editor editor, Matrix3d inverseBlockTransform,
-        Matrix3d blockTransform, TransientFrameMarkers markers, LocalRectangle referenceFrame)
+        Matrix3d blockTransform, TransientFrameMarkers markers, LocalRectangle referenceFrame,
+        PaperDetection detected)
     {
         _editor = editor;
         _inverseBlockTransform = inverseBlockTransform;
@@ -64,10 +74,10 @@ public sealed class FieldBoxSelectDialog : Form
         var wc2 = new Point3d(referenceFrame.MaxX, referenceFrame.MaxY, 0).TransformBy(blockTransform);
         _printAreaCorners = (wc1, wc2);
 
-        Text = "选择图框可选字段";
-        UiLayout.ConfigureForm(this, 460, 400, 430, 375);
-        // 增加打印范围行，纵向多一行。
-        ClientSize = new Size(UiLayout.Scale(460), UiLayout.Scale(378));
+        Text = "设置图框字段与纸张";
+        UiLayout.ConfigureForm(this, 460, 436, 430, 410);
+        // 打印范围、纸张各一行，纵向多两行。
+        ClientSize = new Size(UiLayout.Scale(460), UiLayout.Scale(414));
         FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
         ShowInTaskbar = false;
 
@@ -80,14 +90,14 @@ public sealed class FieldBoxSelectDialog : Form
         table.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
-        // Row 0: 打印范围（可重新框选），Row 1-7: 字段（图名/图号必选，其余可选）
-        for (var i = 0; i < 8; i++)
+        // Row 0: 打印范围（可重新框选），Row 1-7: 字段（图名/图号必选，其余可选），Row 8: 纸张
+        for (var i = 0; i < 9; i++)
         {
             table.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(34)));
         }
-        // Row 8: 提示
+        // Row 9: 提示
         table.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        // Row 9: 按钮
+        // Row 10: 按钮
         table.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(36)));
 
         // 打印范围：显示当前尺寸，提供"框选"按钮供用户修正自动识别的外框。
@@ -129,17 +139,22 @@ public sealed class FieldBoxSelectDialog : Form
         _info2Status = MakeStatusLabel();
         table.Controls.Add(MakeFieldRow(_info2Status, SelectInfo2, ClearInfo2), 1, 7);
 
+        // 纸张：默认按打印范围自动识别，重新框选打印范围时同步刷新，也可手动修改。
+        table.Controls.Add(MakeLabel("纸张"), 0, 8);
+        table.Controls.Add(MakePaperRow(), 1, 8);
+        ApplyDetectedPaper(detected);
+
         // 提示
         var hint = new Label
         {
-            Text = "图名、图号为必选。点击\"框选\"在 CAD 中框选对应区域，已选区域以红色临时框标识。",
+            Text = "图名、图号为必选。点击\"框选\"在 CAD 中框选对应区域，已选区域以红色临时框标识；纸张按打印范围自动识别，可手动修改。",
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleLeft,
             ForeColor = Color.DimGray,
             Font = new Font(Font.FontFamily, Math.Max(Font.Size - 1, 7))
         };
         table.SetColumnSpan(hint, 2);
-        table.Controls.Add(hint, 0, 8);
+        table.Controls.Add(hint, 0, 9);
 
         // 按钮
         var buttons = new FlowLayoutPanel
@@ -184,7 +199,7 @@ public sealed class FieldBoxSelectDialog : Form
         buttons.Controls.Add(skip);
         buttons.Controls.Add(cancel);
         table.SetColumnSpan(buttons, 2);
-        table.Controls.Add(buttons, 0, 9);
+        table.Controls.Add(buttons, 0, 10);
 
         Controls.Add(table);
     }
@@ -247,6 +262,11 @@ public sealed class FieldBoxSelectDialog : Form
             // 立即绘制新的外框临时标识
             _markers.SetBox("外框", first.Value, second.Value, null);
             UpdatePrintAreaStatus();
+
+            // 打印范围变化后重新识别纸张，与原独立纸张界面使用最终外框检测的行为一致。
+            var detectedWidth = Math.Abs(second.Value.X - first.Value.X);
+            var detectedHeight = Math.Abs(second.Value.Y - first.Value.Y);
+            ApplyDetectedPaper(PaperSizeDetector.Detect(detectedWidth, detectedHeight));
         }
         finally
         {
@@ -267,15 +287,23 @@ public sealed class FieldBoxSelectDialog : Form
 
     private bool ValidateRequiredFields()
     {
-        if (TitleRegion.HasArea() && DrawingNumberRegion.HasArea())
+        if (!TitleRegion.HasArea() || !DrawingNumberRegion.HasArea())
         {
-            return true;
+            MessageBox.Show(this,
+                "图名和图号为必选项，请先点击对应\"框选\"按钮完成框选。",
+                Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return false;
         }
 
-        MessageBox.Show(this,
-            "图名和图号为必选项，请先点击对应\"框选\"按钮完成框选。",
-            Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-        return false;
+        if (string.IsNullOrWhiteSpace(PaperName))
+        {
+            MessageBox.Show(this,
+                "纸张名称不能为空。",
+                Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return false;
+        }
+
+        return true;
     }
 
     private void SelectTitle() { if (TryBoxSelect("图名", out var r)) { TitleRegion = r; UpdateStatus(_titleStatus, TitleRegion); } }
@@ -432,5 +460,88 @@ public sealed class FieldBoxSelectDialog : Form
         panel.Controls.Add(selectBtn, 1, 0);
 
         return panel;
+    }
+
+    /// <summary>
+    /// 纸张行布局：纸张名称下拉框 + 宽/高输入框，与原独立纸张选择界面的控件一致。
+    /// </summary>
+    private Control MakePaperRow()
+    {
+        _paperName.Dock = DockStyle.Fill;
+        _paperName.DropDownStyle = ComboBoxStyle.DropDown;
+        _paperName.Items.AddRange(new object[] { "A0", "A1", "A2", "A3", "A0+", "A1+", "A2+", "A3+", "自定义" });
+        _paperName.SelectedIndexChanged += (_, _) => ApplyPaperPreset(_paperName.Text);
+
+        ConfigurePaperNumber(_paperWidth);
+        ConfigurePaperNumber(_paperHeight);
+
+        var panel = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 5,
+            RowCount = 1,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty
+        };
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(64)));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(64)));
+
+        panel.Controls.Add(_paperName, 0, 0);
+        panel.Controls.Add(MakeInlineLabel("宽"), 1, 0);
+        panel.Controls.Add(_paperWidth, 2, 0);
+        panel.Controls.Add(MakeInlineLabel("高"), 3, 0);
+        panel.Controls.Add(_paperHeight, 4, 0);
+
+        return panel;
+    }
+
+    private static Label MakeInlineLabel(string text) => new()
+    {
+        Text = text,
+        AutoSize = true,
+        Dock = DockStyle.Fill,
+        TextAlign = ContentAlignment.MiddleLeft,
+        Margin = new Padding(UiLayout.Scale(6), 0, UiLayout.Scale(2), 0)
+    };
+
+    private static void ConfigurePaperNumber(NumericUpDown input)
+    {
+        input.DecimalPlaces = 2;
+        input.Minimum = 1;
+        input.Maximum = 5000;
+        input.Increment = 1;
+        input.Dock = DockStyle.Fill;
+    }
+
+    private void ApplyDetectedPaper(PaperDetection detected)
+    {
+        _paperName.Text = string.IsNullOrWhiteSpace(detected.PaperName)
+                || detected.PaperWidthMm <= 0
+                || detected.PaperHeightMm <= 0
+                || detected.PaperName.StartsWith("未", StringComparison.Ordinal)
+            ? "自定义"
+            : detected.PaperName;
+
+        SetPaperDimensions(
+            detected.PaperWidthMm > 0 ? detected.PaperWidthMm : 420,
+            detected.PaperHeightMm > 0 ? detected.PaperHeightMm : 297);
+    }
+
+    private void ApplyPaperPreset(string paperName)
+    {
+        var (width, height) = PaperSizeDetector.GetDefaultSize(paperName.Trim(), PaperWidthMm, PaperHeightMm);
+        if (width > 0 && height > 0)
+        {
+            SetPaperDimensions(width, height);
+        }
+    }
+
+    private void SetPaperDimensions(double width, double height)
+    {
+        _paperWidth.Value = UiLayout.Clamp(_paperWidth, width);
+        _paperHeight.Value = UiLayout.Clamp(_paperHeight, height);
     }
 }

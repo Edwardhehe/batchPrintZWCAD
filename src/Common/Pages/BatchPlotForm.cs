@@ -1078,9 +1078,8 @@ public sealed class BatchPlotForm : Form
             job.Selected = false;
         }
 
-        _grid.Refresh();
-        RefreshStatus();
-        RefreshSelectedOverlay();
+        // 右键“不打印”与取消勾选行为一致：直接从清单移除并重新编号。
+        RemoveUnselectedJobs();
     }
 
     private List<PlotJob> GetHighlightedJobs()
@@ -1167,10 +1166,38 @@ public sealed class BatchPlotForm : Form
         if (_grid.Rows[e.RowIndex].DataBoundItem is PlotJob changedJob)
         {
             ApplyPrintSelectionToHighlightedRows(changedJob);
+            if (!changedJob.Selected)
+            {
+                RemoveUnselectedJobs();
+                return;
+            }
         }
 
         RefreshStatus();
         RefreshSelectedOverlay();
+    }
+
+    // 图框块界面取消“打印”即表示从当前清单移除，避免列表编号和 CAD 红框编号不一致（与矩形框批量打印同理）。
+    private void RemoveUnselectedJobs()
+    {
+        var removed = _jobs.Where(job => !job.Selected).ToList();
+        if (removed.Count == 0)
+        {
+            _grid.Refresh();
+            return;
+        }
+
+        foreach (var job in removed)
+        {
+            if (ReferenceEquals(_highlightedJob, job))
+            {
+                _highlightedJob = null;
+            }
+            _jobs.Remove(job);
+        }
+
+        // 移除后重新排序、编号并刷新覆盖层，保持表格与 CAD 红框一致。
+        SortAndRefreshOutputPaths();
     }
 
     private void ApplyPrintSelectionToHighlightedRows(PlotJob changedJob)

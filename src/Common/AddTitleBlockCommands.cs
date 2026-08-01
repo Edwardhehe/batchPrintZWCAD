@@ -150,7 +150,15 @@ public sealed partial class BatchPlotCommands
             markers.SetBox("外框", printExtents.MinPoint, printExtents.MaxPoint, null);
             editor.WriteMessage("\n已自动识别图框外框（红色临时标识），请在弹出窗口中框选图名、图号等字段区域。");
 
-            // 字段（图名/图号必选，日期/版次/设计阶段/信息1/信息2可选）框选
+            // 纸张按当前打印范围自动识别，作为合并对话框中纸张设置的默认值；
+            // 用户在对话框中重新框选打印范围时会同步重新识别。
+            var detected = PaperSizeDetector.Detect(
+                printExtents.MaxPoint.X - printExtents.MinPoint.X,
+                printExtents.MaxPoint.Y - printExtents.MinPoint.Y);
+
+            AddBlockLog($"Detected paper: {detected.PaperName}, {detected.PaperWidthMm:0.##} x {detected.PaperHeightMm:0.##}");
+
+            // 字段（图名/图号必选，日期/版次/设计阶段/信息1/信息2可选）框选 + 纸张设置，同一对话框完成。
             // 同时支持修改打印范围（外框），识别不准时可手动重新框选。
             LocalRectangle titleRegion;
             LocalRectangle numberRegion;
@@ -159,7 +167,10 @@ public sealed partial class BatchPlotCommands
             LocalRectangle phaseRegion;
             LocalRectangle info1Region;
             LocalRectangle info2Region;
-            using (var fieldDialog = new FieldBoxSelectDialog(editor, inverse, blockTransform, markers, referenceFrame))
+            string paperName;
+            double paperWidthMm;
+            double paperHeightMm;
+            using (var fieldDialog = new FieldBoxSelectDialog(editor, inverse, blockTransform, markers, referenceFrame, detected))
             {
                 if (ShowModalDialog(fieldDialog) != DialogResult.OK)
                 {
@@ -178,6 +189,10 @@ public sealed partial class BatchPlotCommands
                 // 用户可能在对话框中重新框选了打印范围，读取最新值并重算世界坐标。
                 referenceFrame = fieldDialog.ReferenceFrame;
                 printExtents = TransformRegion(referenceFrame, blockTransform);
+
+                paperName = fieldDialog.PaperName;
+                paperWidthMm = fieldDialog.PaperWidthMm;
+                paperHeightMm = fieldDialog.PaperHeightMm;
             }
 
             AddBlockLog($"Title region: ({titleRegion.MinX:0.###},{titleRegion.MinY:0.###})-({titleRegion.MaxX:0.###},{titleRegion.MaxY:0.###})");
@@ -187,20 +202,6 @@ public sealed partial class BatchPlotCommands
             if (phaseRegion.HasArea()) AddBlockLog($"Phase region: ({phaseRegion.MinX:0.###},{phaseRegion.MinY:0.###})-({phaseRegion.MaxX:0.###},{phaseRegion.MaxY:0.###})");
             if (info1Region.HasArea()) AddBlockLog($"Info1 region: ({info1Region.MinX:0.###},{info1Region.MinY:0.###})-({info1Region.MaxX:0.###},{info1Region.MaxY:0.###})");
             if (info2Region.HasArea()) AddBlockLog($"Info2 region: ({info2Region.MinX:0.###},{info2Region.MinY:0.###})-({info2Region.MaxX:0.###},{info2Region.MaxY:0.###})");
-
-            var detected = PaperSizeDetector.Detect(
-                printExtents.MaxPoint.X - printExtents.MinPoint.X,
-                printExtents.MaxPoint.Y - printExtents.MinPoint.Y);
-
-            AddBlockLog($"Detected paper: {detected.PaperName}, {detected.PaperWidthMm:0.##} x {detected.PaperHeightMm:0.##}");
-
-            using var paperForm = new PaperSizeSelectionForm(detected);
-            var paperResult = ShowModalDialog(paperForm);
-            AddBlockLog("Paper dialog result: " + paperResult);
-            if (paperResult != DialogResult.OK)
-            {
-                return;
-            }
 
             // 新流程始终显式确定打印区域（自动识别或手动框选），因此 HasPrintRegion 始终为 true。
             const bool hasPrintRegion = true;
@@ -212,9 +213,9 @@ public sealed partial class BatchPlotCommands
                 HasPrintRegion = hasPrintRegion,
                 CoordinateMode = "Frame",
                 PrintRegion = referenceFrame,
-                PaperName = paperForm.PaperName,
-                PaperWidthMm = paperForm.PaperWidthMm,
-                PaperHeightMm = paperForm.PaperHeightMm,
+                PaperName = paperName,
+                PaperWidthMm = paperWidthMm,
+                PaperHeightMm = paperHeightMm,
                 TitleRegion = ToFrameRelative(titleRegion, referenceFrame),
                 DrawingNumberRegion = ToFrameRelative(numberRegion, referenceFrame),
                 DateRegion = dateRegion.HasArea() ? ToFrameRelative(dateRegion, referenceFrame) : new LocalRectangle(),

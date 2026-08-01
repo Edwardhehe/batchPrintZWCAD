@@ -209,12 +209,14 @@ public static class TitleBlockScanner
                     continue;
                 }
 
-                var width = extents.MaxPoint.X - extents.MinPoint.X;
-                var height = extents.MaxPoint.Y - extents.MinPoint.Y;
+                // 识别与显示不能用 extents 包围盒宽高——块参照带旋转角时包围盒比实际边长大（45° 约放大 √2 倍），
+                // 会误判比例和图幅。与矩形框扫描同理，识别和显示改用 wcsCorners 相邻角点的实际边长。
 
                 // 计算打印区域的 4 个实际 WCS 角点（含 BlockTransform 的缩放和旋转）
                 // 不取包围盒，和矩形框扫描的 CornerPoints 同理：4 角 × WCS→DCS 只取一次包围盒
                 var wcsCorners = ComputeWcsCorners(coordinateMode, referenceFrame, blockRef.BlockTransform);
+                var width = CornerDistance(wcsCorners, 0, 1);
+                var height = CornerDistance(wcsCorners, 1, 2);
 
                 var detectionOptions = PaperSizeDetector.CreateTitleBlockBatchOptions(effectivePaperToleranceMm, !layout.ModelType);
                 // 图框录入时已要求设置固定纸张：识别候选中物理尺寸与录入纸张一致的优先，
@@ -886,6 +888,14 @@ public static class TitleBlockScanner
     /// 和矩形框扫描的 CornerPoints 同理：4 角 × WCS→DCS 只取一次包围盒，
     /// 避免在 ResolveWorldExtents 中已经被取过一次包围盒的值再次被取包围盒。
     /// </summary>
+    /// <summary>角点数组（x0,y0,…,x3,y3）中两个角点的平面距离。</summary>
+    private static double CornerDistance(double[] corners, int fromIndex, int toIndex)
+    {
+        var dx = corners[toIndex * 2] - corners[fromIndex * 2];
+        var dy = corners[toIndex * 2 + 1] - corners[fromIndex * 2 + 1];
+        return Math.Sqrt(dx * dx + dy * dy);
+    }
+
     private static double[] ComputeWcsCorners(
         RegionCoordinateMode mode, LocalRectangle frame, Matrix3d blockTransform)
     {
