@@ -12,8 +12,23 @@ using ZwSoft.ZwCAD.Geometry;
 
 namespace ZwcadBatchPlot;
 
+/// <summary>编辑图框库记录时传入的已配置字段与纸张。</summary>
+public sealed class FieldBoxSelectInitialState
+{
+    public LocalRectangle TitleRegion { get; set; } = new();
+    public LocalRectangle DrawingNumberRegion { get; set; } = new();
+    public LocalRectangle DateRegion { get; set; } = new();
+    public LocalRectangle RevisionRegion { get; set; } = new();
+    public LocalRectangle PhaseRegion { get; set; } = new();
+    public LocalRectangle Info1Region { get; set; } = new();
+    public LocalRectangle Info2Region { get; set; } = new();
+    public string PaperName { get; set; } = "";
+    public double PaperWidthMm { get; set; }
+    public double PaperHeightMm { get; set; }
+}
+
 /// <summary>
-/// 新增图框字段框选对话框。
+/// 新增或编辑图框字段框选对话框。
 /// 图名/图号为必选，日期/版次/设计阶段/信息1/信息2可选框选。
 /// 每个已框选字段在图中以红色临时矩形框 + 对角线 + 字段名文字标识。
 /// </summary>
@@ -68,7 +83,8 @@ public sealed class FieldBoxSelectDialog : Form
     public FieldBoxSelectDialog(Editor editor, Matrix3d inverseBlockTransform,
         Matrix3d blockTransform, TransientFrameMarkers markers, LocalRectangle referenceFrame,
         IReadOnlyList<PaperDetection> paperOptions,
-        PaperSizeDetector.DetectionOptions paperDetectionOptions)
+        PaperSizeDetector.DetectionOptions paperDetectionOptions,
+        FieldBoxSelectInitialState? initialState = null)
     {
         _editor = editor;
         _inverseBlockTransform = inverseBlockTransform;
@@ -149,10 +165,19 @@ public sealed class FieldBoxSelectDialog : Form
         _info2Status = MakeStatusLabel();
         table.Controls.Add(MakeFieldRow(_info2Status, SelectInfo2, ClearInfo2), 1, 7);
 
+        if (initialState != null)
+        {
+            ApplyInitialState(initialState);
+        }
+
         // 纸张：默认按打印范围自动识别，重新框选打印范围时同步刷新，也可手动修改。
         table.Controls.Add(MakeLabel("纸张"), 0, 8);
         table.Controls.Add(MakePaperRow(), 1, 8);
-        ApplyPaperOptions(paperOptions);
+        ApplyPaperOptions(
+            paperOptions,
+            initialState?.PaperName,
+            initialState?.PaperWidthMm ?? 0d,
+            initialState?.PaperHeightMm ?? 0d);
 
         // 提示
         var hint = new Label
@@ -214,6 +239,40 @@ public sealed class FieldBoxSelectDialog : Form
         Controls.Add(table);
     }
 
+    private void ApplyInitialState(FieldBoxSelectInitialState state)
+    {
+        TitleRegion = state.TitleRegion;
+        DrawingNumberRegion = state.DrawingNumberRegion;
+        DateRegion = state.DateRegion;
+        RevisionRegion = state.RevisionRegion;
+        PhaseRegion = state.PhaseRegion;
+        Info1Region = state.Info1Region;
+        Info2Region = state.Info2Region;
+
+        AddInitialField("图名", TitleRegion, _titleStatus);
+        AddInitialField("图号", DrawingNumberRegion, _numberStatus);
+        AddInitialField("日期", DateRegion, _dateStatus);
+        AddInitialField("版次", RevisionRegion, _revisionStatus);
+        AddInitialField("设计阶段", PhaseRegion, _phaseStatus);
+        AddInitialField("信息1", Info1Region, _info1Status);
+        AddInitialField("信息2", Info2Region, _info2Status);
+    }
+
+    private void AddInitialField(string fieldName, LocalRectangle region, Label statusLabel)
+    {
+        UpdateStatus(statusLabel, region);
+        if (!region.HasArea())
+        {
+            return;
+        }
+
+        // 库内字段已转换为当前块的局部坐标；变回 WCS 后建立首次显示的红色临时框。
+        var worldRegion = RectangleGeometry.TransformRectangle(region, _blockTransform);
+        _fieldCorners[fieldName] = (
+            new Point3d(worldRegion.MinX, worldRegion.MinY, 0),
+            new Point3d(worldRegion.MaxX, worldRegion.MaxY, 0));
+    }
+
     /// <summary>
     /// 对话框每次重新显示时（例如从 CAD 框选取点后返回），刷新所有已选字段的临时红色标识。
     /// 确保用户始终能看到自己已选择了哪些区域。
@@ -256,7 +315,7 @@ public sealed class FieldBoxSelectDialog : Form
     /// </summary>
     private void SelectPrintArea()
     {
-        Visible = false;
+        CadWindowFocus.HideForCadInput(this);
         try
         {
             var first = _editor.GetPoint(new PromptPointOptions("\n框选图框打印外边界第一个角点: "));
@@ -294,7 +353,7 @@ public sealed class FieldBoxSelectDialog : Form
         }
         finally
         {
-            Visible = true;
+            CadWindowFocus.RestoreDialog(this);
         }
     }
 
@@ -362,7 +421,7 @@ public sealed class FieldBoxSelectDialog : Form
     private bool TryBoxSelect(string fieldName, out LocalRectangle region)
     {
         region = new LocalRectangle();
-        Visible = false;
+        CadWindowFocus.HideForCadInput(this);
         try
         {
             var firstPrompt = $"框选{fieldName}区域第一个角点，或右键跳过: ";
@@ -395,7 +454,7 @@ public sealed class FieldBoxSelectDialog : Form
         }
         finally
         {
-            Visible = true;
+            CadWindowFocus.RestoreDialog(this);
         }
     }
 
@@ -508,7 +567,11 @@ public sealed class FieldBoxSelectDialog : Form
         return panel;
     }
 
-    private void ApplyPaperOptions(IReadOnlyList<PaperDetection> paperOptions)
+    private void ApplyPaperOptions(
+        IReadOnlyList<PaperDetection> paperOptions,
+        string? preferredPaperName = null,
+        double preferredPaperWidthMm = 0d,
+        double preferredPaperHeightMm = 0d)
     {
         if (paperOptions.Count == 0)
         {
@@ -525,7 +588,23 @@ public sealed class FieldBoxSelectDialog : Form
                 _paperName.Items.Add(PaperSizeDetector.FormatOption(paper));
             }
 
-            _paperName.SelectedIndex = 0;
+            var preferredIndex = -1;
+            if (!string.IsNullOrWhiteSpace(preferredPaperName))
+            {
+                for (var i = 0; i < _paperOptions.Count; i++)
+                {
+                    var paper = _paperOptions[i];
+                    if (string.Equals(paper.PaperName, preferredPaperName, StringComparison.OrdinalIgnoreCase)
+                        && Math.Abs(paper.PaperWidthMm - preferredPaperWidthMm) <= 0.01d
+                        && Math.Abs(paper.PaperHeightMm - preferredPaperHeightMm) <= 0.01d)
+                    {
+                        preferredIndex = i;
+                        break;
+                    }
+                }
+            }
+
+            _paperName.SelectedIndex = preferredIndex >= 0 ? preferredIndex : 0;
         }
         finally
         {

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
@@ -11,10 +12,14 @@ namespace ZwcadBatchPlot;
 public sealed class TitleBlockLibraryManagerForm : Form
 {
     private readonly BindingList<TitleBlockRow> _rows = new();
+    private readonly BindingList<TitleBlockRow> _displayRows = new();
     private readonly DataGridView _grid = new();
     private readonly Label _status = new();
+    private readonly ContextMenuStrip _rowMenu = new();
     private bool _loading;
     private bool _dirty;
+    private int _sortColumnIndex = -1;
+    private ListSortDirection _sortDirection = ListSortDirection.Ascending;
 
     public bool LibraryChanged { get; private set; }
 
@@ -23,6 +28,7 @@ public sealed class TitleBlockLibraryManagerForm : Form
         InitializeComponents();
         LoadRows();
         FormClosing += OnFormClosing;
+        FormClosed += (_, _) => _rowMenu.Dispose();
     }
 
     private void InitializeComponents()
@@ -87,7 +93,16 @@ public sealed class TitleBlockLibraryManagerForm : Form
 
         UiLayout.StyleGrid(_grid, Font);
         AddColumns();
-        _grid.DataSource = _rows;
+        _grid.DataSource = _displayRows;
+        _grid.ColumnHeaderMouseClick += GridColumnHeaderMouseClick;
+        _grid.CellDoubleClick += (_, e) =>
+        {
+            if (e.RowIndex >= 0)
+            {
+                EditSelectedDefinition();
+            }
+        };
+        _grid.CellMouseDown += GridCellMouseDown;
         _grid.CellValueChanged += (_, _) => MarkDirty();
         _grid.CurrentCellDirtyStateChanged += (_, _) =>
         {
@@ -101,6 +116,11 @@ public sealed class TitleBlockLibraryManagerForm : Form
             e.ThrowException = false;
             MessageBox.Show("输入值格式不正确，请输入有效的数字。", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
         };
+
+        var editItem = _rowMenu.Items.Add("编辑");
+        editItem.Click += (_, _) => EditSelectedDefinition();
+        _rowMenu.Opening += (_, e) => e.Cancel = _grid.SelectedRows.Count == 0;
+        _grid.ContextMenuStrip = _rowMenu;
 
         _status.Dock = DockStyle.Bottom;
         _status.Height = Math.Max(UiLayout.Scale(28), Font.Height + UiLayout.Scale(10));
@@ -153,6 +173,11 @@ public sealed class TitleBlockLibraryManagerForm : Form
         _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.Info2MaxX), HeaderText = "信息2MaxX", Width = UiLayout.Scale(96) });
         _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.Info2MaxY), HeaderText = "信息2MaxY", Width = UiLayout.Scale(96) });
         _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.UpdatedAt), HeaderText = "更新时间", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill, MinimumWidth = UiLayout.Scale(170), ReadOnly = true });
+
+        foreach (DataGridViewColumn column in _grid.Columns)
+        {
+            column.SortMode = DataGridViewColumnSortMode.Programmatic;
+        }
     }
 
     private void LoadRows()
@@ -174,6 +199,7 @@ public sealed class TitleBlockLibraryManagerForm : Form
                     _rows.Add(TitleBlockRow.FromDefinition(block));
                 }
 
+                RefreshDisplayRows();
                 _dirty = false;
                 RefreshStatus();
             }
@@ -224,9 +250,198 @@ public sealed class TitleBlockLibraryManagerForm : Form
             _rows.Remove(row);
         }
 
+        RefreshDisplayRows();
         _dirty = true;
         RefreshStatus();
         SaveRows();
+    }
+
+    private void GridCellMouseDown(object? sender, DataGridViewCellMouseEventArgs e)
+    {
+        if (e.Button != MouseButtons.Right)
+        {
+            return;
+        }
+
+        if (e.RowIndex < 0)
+        {
+            _grid.ClearSelection();
+            return;
+        }
+
+        // 右键所在行必须先成为当前选择，否则菜单“编辑”可能作用到此前选中的另一条记录。
+        _grid.ClearSelection();
+        _grid.Rows[e.RowIndex].Selected = true;
+        if (e.ColumnIndex >= 0)
+        {
+            _grid.CurrentCell = _grid.Rows[e.RowIndex].Cells[e.ColumnIndex];
+        }
+    }
+
+    private void EditSelectedDefinition()
+    {
+        _grid.EndEdit();
+        var row = _grid.SelectedRows
+            .Cast<DataGridViewRow>()
+            .Select(item => item.DataBoundItem)
+            .OfType<TitleBlockRow>()
+            .FirstOrDefault();
+        if (row == null)
+        {
+            return;
+        }
+
+        // 表格内若已有手工修改，先明确保存，避免编辑窗口从磁盘回读到另一份旧配置。
+        if (_dirty)
+        {
+            var saveFirst = MessageBox.Show(
+                "当前有未保存的表格修改。编辑图框前需要先保存，是否继续？",
+                Text,
+                MessageBoxButtons.OKCancel,
+                MessageBoxIcon.Question);
+            if (saveFirst != DialogResult.OK)
+            {
+                return;
+            }
+
+            SaveRows();
+            if (_dirty)
+            {
+                return;
+            }
+        }
+
+        CadWindowFocus.HideForCadInput(this);
+        try
+        {
+            if (BatchPlotCommands.EditTitleBlockFromLibrary(row.BlockName))
+            {
+                LibraryChanged = true;
+                LoadRows();
+            }
+        }
+        finally
+        {
+            CadWindowFocus.RestoreDialog(this);
+        }
+    }
+
+    private void GridColumnHeaderMouseClick(object? sender, DataGridViewCellMouseEventArgs e)
+    {
+        if (e.ColumnIndex < 0 || e.ColumnIndex >= _grid.Columns.Count)
+        {
+            return;
+        }
+
+        // 同一列表头再次点击时切换升序/降序；切换到其他列时从升序开始。
+        if (_sortColumnIndex == e.ColumnIndex)
+        {
+            _sortDirection = _sortDirection == ListSortDirection.Ascending
+                ? ListSortDirection.Descending
+                : ListSortDirection.Ascending;
+        }
+        else
+        {
+            _sortColumnIndex = e.ColumnIndex;
+            _sortDirection = ListSortDirection.Ascending;
+        }
+
+        _grid.EndEdit();
+        RefreshDisplayRows();
+    }
+
+    private void RefreshDisplayRows()
+    {
+        IEnumerable<TitleBlockRow> rows = _rows;
+        if (_sortColumnIndex >= 0 && _sortColumnIndex < _grid.Columns.Count)
+        {
+            var propertyName = _grid.Columns[_sortColumnIndex].DataPropertyName;
+            var property = TypeDescriptor.GetProperties(typeof(TitleBlockRow))[propertyName];
+            if (property != null)
+            {
+                var comparer = Comparer<TitleBlockRow>.Create((left, right) =>
+                    CompareSortValues(property.GetValue(left), property.GetValue(right)));
+                rows = _sortDirection == ListSortDirection.Ascending
+                    ? rows.OrderBy(row => row, comparer)
+                    : rows.OrderByDescending(row => row, comparer);
+            }
+        }
+
+        var wasLoading = _loading;
+        _loading = true;
+        try
+        {
+            // DataGridView 在重置绑定时可能触发 CellValueChanged；排序属于视图操作，不能误标记为未保存修改。
+            ReplaceBindingListContents(_displayRows, rows);
+            UpdateSortGlyph();
+        }
+        finally
+        {
+            _loading = wasLoading;
+        }
+    }
+
+    private static int CompareSortValues(object? left, object? right)
+    {
+        if (ReferenceEquals(left, right))
+        {
+            return 0;
+        }
+
+        if (left == null)
+        {
+            return -1;
+        }
+
+        if (right == null)
+        {
+            return 1;
+        }
+
+        if (left is string leftText && right is string rightText)
+        {
+            return NaturalStringComparer.Instance.Compare(leftText, rightText);
+        }
+
+        return left is IComparable comparable
+            ? comparable.CompareTo(right)
+            : string.Compare(left.ToString(), right.ToString(), StringComparison.CurrentCultureIgnoreCase);
+    }
+
+    private void UpdateSortGlyph()
+    {
+        foreach (DataGridViewColumn column in _grid.Columns)
+        {
+            column.HeaderCell.SortGlyphDirection = SortOrder.None;
+        }
+
+        if (_sortColumnIndex >= 0 && _sortColumnIndex < _grid.Columns.Count)
+        {
+            _grid.Columns[_sortColumnIndex].HeaderCell.SortGlyphDirection =
+                _sortDirection == ListSortDirection.Ascending ? SortOrder.Ascending : SortOrder.Descending;
+        }
+    }
+
+    /// <summary>
+    /// 排序只替换界面绑定列表，不改变图框库的原始集合顺序；编辑、删除仍操作同一行对象。
+    /// </summary>
+    private static void ReplaceBindingListContents<T>(BindingList<T> target, IEnumerable<T> values)
+    {
+        var snapshot = values.ToList();
+        target.RaiseListChangedEvents = false;
+        try
+        {
+            target.Clear();
+            foreach (var value in snapshot)
+            {
+                target.Add(value);
+            }
+        }
+        finally
+        {
+            target.RaiseListChangedEvents = true;
+            target.ResetBindings();
+        }
     }
 
     private void ImportLibrary()
@@ -286,7 +501,7 @@ public sealed class TitleBlockLibraryManagerForm : Form
 
     private void RefreshStatus()
     {
-        _status.Text = $"共 {_rows.Count} 个图框定义。{(_dirty ? "有未保存修改。" : "")} 配置文件: {TitleBlockLibraryStore.DefaultPath}";
+        _status.Text = $"共 {_rows.Count} 个图框定义。双击行或右键选择“编辑”。{(_dirty ? "有未保存修改。" : "")} 配置文件: {TitleBlockLibraryStore.DefaultPath}";
     }
 
     private bool TryBuildLibrary(out TitleBlockLibrary library)

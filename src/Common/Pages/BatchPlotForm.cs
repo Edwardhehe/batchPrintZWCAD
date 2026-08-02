@@ -1509,19 +1509,21 @@ public sealed class BatchPlotForm : Form
             return;
         }
 
-        Hide();
-        System.Windows.Forms.Application.DoEvents();
+        var ok = false;
+        var message = "";
+        CadWindowFocus.HideForCadInput(this);
         try
         {
-            var ok = DirectoryTableGenerator.PromptAndGenerate(_currentDocument, _jobs.ToList(), _settings, out var message);
+            ok = DirectoryTableGenerator.PromptAndGenerate(_currentDocument, _jobs.ToList(), _settings, out message);
             AppendLog(ok ? "INFO" : "WARN", message);
-            MessageBox.Show(message, "批量打印", MessageBoxButtons.OK, ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
         }
         finally
         {
-            Show();
-            Activate();
+            CadWindowFocus.RestoreDialog(this);
         }
+
+        // 主窗口恢复后再显示带 owner 的结果提示，避免无主提示框落到其他程序后面。
+        MessageBox.Show(this, message, "批量打印", MessageBoxButtons.OK, ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
     }
 
     private void SplitSelectedDwgs()
