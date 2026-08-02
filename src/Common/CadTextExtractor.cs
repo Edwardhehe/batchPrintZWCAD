@@ -601,15 +601,14 @@ public static class CadTextExtractor
             }
         }
 
-        if (TryGetTransformedExtents(entity, entityToLocal, out var extents)
-            && HasMeaningfulOverlap(region, extents))
+        if (TryGetTransformedExtents(entity, entityToLocal, out var extents))
         {
-            return true;
+            // 已取得 CAD 的真实文字包围盒时，它就是最终依据；真实包围盒不相交后不能再用估算框重试，
+            // 否则旋转文字的无效对齐点可能生成巨大假包围盒，把相邻单元格标题误识别进来。
+            return HasMeaningfulOverlap(region, extents);
         }
 
-        return entity is DBText dbText
-            && TryGetEstimatedTextExtents(dbText, entityToLocal, out var estimated)
-            && HasMeaningfulOverlap(region, estimated);
+        return false;
     }
 
     private static bool IsCandidateInRegion(
@@ -689,13 +688,21 @@ public static class CadTextExtractor
     private static bool TryGetAlignmentPoint(Entity entity, out Point3d point)
     {
         point = Point3d.Origin;
-        if (entity is not DBText)
+        if (entity is not DBText dbText)
         {
             return false;
         }
 
         try
         {
+            // 左对齐、基线文字只使用 Position；这类文字在 AutoCAD/ZWCAD 中经常仍返回 (0,0,0)
+            // 的占位 AlignmentPoint。把占位点当成真实对齐点会令估算包围盒跨越很远距离。
+            if (dbText.HorizontalMode == TextHorizontalMode.TextLeft
+                && dbText.VerticalMode == TextVerticalMode.TextBase)
+            {
+                return false;
+            }
+
             var property = entity.GetType().GetProperty("AlignmentPoint", BindingFlags.Instance | BindingFlags.Public)
                 ?? typeof(DBText).GetProperty("AlignmentPoint", BindingFlags.Instance | BindingFlags.Public);
             if (property?.GetValue(entity, null) is Point3d alignment
