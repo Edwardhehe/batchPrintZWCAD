@@ -164,6 +164,11 @@ public static class CadTextExtractor
                 continue;
             }
 
+            if (!IsEntityVisible(entity))
+            {
+                continue;
+            }
+
             if (entity is BlockReference ownerBlock)
             {
                 if (!IsBlockClipped(tr, ownerBlock))
@@ -222,6 +227,12 @@ public static class CadTextExtractor
 
             if (tr.GetObject(attributeId, OpenMode.ForRead, false) is AttributeReference attribute)
             {
+                // 动态块被可见性状态隐藏的属性仍挂在块参照上且保留旧位置，必须跳过。
+                if (!IsEntityVisible(attribute))
+                {
+                    continue;
+                }
+
                 if (TryGetText(attribute, out var text, out var worldPoint))
                 {
                     var local = worldPoint.TransformBy(inverse);
@@ -319,6 +330,7 @@ public static class CadTextExtractor
             }
 
             if (tr.GetObject(attributeId, OpenMode.ForRead, false) is AttributeReference attribute
+                && IsEntityVisible(attribute)
                 && TryGetText(attribute, out var attributeText, out var attributePoint))
             {
                 AddText(values, attributeText, attributePoint, TextSourcePriority.Attribute, attribute);
@@ -365,6 +377,22 @@ public static class CadTextExtractor
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// 实体是否可见。动态块被可见性状态隐藏的实体 Visible=false，识别时必须跳过，
+    /// 否则隐藏状态的旧位置文字/属性会污染字段区域匹配。API 异常时按可见处理（宁可多扫不丢）。
+    /// </summary>
+    private static bool IsEntityVisible(Entity entity)
+    {
+        try
+        {
+            return entity.Visible;
+        }
+        catch
+        {
+            return true;
+        }
     }
 
     private static bool TryGetText(Entity entity, out string text, out Point3d point)
@@ -421,6 +449,12 @@ public static class CadTextExtractor
         foreach (ObjectId id in definition)
         {
             if (tr.GetObject(id, OpenMode.ForRead, false) is not Entity entity)
+            {
+                continue;
+            }
+
+            // 动态块匿名定义包含所有可见性状态的实体，隐藏状态的旧位置文字/嵌套块一律跳过。
+            if (!IsEntityVisible(entity))
             {
                 continue;
             }
@@ -507,6 +541,9 @@ public static class CadTextExtractor
             if (tr.GetObject(id, OpenMode.ForRead, false) is not BlockReference otherBlock)
                 continue;
 
+            if (!IsEntityVisible(otherBlock))
+                continue;
+
             // 快速剔除：检查两个包围盒是否相交
             Extents3d otherExtents;
             try { otherExtents = otherBlock.GeometricExtents; }
@@ -529,6 +566,7 @@ public static class CadTextExtractor
                 if (!attrId.IsValid || attrId.IsErased)
                     continue;
                 if (tr.GetObject(attrId, OpenMode.ForRead, false) is AttributeReference attr
+                    && IsEntityVisible(attr)
                     && TryGetText(attr, out var attrText, out var attrWorldPoint))
                 {
                     var attrLocal = attrWorldPoint.TransformBy(otherInverse);

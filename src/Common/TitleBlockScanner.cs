@@ -161,8 +161,8 @@ public static class TitleBlockScanner
                 try
                 {
                     coordinateMode = GetCoordinateMode(definition);
-                    referenceFrame = ResolveReferenceFrame(definition, blockRef);
-                    extents = ResolveWorldExtents(definition, blockRef, coordinateMode, referenceFrame);
+                    referenceFrame = ResolveReferenceFrame(definition, blockRef, effectiveBlockTransform);
+                    extents = ResolveWorldExtents(definition, blockRef, effectiveBlockTransform, coordinateMode, referenceFrame);
                     titleRegion = ResolveLocalRegion(definition.TitleRegion, effectiveBlockTransform, coordinateMode, referenceFrame);
                     numberRegion = ResolveLocalRegion(definition.DrawingNumberRegion, effectiveBlockTransform, coordinateMode, referenceFrame);
                     dateRegion = definition.DateRegion.HasArea()
@@ -182,8 +182,8 @@ public static class TitleBlockScanner
                         : new LocalRectangle();
 
                     // 嵌套匹配时 ResolveLocalRegion 返回的 region 处于内层块定义空间，
-                    // 而 ExtractRegionText 从外层 blockRef 定义空间起算，需统一坐标系。
-                    if (isNestedMatch && coordinateMode != RegionCoordinateMode.Frame)
+                    // 而 ExtractRegionText 从外层 blockRef 定义空间起算，三种坐标模式都需统一坐标系。
+                    if (isNestedMatch)
                     {
                         titleRegion = TransformLocalRegion(titleRegion, nestedToOuter);
                         numberRegion = TransformLocalRegion(numberRegion, nestedToOuter);
@@ -215,7 +215,7 @@ public static class TitleBlockScanner
 
                 // 计算打印区域的 4 个实际 WCS 角点（含 BlockTransform 的缩放和旋转）
                 // 不取包围盒，和矩形框扫描的 CornerPoints 同理：4 角 × WCS→DCS 只取一次包围盒
-                var wcsCorners = ComputeWcsCorners(coordinateMode, referenceFrame, blockRef.BlockTransform);
+                var wcsCorners = ComputeWcsCorners(coordinateMode, referenceFrame, effectiveBlockTransform);
                 var width = CornerDistance(wcsCorners, 0, 1);
                 var height = CornerDistance(wcsCorners, 1, 2);
 
@@ -491,7 +491,7 @@ public static class TitleBlockScanner
             : RegionCoordinateMode.Local;
     }
 
-    private static Extents3d ResolveWorldExtents(TitleBlockDefinition definition, BlockReference blockRef, RegionCoordinateMode mode, LocalRectangle referenceFrame)
+    private static Extents3d ResolveWorldExtents(TitleBlockDefinition definition, BlockReference blockRef, Matrix3d effectiveBlockTransform, RegionCoordinateMode mode, LocalRectangle referenceFrame)
     {
         if (mode == RegionCoordinateMode.World && definition.HasPrintRegion)
         {
@@ -500,11 +500,11 @@ public static class TitleBlockScanner
 
         if (mode == RegionCoordinateMode.Frame)
         {
-            return TransformRegion(referenceFrame, blockRef.BlockTransform);
+            return TransformRegion(referenceFrame, effectiveBlockTransform);
         }
 
         return definition.HasPrintRegion
-            ? TransformRegion(definition.PrintRegion, blockRef.BlockTransform)
+            ? TransformRegion(definition.PrintRegion, effectiveBlockTransform)
             : blockRef.GeometricExtents;
     }
 
@@ -536,13 +536,15 @@ public static class TitleBlockScanner
             points.Max(p => p.Y));
     }
 
-    private static LocalRectangle ResolveReferenceFrame(TitleBlockDefinition definition, BlockReference blockRef)
+    private static LocalRectangle ResolveReferenceFrame(TitleBlockDefinition definition, BlockReference blockRef, Matrix3d effectiveBlockTransform)
     {
         var hasSavedFrame = HasArea(definition.PrintRegion);
         LocalRectangle blockFrame;
         try
         {
-            blockFrame = TransformExtents(blockRef.GeometricExtents, blockRef.BlockTransform.Inverse());
+            // blockFrame 必须换算到与 PrintRegion 相同的坐标系（入库时的复合变换基准），
+            // 否则嵌套动态块下两者不在同一坐标系，重叠比较没有意义。
+            blockFrame = TransformExtents(blockRef.GeometricExtents, effectiveBlockTransform.Inverse());
         }
         catch
         {
