@@ -505,7 +505,7 @@ public static class DwgSplitService
             sequenceNumber,
             sequenceDigits,
             settings.LongPaperNameFormat,
-            settings.OutputLongPaperSnapToleranceMm);
+            settings.LongPaperSnapToleranceMm);
         return FileNameSanitizer.MakeUnique(
             directory,
             baseName,

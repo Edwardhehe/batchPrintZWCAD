@@ -62,7 +62,8 @@ public static class TitleBlockScanner
     {
         var jobs = new List<PlotJob>();
         var warnings = new List<string>();
-        var effectivePaperToleranceMm = paperMatchToleranceMm ?? AppSettingsStore.Load().PaperMatchToleranceMm;
+        var storedSettings = AppSettingsStore.Load();
+        var effectivePaperToleranceMm = paperMatchToleranceMm ?? storedSettings.PaperMatchToleranceMm;
         if (string.IsNullOrWhiteSpace(sourceName))
         {
             sourceName = db.Filename;
@@ -218,7 +219,7 @@ public static class TitleBlockScanner
                 var width = CornerDistance(wcsCorners, 0, 1);
                 var height = CornerDistance(wcsCorners, 1, 2);
 
-                var detectionOptions = PaperSizeDetector.CreateTitleBlockBatchOptions(effectivePaperToleranceMm, !layout.ModelType);
+                var detectionOptions = PaperSizeDetector.CreateTitleBlockBatchOptions(effectivePaperToleranceMm, !layout.ModelType, storedSettings.LongPaperSnapToleranceMm);
                 // 图框录入时已要求设置固定纸张：识别候选中物理尺寸与录入纸张一致的优先，
                 // 避免把图框零头误差识别成动态加长纸而偏离图框库纸张。
                 if (definition.PaperWidthMm > 0 && definition.PaperHeightMm > 0)

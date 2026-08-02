@@ -28,7 +28,7 @@ public sealed class SettingsForm : Form
     private readonly NumericUpDown _paperTolerance = new();
     private readonly CheckBox _recognizeFourLineRectangleFrames = new();
     private readonly ComboBox _longPaperNameFormat = new();
-    private readonly NumericUpDown _outputLongPaperSnapTolerance = new();
+    private readonly NumericUpDown _longPaperSnapTolerance = new();
     private readonly CheckBox _addSequenceWhenPdfExists = new();
     private readonly CheckBox _openExternalDwgForPlot = new();
     private readonly CheckBox _useFileNameAsPdfBookmark = new();
@@ -153,6 +153,12 @@ public sealed class SettingsForm : Form
         categories.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
         ConfigureNumber(_paperTolerance, 0.5M, 20M, 0.5M, 1);
+        ConfigureNumber(_longPaperSnapTolerance, 0.5M, 20M, 0.5M, 1);
+        _longPaperSnapTolerance.ValueChanged += (_, _) => UpdateFileNamePreview();
+        var longPaperSnapTip = new ToolTip();
+        longPaperSnapTip.SetToolTip(
+            _longPaperSnapTolerance,
+            "加长图长边吸附到最近 1/8 模数标准加长图的容差；同时影响实际打印纸张和输出名称。");
 
         _addSequenceWhenPdfExists.Text = "PDF 已存在时自动加序号";
         _addSequenceWhenPdfExists.AutoSize = true;
@@ -162,8 +168,9 @@ public sealed class SettingsForm : Form
         _openExternalDwgForPlot.AutoSize = true;
         _openExternalDwgForPlot.Dock = DockStyle.Fill;
 
-        var paperTable = CreateSettingsTable(1);
+        var paperTable = CreateSettingsTable(2);
         UiLayout.AddRow(paperTable, 0, "纸张匹配容差(mm)", _paperTolerance);
+        UiLayout.AddRow(paperTable, 1, "加长图长边吸附容差(mm)", _longPaperSnapTolerance);
 
         _recognizeFourLineRectangleFrames.Text = "识别四条直线或直线型 PL 首尾相连组成的矩形框";
         _recognizeFourLineRectangleFrames.AutoSize = true;
@@ -471,22 +478,6 @@ public sealed class SettingsForm : Form
         _longPaperNameFormat.SelectedIndex = 0;
         _longPaperNameFormat.SelectedIndexChanged += (_, _) => UpdateFileNamePreview();
         longPaperRow.Controls.Add(_longPaperNameFormat);
-        longPaperRow.Controls.Add(new Label
-        {
-            Text = "输出加长图长边吸附容差(mm)：",
-            AutoSize = true,
-            TextAlign = ContentAlignment.MiddleLeft,
-            Margin = new Padding(UiLayout.Scale(16), UiLayout.Scale(4), UiLayout.Scale(6), 0)
-        });
-        ConfigureNumber(_outputLongPaperSnapTolerance, 0.5M, 20M, 0.5M, 1);
-        _outputLongPaperSnapTolerance.Width = UiLayout.Scale(85);
-        _outputLongPaperSnapTolerance.Margin = new Padding(0, UiLayout.Scale(1), 0, 0);
-        _outputLongPaperSnapTolerance.ValueChanged += (_, _) => UpdateFileNamePreview();
-        longPaperRow.Controls.Add(_outputLongPaperSnapTolerance);
-        var outputLongPaperTip = new ToolTip();
-        outputLongPaperTip.SetToolTip(
-            _outputLongPaperSnapTolerance,
-            "仅影响文件名、图纸目录等输出图幅名吸附到最近的 1/8 模数；不改变实际打印纸张尺寸。");
         longPaperGroup.Controls.Add(longPaperRow);
         root.Controls.Add(longPaperGroup, 0, 2);
 
@@ -525,7 +516,7 @@ public sealed class SettingsForm : Form
             startNumber,
             sequenceDigits,
             (LongPaperNameFormat)Math.Max(0, _longPaperNameFormat.SelectedIndex),
-            (double)_outputLongPaperSnapTolerance.Value);
+            (double)_longPaperSnapTolerance.Value);
         if (_autoFileNameSequenceDigits.Checked)
         {
             _fileNamePreview.Text += "（实际位数按图框列表总张数计算）";
@@ -1047,9 +1038,9 @@ public sealed class SettingsForm : Form
         SelectTextStyle(settings.DirectoryTextStyleName);
         LoadDirectoryColumns(settings.DirectoryColumns);
         _longPaperNameFormat.SelectedIndex = Math.Max(0, Math.Min(5, (int)settings.LongPaperNameFormat));
-        _outputLongPaperSnapTolerance.Value = UiLayout.Clamp(
-            _outputLongPaperSnapTolerance,
-            settings.OutputLongPaperSnapToleranceMm);
+        _longPaperSnapTolerance.Value = UiLayout.Clamp(
+            _longPaperSnapTolerance,
+            settings.LongPaperSnapToleranceMm);
     }
 
     private void SaveSettings()
@@ -1104,7 +1095,7 @@ public sealed class SettingsForm : Form
         current.DirectoryDrawGridLines = _directoryDrawGridLines.Checked;
         current.DirectoryColumns = directoryColumns;
         current.LongPaperNameFormat = (LongPaperNameFormat)Math.Max(0, Math.Min(5, _longPaperNameFormat.SelectedIndex));
-        current.OutputLongPaperSnapToleranceMm = (double)_outputLongPaperSnapTolerance.Value;
+        current.LongPaperSnapToleranceMm = (double)_longPaperSnapTolerance.Value;
         return true;
     }
 

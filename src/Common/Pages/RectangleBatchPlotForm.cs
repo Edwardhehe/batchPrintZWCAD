@@ -1320,7 +1320,7 @@ public sealed class RectangleBatchPlotForm : Form
                     Path.GetFileNameWithoutExtension(originalPaths[job]),
                     OutputPaperNameResolver.Resolve(
                         job,
-                        _settings.OutputLongPaperSnapToleranceMm),
+                        _settings.LongPaperSnapToleranceMm),
                     job.PaperWidthMm,
                     job.PaperHeightMm)).ToList();
                 var mergePlans = PdfDocumentService.PlanMerges(
@@ -1846,7 +1846,7 @@ public sealed class RectangleBatchPlotForm : Form
                 != updated.RecognizeFourLineRectangleFrames;
             _settings.PaperMatchToleranceMm = updated.PaperMatchToleranceMm;
             _settings.RecognizeFourLineRectangleFrames = updated.RecognizeFourLineRectangleFrames;
-            _settings.OutputLongPaperSnapToleranceMm = updated.OutputLongPaperSnapToleranceMm;
+            _settings.LongPaperSnapToleranceMm = updated.LongPaperSnapToleranceMm;
             _settings.LongPaperNameFormat = updated.LongPaperNameFormat;
             _settings.SortOrderHorizontalFirst = updated.SortOrderHorizontalFirst;
 

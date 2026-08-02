@@ -143,7 +143,7 @@ public static class FileNameSanitizer
         int? sequenceNumber = null,
         int sequenceDigits = 0,
         LongPaperNameFormat longPaperNameFormat = LongPaperNameFormat.Fraction,
-        double outputLongPaperSnapToleranceMm = 4d)
+        double longPaperSnapToleranceMm = 3d)
     {
         var result = new StringBuilder();
         var value = pattern ?? "";
@@ -166,7 +166,7 @@ public static class FileNameSanitizer
                 'F' => job.Info2,
                 'G' => job.Phase,
                 'T' => NormalizeLongPaperFraction(
-                    OutputPaperNameResolver.Resolve(job, outputLongPaperSnapToleranceMm),
+                    OutputPaperNameResolver.Resolve(job, longPaperSnapToleranceMm),
                     longPaperNameFormat),
                 'N' => sequenceNumber.HasValue ? FormatSequenceNumber(sequenceNumber.Value, sequenceDigits) : "",
                 _ => null
@@ -230,7 +230,7 @@ public static class FileNameSanitizer
         int sequenceNumber = 0,
         int sequenceDigits = 2,
         LongPaperNameFormat longPaperNameFormat = LongPaperNameFormat.Fraction,
-        double outputLongPaperSnapToleranceMm = 4d)
+        double longPaperSnapToleranceMm = 3d)
     {
         var parts = new List<string>();
         foreach (var key in fieldKeys)
@@ -245,7 +245,7 @@ public static class FileNameSanitizer
                 "Info1" => job.Info1,
                 "Info2" => job.Info2,
                 "PaperName" => NormalizeLongPaperFraction(
-                    OutputPaperNameResolver.Resolve(job, outputLongPaperSnapToleranceMm),
+                    OutputPaperNameResolver.Resolve(job, longPaperSnapToleranceMm),
                     longPaperNameFormat),
                 "Sequence" => sequenceNumber > 0 ? sequenceNumber.ToString($"D{Math.Max(1, Math.Min(10, sequenceDigits))}") : "",
                 _ => ""

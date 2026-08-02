@@ -69,10 +69,10 @@ public sealed class AppSettings
     /// <summary>加长图图名命名格式：分数（配置1）或小数（配置2）等。</summary>
     public LongPaperNameFormat LongPaperNameFormat { get; set; } = LongPaperNameFormat.Fraction;
     /// <summary>
-    /// 仅用于文件名、图纸目录等输出图幅名：实测加长图长边与最近 1/8 模数的吸附容差（毫米）。
-    /// 不参与实际打印纸张、PMP 尺寸或打印范围的识别。
+    /// 加长图长边吸附到最近 1/8 模数标准加长图的容差（毫米）。
+    /// 同时影响实际打印纸张尺寸（PMP 注册）和文件名、图纸目录等输出显示名称。
     /// </summary>
-    public double OutputLongPaperSnapToleranceMm { get; set; } = 4.0;
+    public double LongPaperSnapToleranceMm { get; set; } = 3.0;
     public string PdfFileNameSeparator { get; set; } = "_";
     public List<string> PdfFileNameFields { get; set; } = new() { "DrawingNumber", "Title" };
     /// <summary>
@@ -165,9 +165,9 @@ public static class AppSettingsStore
             settings.PaperMatchToleranceMm = 1.0;
         }
 
-        if (settings.OutputLongPaperSnapToleranceMm <= 0)
+        if (settings.LongPaperSnapToleranceMm <= 0)
         {
-            settings.OutputLongPaperSnapToleranceMm = 4.0;
+            settings.LongPaperSnapToleranceMm = 3.0;
         }
 
         if (settings.DirectoryIndexWidth <= 0)

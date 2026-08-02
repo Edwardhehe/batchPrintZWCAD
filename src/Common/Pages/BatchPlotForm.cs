@@ -1424,7 +1424,7 @@ public sealed class BatchPlotForm : Form
             sequenceNumber,
             sequenceDigits,
             _settings.LongPaperNameFormat,
-            _settings.OutputLongPaperSnapToleranceMm);
+            _settings.LongPaperSnapToleranceMm);
         return FileNameSanitizer.MakeUnique(
             GetOutputDirectory(job),
             baseName,
@@ -1763,7 +1763,7 @@ public sealed class BatchPlotForm : Form
         _settings.DirectoryDrawGridLines = updated.DirectoryDrawGridLines;
         _settings.DirectoryColumns = updated.DirectoryColumns.Select(x => x.Clone()).ToList();
         _settings.LongPaperNameFormat = updated.LongPaperNameFormat;
-        _settings.OutputLongPaperSnapToleranceMm = updated.OutputLongPaperSnapToleranceMm;
+        _settings.LongPaperSnapToleranceMm = updated.LongPaperSnapToleranceMm;
         _mergePdfCheckBox.Checked = updated.MergePdf;
     }
 
@@ -2106,7 +2106,7 @@ public sealed class BatchPlotForm : Form
                         Path.GetFileNameWithoutExtension(originalOutputPaths[job]),
                         OutputPaperNameResolver.Resolve(
                             job,
-                            _settings.OutputLongPaperSnapToleranceMm),
+                            _settings.LongPaperSnapToleranceMm),
                         job.PaperWidthMm,
                         job.PaperHeightMm)).ToList();
                     var mergePlans = PdfDocumentService.PlanMerges(

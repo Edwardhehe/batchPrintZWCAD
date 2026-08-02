@@ -35,8 +35,8 @@ public static class OutputPaperNameResolver
     }
 
     /// <summary>
-    /// 已识别为加长图时，将实测物理长边吸附到标准长边的最近 1/8 整数倍。
-    /// 只有长边误差不超过输出专用容差才改变输出图幅名；实际打印仍保留原始尺寸。
+    /// 已识别为加长图时，将物理长边吸附到标准长边的最近 1/8 整数倍。
+    /// 只有长边误差不超过容差才改变输出图幅名；实际打印纸张已在识别阶段完成吸附，此处仅同步显示名称。
     /// </summary>
     public static string Resolve(
         string? actualPaperName,

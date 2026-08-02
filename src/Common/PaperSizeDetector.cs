@@ -18,6 +18,8 @@ public static class PaperSizeDetector
         public double LongPaperShortSideTolerance { get; set; } = DefaultLongPaperShortSideTolerance;
         /// <summary>任意加长图短边的绝对匹配容差（毫米）；设置后优先于相对容差。</summary>
         public double? LongPaperShortSideToleranceMm { get; set; }
+        /// <summary>加长图长边吸附到最近 1/8 模数的容差（毫米）；null 表示不吸附，按实测生成动态纸。</summary>
+        public double? LongPaperSnapToleranceMm { get; set; }
         /// <summary>长边只要求超过标准长边，按实测尺寸返回，不再吸附到 1/8 模数。</summary>
         public bool AllowArbitraryLongSide { get; set; }
         /// <summary>同一几何尺寸存在多个比例候选时的首选比例；布局空间使用 1:1。</summary>
@@ -180,30 +182,33 @@ public static class PaperSizeDetector
     }
 
     /// <summary>
-    /// 创建图框库批打专用识别参数。短边按设置中的毫米容差匹配；长边只要超过标准长边，
-    /// 就保留实测物理尺寸并标记为动态纸张。布局空间优先 1:1，模型空间沿用常用的 1:100 优先。
+    /// 创建图框库批打专用识别参数。短边按设置中的毫米容差匹配；长边超过标准长边后，
+    /// 与最近 1/8 模数的差距在吸附容差内按标准加长图输出，超出才保留实测尺寸生成动态纸张。
+    /// 布局空间优先 1:1，模型空间沿用常用的 1:100 优先。
     /// </summary>
-    public static DetectionOptions CreateTitleBlockBatchOptions(double paperMatchToleranceMm, bool isPaperSpace)
+    public static DetectionOptions CreateTitleBlockBatchOptions(double paperMatchToleranceMm, bool isPaperSpace, double? longPaperSnapToleranceMm = null)
     {
         return new DetectionOptions
         {
             AllowArbitraryLongSide = true,
             LongPaperShortSideToleranceMm = Math.Max(0.05d, paperMatchToleranceMm),
+            LongPaperSnapToleranceMm = longPaperSnapToleranceMm,
             PreferredScaleValue = isPaperSpace ? 1d : 100d
         };
     }
 
     /// <summary>
-    /// 创建矩形框批打专用识别参数。短边和 1/8 模数的误差都使用设置中的毫米容差；
+    /// 创建矩形框批打专用识别参数。短边匹配用纸张匹配容差，长边 1/8 模数吸附用专用吸附容差；
     /// 模型空间优先按 1:100 解释，布局空间优先按 1:1 解释，同时把另一常用比例排在其余比例之前。
     /// </summary>
-    public static DetectionOptions CreateRectangleBatchOptions(double paperMatchToleranceMm, bool isPaperSpace)
+    public static DetectionOptions CreateRectangleBatchOptions(double paperMatchToleranceMm, bool isPaperSpace, double? longPaperSnapToleranceMm = null)
     {
         var toleranceMm = Math.Max(0d, paperMatchToleranceMm);
         return new DetectionOptions
         {
             UseRectangleShortSideMatching = true,
             LongPaperShortSideToleranceMm = toleranceMm,
+            LongPaperSnapToleranceMm = longPaperSnapToleranceMm,
             PreferredScaleValues = isPaperSpace
                 ? new[] { 1d, 100d }
                 : new[] { 100d, 1d }
@@ -342,20 +347,32 @@ public static class PaperSizeDetector
         {
             var shortErrorMm = Math.Abs(actualShort - expectedShort);
             var shortToleranceMm = options.LongPaperShortSideToleranceMm ?? 0d;
-            // 任意加长纸只锁定标准短边；长边无模数限制，并保留图框实测宽高以生成精确 PMP 纸张。
+            // 任意加长纸只锁定标准短边；长边与最近 1/8 模数的差距在吸附容差内时按标准加长图输出
+            // （吸附后的尺寸同时用于 PMP 注册和输出显示名），超出容差才保留实测宽高生成动态纸张。
             // 长边超出标准长边一个匹配容差以上才算加长；容差内的零头（如图框含线宽多出的 0.5mm）仍按标准幅面处理。
             if (actualLong > expectedLong + shortToleranceMm && shortErrorMm <= shortToleranceMm)
             {
+                var snappedLongMm = SnapLongSide(actualLong, expectedLong);
+                var snapErrorMm = Math.Abs(actualLong - snappedLongMm);
+                var snapToleranceMm = options.LongPaperSnapToleranceMm;
+                var canSnap = snapToleranceMm.HasValue && snapErrorMm <= snapToleranceMm.Value;
+                var isLandscape = widthMm >= heightMm;
                 candidates.Add(new PaperCandidate
                 {
                     Paper = paper,
                     Scale = scale,
                     Score = shortError,
                     IsLong = true,
-                    RequiresCustomPaper = true,
-                    PaperWidthMm = widthMm,
-                    PaperHeightMm = heightMm,
-                    Reason = $"短边与 {expectedShort:0.##}mm 的误差为 {shortErrorMm:0.###}mm（容差 {shortToleranceMm:0.###}mm），长边按实测 {actualLong:0.######}mm 动态生成"
+                    RequiresCustomPaper = !canSnap,
+                    PaperWidthMm = canSnap
+                        ? (isLandscape ? snappedLongMm : expectedShort)
+                        : widthMm,
+                    PaperHeightMm = canSnap
+                        ? (isLandscape ? expectedShort : snappedLongMm)
+                        : heightMm,
+                    Reason = canSnap
+                        ? $"短边与 {expectedShort:0.##}mm 的误差为 {shortErrorMm:0.###}mm（容差 {shortToleranceMm:0.###}mm），长边吸附 1/8 模数 {snappedLongMm:0.###}mm（误差 {snapErrorMm:0.###}mm，吸附容差 {snapToleranceMm.GetValueOrDefault():0.###}mm）"
+                        : $"短边与 {expectedShort:0.##}mm 的误差为 {shortErrorMm:0.###}mm（容差 {shortToleranceMm:0.###}mm），长边按实测 {actualLong:0.######}mm 动态生成"
                 });
             }
 
@@ -437,7 +454,9 @@ public static class PaperSizeDetector
 
         var snappedLong = SnapLongSide(actualLong, paper.LongSide);
         var modularErrorMm = Math.Abs(actualLong - snappedLong);
-        if (modularErrorMm <= toleranceMm)
+        // 长边 1/8 模数吸附优先用专用吸附容差，未设置时回退到短边匹配容差。
+        var snapToleranceMm = options.LongPaperSnapToleranceMm ?? toleranceMm;
+        if (modularErrorMm <= snapToleranceMm)
         {
             candidates.Add(new PaperCandidate
             {
@@ -448,7 +467,7 @@ public static class PaperSizeDetector
                 IsLong = true,
                 PaperWidthMm = landscape ? snappedLong : paper.ShortSide,
                 PaperHeightMm = landscape ? paper.ShortSide : snappedLong,
-                Reason = $"短边误差 {shortErrorMm:0.###}mm，长边命中 1/8 模数 {snappedLong:0.###}mm，模数误差 {modularErrorMm:0.###}mm（设置容差 {toleranceMm:0.###}mm）"
+                Reason = $"短边误差 {shortErrorMm:0.###}mm，长边命中 1/8 模数 {snappedLong:0.###}mm，模数误差 {modularErrorMm:0.###}mm（吸附容差 {snapToleranceMm:0.###}mm）"
             });
             return;
         }

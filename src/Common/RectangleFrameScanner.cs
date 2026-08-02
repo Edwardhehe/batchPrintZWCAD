@@ -226,7 +226,8 @@ public static class RectangleFrameScanner
             sourceFile,
             layoutName,
             !layout.ModelType,
-            effectivePaperToleranceMm);
+            effectivePaperToleranceMm,
+            storedSettings.LongPaperSnapToleranceMm);
     }
 
     /// <summary>
@@ -295,7 +296,8 @@ public static class RectangleFrameScanner
                 sourceFile,
                 layoutName,
                 isPaperSpace,
-                effectivePaperToleranceMm);
+                effectivePaperToleranceMm,
+                storedSettings.LongPaperSnapToleranceMm);
             allResults.AddRange(results);
         }
 
@@ -356,7 +358,8 @@ public static class RectangleFrameScanner
         string sourceFile,
         string layoutName,
         bool isPaperSpace,
-        double paperMatchToleranceMm)
+        double paperMatchToleranceMm,
+        double longPaperSnapToleranceMm)
     {
         // 3a. 窗口裁剪（可选）
         List<LocalRectangle> inWindow;
@@ -385,7 +388,7 @@ public static class RectangleFrameScanner
             var width = rectangle.ActualWidth > 0 ? rectangle.ActualWidth : rectangle.MaxX - rectangle.MinX;
             var height = rectangle.ActualHeight > 0 ? rectangle.ActualHeight : rectangle.MaxY - rectangle.MinY;
             // 短边按设置中的毫米容差匹配常用比例；长边先吸附 1/8 模数，超出同一容差才转任意动态纸张。
-            var detectionOptions = PaperSizeDetector.CreateRectangleBatchOptions(paperMatchToleranceMm, isPaperSpace);
+            var detectionOptions = PaperSizeDetector.CreateRectangleBatchOptions(paperMatchToleranceMm, isPaperSpace, longPaperSnapToleranceMm);
             var options = PaperSizeDetector.DetectCandidates(width, height, detectionOptions);
             if (options.Count == 0)
             {

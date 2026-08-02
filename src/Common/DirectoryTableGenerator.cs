@@ -298,7 +298,7 @@ public static class DirectoryTableGenerator
             "DrawingNumber" => job.DrawingNumber,
             "Title" => job.Title,
             "PaperName" => FileNameSanitizer.NormalizeLongPaperFraction(
-                OutputPaperNameResolver.Resolve(job, settings.OutputLongPaperSnapToleranceMm),
+                OutputPaperNameResolver.Resolve(job, settings.LongPaperSnapToleranceMm),
                 settings.LongPaperNameFormat),
             "Date" => job.Date,
             "Revision" => job.Revision,
