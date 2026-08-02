@@ -433,7 +433,7 @@ public sealed class RectangleBatchPlotForm : Form
             {
                 Job = result.Job,
                 Options = result.PaperOptions,
-                PaperChoice = FormatPaper(option)
+                PaperChoice = PaperSizeDetector.FormatOption(option)
             });
         }
 
@@ -820,7 +820,7 @@ public sealed class RectangleBatchPlotForm : Form
                 continue;
             }
 
-            cell.DataSource = row.Options.Select(FormatPaper).ToList();
+            cell.DataSource = row.Options.Select(PaperSizeDetector.FormatOption).ToList();
             cell.Value = row.PaperChoice;
         }
     }
@@ -841,7 +841,7 @@ public sealed class RectangleBatchPlotForm : Form
         else if (_grid.Columns[e.ColumnIndex].Name == "PaperChoice")
         {
             var value = _grid.Rows[e.RowIndex].Cells[e.ColumnIndex].Value?.ToString() ?? "";
-            var option = row.Options.FirstOrDefault(candidate => string.Equals(FormatPaper(candidate), value, StringComparison.Ordinal));
+            var option = row.Options.FirstOrDefault(candidate => string.Equals(PaperSizeDetector.FormatOption(candidate), value, StringComparison.Ordinal));
             if (option != null)
             {
                 row.PaperChoice = value;
@@ -1003,7 +1003,7 @@ public sealed class RectangleBatchPlotForm : Form
         }
 
         var selectedPaper = dialog.SelectedPaper;
-        var paperChoice = FormatPaper(selectedPaper);
+        var paperChoice = PaperSizeDetector.FormatOption(selectedPaper);
         foreach (var row in rows)
         {
             row.PaperChoice = paperChoice;
@@ -1744,11 +1744,6 @@ public sealed class RectangleBatchPlotForm : Form
         _settings.LeavePaperMargin = _leaveMargin.Checked;
         _settings.PaperMarginMm = BatchPlotForm.ReadMarginValue(_marginInput);
         AppSettingsStore.Save(_settings);
-    }
-
-    private static string FormatPaper(PaperDetection paper)
-    {
-        return $"{paper.PaperName} | {paper.PaperWidthMm:0.##}×{paper.PaperHeightMm:0.##}mm | {paper.ScaleText}";
     }
 
     private static void ApplyPaper(PlotJob job, PaperDetection paper)

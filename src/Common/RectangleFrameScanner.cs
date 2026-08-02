@@ -602,7 +602,11 @@ public static class RectangleFrameScanner
             // 图框 PL 可能专门放在 Defpoints 或其他”不打印”辅助层；
             // 它只提供打印边界，不代表该层图素会进入打印内容，因此这里只要求图层开启且未冻结。
             && IsFrameBoundaryLayerScannable(tr, entity)
-            && TryGetRectangle(polyline, transform, out var rectangle))
+            && RectangleGeometry.TryGetRectangle(
+                polyline,
+                transform,
+                requireClosed: true,
+                out var rectangle))
         {
             // 先全部收集，不去重——不同实例的同一定义各自独立，去重放在后续 FilterRectangles
             rectangles.Add(rectangle);
@@ -613,7 +617,12 @@ public static class RectangleFrameScanner
         // .NET API 类型为 Polyline2d，与轻量 Polyline 不同，需单独处理。
         if (entity is Polyline2d polyline2d
             && IsFrameBoundaryLayerScannable(tr, entity)
-            && TryGetRectangleFrom2d(tr, polyline2d, transform, out var rectangle2d))
+            && RectangleGeometry.TryGetRectangleFrom2d(
+                tr,
+                polyline2d,
+                transform,
+                requireClosed: false,
+                out var rectangle2d))
         {
             rectangles.Add(rectangle2d);
         }
@@ -622,7 +631,12 @@ public static class RectangleFrameScanner
         // 三维多段线在 XY 平面上也可构成矩形图框，顶点类型为 Vertex3d。
         if (entity is Polyline3d polyline3d
             && IsFrameBoundaryLayerScannable(tr, entity)
-            && TryGetRectangleFrom3d(tr, polyline3d, transform, out var rectangle3d))
+            && RectangleGeometry.TryGetRectangleFrom3d(
+                tr,
+                polyline3d,
+                transform,
+                requireClosed: false,
+                out var rectangle3d))
         {
             rectangles.Add(rectangle3d);
         }
@@ -647,7 +661,7 @@ public static class RectangleFrameScanner
         {
             if (cachedRects.Count > 0)
             {
-                rectangles.Add(TransformCachedRect(cachedRects[0], instanceXform));
+                rectangles.Add(RectangleGeometry.TransformRectangle(cachedRects[0], instanceXform));
             }
             return;
         }
@@ -713,7 +727,7 @@ public static class RectangleFrameScanner
             {
                 var largest = localRects.OrderByDescending(Area).First();
                 cacheEntry = new List<LocalRectangle> { largest };
-                rectangles.Add(TransformCachedRect(largest, instanceXform));
+                rectangles.Add(RectangleGeometry.TransformRectangle(largest, instanceXform));
             }
             else
             {
@@ -1138,6 +1152,13 @@ public static class RectangleFrameScanner
         return true;
     }
 
+    /// <summary>四条独立线闭环验证使用的点重合判断；多段线矩形算法由 RectangleGeometry 负责。</summary>
+    private static bool SamePoint(Point3d a, Point3d b, double tolerance)
+    {
+        return Math.Abs(a.X - b.X) <= tolerance
+            && Math.Abs(a.Y - b.Y) <= tolerance;
+    }
+
     // ═══════════════════════════════════════════════════════════════
     // 可见性 & 图层过滤
     // ═══════════════════════════════════════════════════════════════
@@ -1248,344 +1269,7 @@ public static class RectangleFrameScanner
         }
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // 矩形检测（核心算法）
-    // ═══════════════════════════════════════════════════════════════
-
-    /// <summary>
-    /// 检测 Polyline 是否为矩形。支持任意方向的矩形（UCS 旋转下也可检测）。
-    ///
-    /// 算法流程：
-    ///   1. 基本检查：顶点数≥4、无圆弧段（bulge=0）
-    ///   2. 闭合处理：未闭合的首尾点相近也算闭合
-    ///   3. 去连续重复点
-    ///   4. 去共线中间点（叉积法，旋转无关）
-    ///   5. 精简后必须剩 4 点
-    ///   6. 几何矩形验证：对角线等长 + 中点重合（替代旧的轴对齐检查）
-    ///   7. 计算实际边长用于纸张检测
-    ///   8. 保存包围盒（位置/相交用）和实际角点（DCS 变换用）
-    /// </summary>
-    /// <param name="polyline">待检测的多段线</param>
-    /// <param name="transform">累积变换矩阵（块参照嵌套时的坐标变换）</param>
-    /// <param name="rectangle">输出的矩形数据（包围盒 + 实际边长 + 角点）</param>
-    /// <returns>true 表示是有效矩形</returns>
-    /// <summary>
-    /// 从 Polyline3d（3DPOLY）提取矩形，逻辑与 TryGetRectangleFrom2d 一致。
-    /// Polyline3d 只有直线段，无圆弧；顶点类型为 Vertex3d，只取线型顶点（枚举值=0）。
-    /// </summary>
-    private static bool TryGetRectangleFrom3d(Transaction tr, Polyline3d polyline3d, Matrix3d transform, out LocalRectangle rectangle)
-    {
-        rectangle = new LocalRectangle();
-        var points = new List<Point3d>();
-        foreach (ObjectId vertexId in polyline3d)
-        {
-            if (tr.GetObject(vertexId, OpenMode.ForRead, false) is not PolylineVertex3d vertex)
-                continue;
-            // 只接受线型顶点（枚举值=0），跳过样条曲线控制点
-            if ((int)vertex.VertexType != 0)
-                continue;
-            // 压平 Z 坐标，允许图框略微不在 XY 平面上
-            var wcs = vertex.Position.TransformBy(transform);
-            points.Add(new Point3d(wcs.X, wcs.Y, 0));
-        }
-
-        if (points.Count < 4) return false;
-
-        var minX = points.Min(p => p.X);
-        var minY = points.Min(p => p.Y);
-        var maxX = points.Max(p => p.X);
-        var maxY = points.Max(p => p.Y);
-        var boxWidth = maxX - minX;
-        var boxHeight = maxY - minY;
-        if (boxWidth <= 1e-6 || boxHeight <= 1e-6) return false;
-
-        var tolerance = Math.Max(boxWidth, boxHeight) * 0.001;
-
-        if (points.Count > 1 && SamePoint(points[0], points[points.Count - 1], tolerance))
-            points.RemoveAt(points.Count - 1);
-
-        RemoveConsecutiveDuplicatePoints(points, tolerance);
-        RemoveCollinearPoints(points, tolerance);
-
-        if (points.Count != 4) return false;
-
-        var d02 = points[0].DistanceTo(points[2]);
-        var d13 = points[1].DistanceTo(points[3]);
-        if (Math.Abs(d02 - d13) > tolerance) return false;
-
-        var mid02 = new Point3d((points[0].X + points[2].X) / 2d, (points[0].Y + points[2].Y) / 2d, 0);
-        var mid13 = new Point3d((points[1].X + points[3].X) / 2d, (points[1].Y + points[3].Y) / 2d, 0);
-        if (mid02.DistanceTo(mid13) > tolerance) return false;
-
-        var side0 = points[0].DistanceTo(points[1]);
-        var side1 = points[1].DistanceTo(points[2]);
-        var actualWidth = Math.Max(side0, side1);
-        var actualHeight = Math.Min(side0, side1);
-
-        rectangle = new LocalRectangle
-        {
-            MinX = minX, MinY = minY, MaxX = maxX, MaxY = maxY,
-            ActualWidth = actualWidth, ActualHeight = actualHeight,
-            CornerPoints = new[]
-            {
-                points[0].X, points[0].Y,
-                points[1].X, points[1].Y,
-                points[2].X, points[2].Y,
-                points[3].X, points[3].Y
-            }
-        };
-        return true;
-    }
-
-    /// <summary>
-    /// 从老式 Polyline2d（POLYLINE+VERTEX）提取矩形，逻辑与 TryGetRectangle 一致。
-    /// Polyline2d 的顶点存储在子实体中，需通过事务逐个读取。
-    /// </summary>
-    private static bool TryGetRectangleFrom2d(Transaction tr, Polyline2d polyline2d, Matrix3d transform, out LocalRectangle rectangle)
-    {
-        rectangle = new LocalRectangle();
-        var points = new List<Point3d>();
-        foreach (ObjectId vertexId in polyline2d)
-        {
-            if (tr.GetObject(vertexId, OpenMode.ForRead, false) is not Vertex2d vertex)
-                continue;
-            // 只接受普通顶点（枚举值=0），跳过样条曲线控制点等非几何顶点
-            if ((int)vertex.VertexType != 0)
-                continue;
-            // 圆弧段判断
-            if (Math.Abs(vertex.Bulge) > 1e-9) return false;
-            points.Add(vertex.Position.TransformBy(transform));
-        }
-
-        if (points.Count < 4) return false;
-
-        var minX = points.Min(p => p.X);
-        var minY = points.Min(p => p.Y);
-        var maxX = points.Max(p => p.X);
-        var maxY = points.Max(p => p.Y);
-        var boxWidth = maxX - minX;
-        var boxHeight = maxY - minY;
-        if (boxWidth <= 1e-6 || boxHeight <= 1e-6) return false;
-
-        var tolerance = Math.Max(boxWidth, boxHeight) * 0.001;
-
-        // 去掉与首点重合的尾点（闭合时最后一个顶点等于第一个）
-        if (points.Count > 1 && SamePoint(points[0], points[points.Count - 1], tolerance))
-            points.RemoveAt(points.Count - 1);
-
-        RemoveConsecutiveDuplicatePoints(points, tolerance);
-        RemoveCollinearPoints(points, tolerance);
-
-        if (points.Count != 4) return false;
-
-        // 矩形验证：对角线等长 + 中点重合
-        var d02 = points[0].DistanceTo(points[2]);
-        var d13 = points[1].DistanceTo(points[3]);
-        if (Math.Abs(d02 - d13) > tolerance) return false;
-
-        var mid02 = new Point3d((points[0].X + points[2].X) / 2d, (points[0].Y + points[2].Y) / 2d, 0);
-        var mid13 = new Point3d((points[1].X + points[3].X) / 2d, (points[1].Y + points[3].Y) / 2d, 0);
-        if (mid02.DistanceTo(mid13) > tolerance) return false;
-
-        // 计算实际边长（相邻两点距离）
-        var side0 = points[0].DistanceTo(points[1]);
-        var side1 = points[1].DistanceTo(points[2]);
-        var actualWidth = Math.Max(side0, side1);
-        var actualHeight = Math.Min(side0, side1);
-
-        rectangle = new LocalRectangle
-        {
-            MinX = minX, MinY = minY, MaxX = maxX, MaxY = maxY,
-            ActualWidth = actualWidth, ActualHeight = actualHeight,
-            CornerPoints = new[]
-            {
-                points[0].X, points[0].Y,
-                points[1].X, points[1].Y,
-                points[2].X, points[2].Y,
-                points[3].X, points[3].Y
-            }
-        };
-        return true;
-    }
-
-    private static bool TryGetRectangle(Polyline polyline, Matrix3d transform, out LocalRectangle rectangle)
-    {
-        rectangle = new LocalRectangle();
-
-        // ── 第 1 步：基本检查 ──
-        if (polyline.NumberOfVertices < 4)
-        {
-            return false;
-        }
-
-        // bulge ≠ 0 表示圆弧段，不是矩形
-        for (var index = 0; index < polyline.NumberOfVertices; index++)
-        {
-            if (Math.Abs(polyline.GetBulgeAt(index)) > 1e-9)
-            {
-                return false;
-            }
-        }
-
-        // ── 第 2 步：提取所有顶点并变换到 WCS ──
-        var points = Enumerable.Range(0, polyline.NumberOfVertices)
-            .Select(index =>
-            {
-                var point = polyline.GetPoint3dAt(index);  // 块内坐标
-                return point.TransformBy(transform);        // → WCS 坐标
-            })
-            .ToList();
-
-        // 取包围盒用于后续容差计算
-        var minX = points.Min(point => point.X);
-        var minY = points.Min(point => point.Y);
-        var maxX = points.Max(point => point.X);
-        var maxY = points.Max(point => point.Y);
-        var boxWidth = maxX - minX;
-        var boxHeight = maxY - minY;
-        if (boxWidth <= 1e-6 || boxHeight <= 1e-6)
-        {
-            return false;
-        }
-
-        // 容差：包围盒长边的 0.1%
-        var tolerance = Math.Max(boxWidth, boxHeight) * 0.001;
-
-        // ── 第 3 步：闭合处理 ──
-        // 未闭合但首尾很近 → 视为闭合；已闭合的去掉重复的尾点
-        if (!polyline.Closed && !SamePoint(points[0], points[points.Count - 1], tolerance))
-        {
-            return false;
-        }
-
-        if (points.Count > 1 && SamePoint(points[0], points[points.Count - 1], tolerance))
-        {
-            points.RemoveAt(points.Count - 1);
-        }
-
-        // ── 第 4 步：精简顶点 ──
-        RemoveConsecutiveDuplicatePoints(points, tolerance); // 去掉连续重复点
-        RemoveCollinearPoints(points, tolerance);             // 去掉边上的共线中间点
-
-        // ── 第 5 步：精简后必须是 4 个顶点 ──
-        if (points.Count != 4)
-        {
-            return false;
-        }
-
-        // ── 第 6 步：几何矩形验证 ──
-        // 矩形的充要条件（任意方向）：对角线等长 且 对角线中点重合
-        // 此方法不依赖轴对齐，UCS 旋转下同样有效
-        var d02 = points[0].DistanceTo(points[2]);  // 对角线 0→2
-        var d13 = points[1].DistanceTo(points[3]);  // 对角线 1→3
-        if (Math.Abs(d02 - d13) > tolerance)
-        {
-            return false;
-        }
-
-        // 两条对角线的中点应该重合（平行四边形）
-        var mid02 = new Point3d(
-            (points[0].X + points[2].X) / 2d,
-            (points[0].Y + points[2].Y) / 2d, 0);
-        var mid13 = new Point3d(
-            (points[1].X + points[3].X) / 2d,
-            (points[1].Y + points[3].Y) / 2d, 0);
-        if (mid02.DistanceTo(mid13) > tolerance)
-        {
-            return false;
-        }
-
-        // ── 第 7 步：计算实际边长（用于纸张检测）──
-        // 不能用包围盒宽高——UCS 旋转时包围盒比实际矩形大
-        // 例如 45° 旋转的 A2 矩形，包围盒可能被误判为 A1
-        var side01 = points[0].DistanceTo(points[1]);  // 边 0→1
-        var side12 = points[1].DistanceTo(points[2]);  // 边 1→2
-        var actualWidth = Math.Max(side01, side12);     // 长边 = 宽度
-        var actualHeight = Math.Min(side01, side12);    // 短边 = 高度
-
-        // ── 第 8 步：输出 ──
-        // 包围盒用于位置判断和相交检测（Intersects、Contains 等）
-        // 实际边长用于纸张识别
-        // 实际角点用于 DCS 变换（4 点 × WCS→DCS → 取包围盒，和单张打印算法一致）
-        rectangle = LocalRectangle.FromPoints(minX, minY, maxX, maxY);
-        rectangle.ActualWidth = actualWidth;
-        rectangle.ActualHeight = actualHeight;
-        rectangle.CornerPoints = new[]
-        {
-            points[0].X, points[0].Y,
-            points[1].X, points[1].Y,
-            points[2].X, points[2].Y,
-            points[3].X, points[3].Y
-        };
-        return true;
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    // 顶点精简
-    // ═══════════════════════════════════════════════════════════════
-
-    /// <summary>移除连续重复的顶点（相邻两点距离小于容差时去重）。</summary>
-    private static void RemoveConsecutiveDuplicatePoints(IList<Point3d> points, double tolerance)
-    {
-        for (var index = points.Count - 1; index > 0; index--)
-        {
-            if (SamePoint(points[index], points[index - 1], tolerance))
-            {
-                points.RemoveAt(index);
-            }
-        }
-    }
-
-    /// <summary>
-    /// 移除边上的共线中间点（三点共线时删除中间点）。
-    ///
-    /// 使用向量叉积判断共线性：
-    ///   v1 = current - previous, v2 = next - current
-    ///   crossZ = v1.x × v2.y - v1.y × v2.x
-    ///   |crossZ| ≈ 0 → 三点共线 → 删除 current
-    ///
-    /// 叉积法不依赖坐标轴方向，UCS 旋转下同样有效。
-    /// </summary>
-    private static void RemoveCollinearPoints(IList<Point3d> points, double tolerance)
-    {
-        var changed = true;
-        while (changed && points.Count > 4)
-        {
-            changed = false;
-            for (var index = 0; index < points.Count; index++)
-            {
-                var previous = points[(index - 1 + points.Count) % points.Count];
-                var current = points[index];
-                var next = points[(index + 1) % points.Count];
-
-                // 向量叉积 (v1 × v2)_z
-                // = 0 表示 v1 // v2，即三点共线
-                var v1x = current.X - previous.X;
-                var v1y = current.Y - previous.Y;
-                var v2x = next.X - current.X;
-                var v2y = next.Y - current.Y;
-                var crossZ = v1x * v2y - v1y * v2x;
-
-                if (Math.Abs(crossZ) > tolerance)
-                {
-                    continue;  // 不共线，保留
-                }
-
-                // 共线 → 删除中间点，重新开始检测
-                points.RemoveAt(index);
-                changed = true;
-                break;
-            }
-        }
-    }
-
-    /// <summary>两点是否重合（XY 分量差均在容差内）。</summary>
-    private static bool SamePoint(Point3d a, Point3d b, double tolerance)
-    {
-        return Math.Abs(a.X - b.X) <= tolerance
-            && Math.Abs(a.Y - b.Y) <= tolerance;
-    }
-
+    // 多段线矩形判定与角点变换统一由 RectangleGeometry 提供，扫描器仅保留扫描策略。
     // ═══════════════════════════════════════════════════════════════
     // 矩形过滤：去重、去嵌套
     // ═══════════════════════════════════════════════════════════════
@@ -1696,44 +1380,6 @@ public static class RectangleFrameScanner
     {
         return Math.Max(0, rectangle.MaxX - rectangle.MinX)
             * Math.Max(0, rectangle.MaxY - rectangle.MinY);
-    }
-
-    /// <summary>
-    /// 将缓存的局部坐标矩形通过变换矩阵转到世界坐标。
-    /// 根据变换后的四角点重新计算包围盒和实际边长，块缩放必须反映到纸张比例识别。
-    /// </summary>
-    private static LocalRectangle TransformCachedRect(LocalRectangle localRect, Matrix3d xform)
-    {
-        if (localRect.CornerPoints == null)
-        {
-            // 无角点的退化情况：直接变换 Min/Max 角点取包围盒
-            var pMin = new Point3d(localRect.MinX, localRect.MinY, 0).TransformBy(xform);
-            var pMax = new Point3d(localRect.MaxX, localRect.MaxY, 0).TransformBy(xform);
-            return LocalRectangle.FromPoints(
-                Math.Min(pMin.X, pMax.X), Math.Min(pMin.Y, pMax.Y),
-                Math.Max(pMin.X, pMax.X), Math.Max(pMin.Y, pMax.Y));
-        }
-
-        var cp = localRect.CornerPoints;
-        var p0 = new Point3d(cp[0], cp[1], 0).TransformBy(xform);
-        var p1 = new Point3d(cp[2], cp[3], 0).TransformBy(xform);
-        var p2 = new Point3d(cp[4], cp[5], 0).TransformBy(xform);
-        var p3 = new Point3d(cp[6], cp[7], 0).TransformBy(xform);
-
-        var minX = Math.Min(Math.Min(p0.X, p1.X), Math.Min(p2.X, p3.X));
-        var minY = Math.Min(Math.Min(p0.Y, p1.Y), Math.Min(p2.Y, p3.Y));
-        var maxX = Math.Max(Math.Max(p0.X, p1.X), Math.Max(p2.X, p3.X));
-        var maxY = Math.Max(Math.Max(p0.Y, p1.Y), Math.Max(p2.Y, p3.Y));
-
-        var result = LocalRectangle.FromPoints(minX, minY, maxX, maxY);
-        // ActualWidth/ActualHeight 必须使用世界坐标边长，不能沿用块定义内尺寸。
-        // 例如块内 A3 图框为 52500×37125、参照缩放 0.8 后应按 42000×29700 识别为 1:100。
-        var side01 = p0.DistanceTo(p1);
-        var side12 = p1.DistanceTo(p2);
-        result.ActualWidth = Math.Max(side01, side12);
-        result.ActualHeight = Math.Min(side01, side12);
-        result.CornerPoints = new[] { p0.X, p0.Y, p1.X, p1.Y, p2.X, p2.Y, p3.X, p3.Y };
-        return result;
     }
 
     /// <summary>两个轴对齐矩形是否相交。</summary>

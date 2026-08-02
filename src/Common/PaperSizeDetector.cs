@@ -182,6 +182,52 @@ public static class PaperSizeDetector
     }
 
     /// <summary>
+    /// 返回全部有效候选；若当前尺寸不满足标准/加长纸规则，则生成一个包含完整尺寸的自定义兜底项。
+    /// 新增图框需要始终允许用户继续录入，而矩形框扫描仍可使用 DetectCandidates 的空结果过滤非图框。
+    /// </summary>
+    public static IReadOnlyList<PaperDetection> DetectCandidatesOrFallback(
+        double width,
+        double height,
+        DetectionOptions options)
+    {
+        var candidates = DetectCandidates(width, height, options);
+        if (candidates.Count > 0)
+        {
+            return candidates;
+        }
+
+        // 界面已不再提供独立宽/高输入框，因此兜底项也必须携带可保存、可打印的完整尺寸。
+        // 比例优先按常用整数比例推测；仍无法推测时按 1:1 保留实测尺寸。
+        var actualWidth = Math.Abs(width);
+        var actualHeight = Math.Abs(height);
+        var scale = GuessScale(actualWidth, actualHeight);
+        if (scale <= 0)
+        {
+            scale = 1;
+        }
+
+        return new[]
+        {
+            new PaperDetection
+            {
+                PaperName = "自定义",
+                PaperWidthMm = actualWidth / scale,
+                PaperHeightMm = actualHeight / scale,
+                ScaleValue = scale,
+                ScaleText = ToScaleText(scale),
+                RequiresCustomPaper = true,
+                Note = $"未匹配到标准或模数纸张，按实测尺寸生成自定义纸张（推测比例 {ToScaleText(scale)}）"
+            }
+        };
+    }
+
+    /// <summary>统一纸张候选的界面显示，避免不同打印入口对名称、尺寸和比例采用不同格式。</summary>
+    public static string FormatOption(PaperDetection paper)
+    {
+        return $"{paper.PaperName} | {paper.PaperWidthMm:0.##}×{paper.PaperHeightMm:0.##}mm | {paper.ScaleText}";
+    }
+
+    /// <summary>
     /// 创建图框库批打专用识别参数。短边按设置中的毫米容差匹配；长边超过标准长边后，
     /// 与最近 1/8 模数的差距在吸附容差内按标准加长图输出，超出才保留实测尺寸生成动态纸张。
     /// 布局空间优先 1:1，模型空间沿用常用的 1:100 优先。

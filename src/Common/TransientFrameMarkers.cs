@@ -61,7 +61,7 @@ public sealed class TransientFrameMarkers : IDisposable
         }
 
         _markers[key] = entities;
-        _editor.UpdateScreen();
+        RefreshDisplay();
     }
 
     /// <summary>
@@ -82,7 +82,27 @@ public sealed class TransientFrameMarkers : IDisposable
         }
 
         _markers.Remove(key);
-        _editor.UpdateScreen();
+        RefreshDisplay();
+    }
+
+    /// <summary>
+    /// 刷新 CAD 视图。首次弹出模态窗口时可要求 Regen，确保刚创建的临时红框在窗口接管消息循环后立即显示；
+    /// 普通字段更新只做 UpdateScreen，避免每次框选都触发较重的重生成。
+    /// </summary>
+    public void RefreshDisplay(bool regenerate = false)
+    {
+        try
+        {
+            _editor.UpdateScreen();
+            if (regenerate)
+            {
+                _editor.Regen();
+            }
+        }
+        catch
+        {
+            // 临时标识刷新失败不应中断图框录入；后续 CAD 视图刷新仍会显示已注册的 transient。
+        }
     }
 
     /// <summary>
@@ -135,7 +155,7 @@ public sealed class TransientFrameMarkers : IDisposable
             var width = maxX - minX;
             var height = maxY - minY;
             // 文字高度随框选大小自适应，取框高的 35% 且不超过框宽/字数，最大 120 单位。
-            var textHeight = Math.Min(Math.Min(height * 0.35, width / Math.Max(label.Length, 1)), 120d);
+            var textHeight = Math.Min(Math.Min(height * 0.35, width / Math.Max(label!.Length, 1)), 120d);
             if (textHeight > 1e-6)
             {
                 var center = new Point3d((minX + maxX) / 2, (minY + maxY) / 2, z);

@@ -60,20 +60,34 @@ public sealed partial class BatchPlotCommands
             string blockName;
             Matrix3d blockTransform;
             Matrix3d inverse;
-            string? nestedBlockName = null;
+            ObjectId frameDefinitionId;
+            bool isPaperSpace;
             using (var tr = doc.Database.TransactionManager.StartTransaction())
             {
                 var blockRef = (BlockReference)tr.GetObject(blockResult.ObjectId, OpenMode.ForRead);
                 blockName = CadTextExtractor.GetBlockName(blockRef, tr);
                 blockTransform = blockRef.BlockTransform;
+                frameDefinitionId = blockRef.BlockTableRecord;
+
+                // 纸张候选顺序必须与矩形框批打一致：模型空间优先 1:100、再 1:1；
+                // 布局空间优先 1:1、再 1:100。以所选块实际所属布局判断，不能只看当前 TileMode。
+                var owner = (BlockTableRecord)tr.GetObject(blockRef.OwnerId, OpenMode.ForRead);
+                isPaperSpace = owner.IsLayout
+                    && !owner.LayoutId.IsNull
+                    && !((Layout)tr.GetObject(owner.LayoutId, OpenMode.ForRead)).ModelType;
 
                 // 动态块通过可见性状态切换不同尺寸
                 // 入库块名使用“外层块名+内层可见嵌套块名”复合名，变换矩阵取内层嵌套块的
-                if (TryGetVisibleNestedBlock(tr, blockRef, out var innerName, out var innerTransform))
+                if (TryGetVisibleNestedBlock(
+                        tr,
+                        blockRef,
+                        out var innerName,
+                        out var innerTransform,
+                        out var innerDefinitionId))
                 {
-                    nestedBlockName = innerName;
                     blockName = blockName + "+" + innerName;
                     blockTransform = innerTransform * blockRef.BlockTransform;
+                    frameDefinitionId = innerDefinitionId;
                     AddBlockLog($"Dynamic block detected: outer={CadTextExtractor.GetBlockName(blockRef, tr)}, inner={innerName}, stored={blockName}");
                 }
 
@@ -103,17 +117,22 @@ public sealed partial class BatchPlotCommands
 
             inverse = blockTransform.Inverse();
 
-            // 外框按块内所有 Polyline + Line 的外包盒自动识别；
-            // 排除文字、属性等非几何图素，避免外包盒偏大。
+            // 自动范围优先使用块内面积最大的闭合矩形；找不到时再合并可见线类图素的包围盒。
+            // 识别结果直接保留在入库基准定义空间，避免“世界包围盒再反变换”放大旋转图框。
             Extents3d printExtents;
             LocalRectangle referenceFrame;
-            if (TryGetBlockLineExtents(doc.Database, blockResult.ObjectId, out var blockExtents))
+            if (TryGetBlockFrame(
+                    doc.Database,
+                    frameDefinitionId,
+                    out referenceFrame,
+                    out var frameSource))
             {
-                printExtents = blockExtents;
-                referenceFrame = TransformExtents(blockExtents, inverse);
-                AddBlockLog("Outer frame detected from Polyline + Line extents inside block.");
+                printExtents = TransformRegion(referenceFrame, blockTransform);
+                AddBlockLog(frameSource == BlockFrameSource.ClosedRectangle
+                    ? "Outer frame detected from the largest closed rectangle inside block."
+                    : "No closed rectangle found; outer frame detected from visible line geometry extents.");
             }
-            else if (TryGetBlockExtents(doc.Database, blockResult.ObjectId, out blockExtents))
+            else if (TryGetBlockExtents(doc.Database, blockResult.ObjectId, out var blockExtents))
             {
                 printExtents = blockExtents;
                 referenceFrame = TransformExtents(blockExtents, inverse);
@@ -150,13 +169,27 @@ public sealed partial class BatchPlotCommands
             markers.SetBox("外框", printExtents.MinPoint, printExtents.MaxPoint, null);
             editor.WriteMessage("\n已自动识别图框外框（红色临时标识），请在弹出窗口中框选图名、图号等字段区域。");
 
-            // 纸张按当前打印范围自动识别，作为合并对话框中纸张设置的默认值；
-            // 用户在对话框中重新框选打印范围时会同步重新识别。
-            var detected = PaperSizeDetector.Detect(
-                printExtents.MaxPoint.X - printExtents.MinPoint.X,
-                printExtents.MaxPoint.Y - printExtents.MinPoint.Y);
+            // 与矩形框批打共用同一候选策略：短边匹配、1/8 加长模数、任意加长纸回退，
+            // 并把 1:100 / 1:1 按当前空间顺序放在其他比例之前。
+            var placedFrame = RectangleGeometry.TransformRectangle(referenceFrame, blockTransform);
+            var detectedWidth = placedFrame.ActualWidth > 0
+                ? placedFrame.ActualWidth
+                : printExtents.MaxPoint.X - printExtents.MinPoint.X;
+            var detectedHeight = placedFrame.ActualHeight > 0
+                ? placedFrame.ActualHeight
+                : printExtents.MaxPoint.Y - printExtents.MinPoint.Y;
+            var settings = AppSettingsStore.Load();
+            var paperDetectionOptions = PaperSizeDetector.CreateRectangleBatchOptions(
+                settings.PaperMatchToleranceMm,
+                isPaperSpace,
+                settings.LongPaperSnapToleranceMm);
+            var paperOptions = PaperSizeDetector.DetectCandidatesOrFallback(
+                detectedWidth,
+                detectedHeight,
+                paperDetectionOptions);
+            var detected = paperOptions[0];
 
-            AddBlockLog($"Detected paper: {detected.PaperName}, {detected.PaperWidthMm:0.##} x {detected.PaperHeightMm:0.##}");
+            AddBlockLog($"Detected {paperOptions.Count} paper option(s); preferred: {detected.PaperName}, {detected.PaperWidthMm:0.##} x {detected.PaperHeightMm:0.##}, {detected.ScaleText}");
 
             // 字段（图名/图号必选，日期/版次/设计阶段/信息1/信息2可选）框选 + 纸张设置，同一对话框完成。
             // 同时支持修改打印范围（外框），识别不准时可手动重新框选。
@@ -170,7 +203,14 @@ public sealed partial class BatchPlotCommands
             string paperName;
             double paperWidthMm;
             double paperHeightMm;
-            using (var fieldDialog = new FieldBoxSelectDialog(editor, inverse, blockTransform, markers, referenceFrame, detected))
+            using (var fieldDialog = new FieldBoxSelectDialog(
+                       editor,
+                       inverse,
+                       blockTransform,
+                       markers,
+                       referenceFrame,
+                       paperOptions,
+                       paperDetectionOptions))
             {
                 if (ShowModalDialog(fieldDialog) != DialogResult.OK)
                 {
@@ -270,10 +310,12 @@ public sealed partial class BatchPlotCommands
         Transaction tr,
         BlockReference blockRef,
         out string innerBlockName,
-        out Matrix3d innerTransform)
+        out Matrix3d innerTransform,
+        out ObjectId innerDefinitionId)
     {
         innerBlockName = "";
         innerTransform = Matrix3d.Identity;
+        innerDefinitionId = ObjectId.Null;
 
         // 只针对动态块：普通块即使内有嵌套块也不深入，保持原有行为
         if (!blockRef.IsDynamicBlock)
@@ -288,7 +330,7 @@ public sealed partial class BatchPlotCommands
         }
 
         var definition = (BlockTableRecord)tr.GetObject(definitionId, OpenMode.ForRead);
-        var nestedBlocks = new List<(string Name, Matrix3d Transform)>();
+        var nestedBlocks = new List<(string Name, Matrix3d Transform, ObjectId DefinitionId)>();
 
         foreach (ObjectId id in definition)
         {
@@ -306,7 +348,7 @@ public sealed partial class BatchPlotCommands
             var nestedName = CadTextExtractor.GetBlockName(nested, tr);
             if (!string.IsNullOrWhiteSpace(nestedName))
             {
-                nestedBlocks.Add((nestedName, nested.BlockTransform));
+                nestedBlocks.Add((nestedName, nested.BlockTransform, nested.BlockTableRecord));
             }
         }
 
@@ -334,75 +376,200 @@ public sealed partial class BatchPlotCommands
 
         innerBlockName = selected.Name;
         innerTransform = selected.Transform;
+        innerDefinitionId = selected.DefinitionId;
         return true;
     }
 
-    /// <summary>
-    /// 取块定义内所有 Polyline + Line 图素的合并外包盒（世界坐标）。
-    /// 只统计线条类图素，排除文字、属性等，避免外包盒因额外标注而偏大。
-    /// </summary>
-    private static bool TryGetBlockLineExtents(Database database, ObjectId blockReferenceId, out Extents3d extents)
+    private enum BlockFrameSource
     {
-        extents = default;
-        using var tr = database.TransactionManager.StartTransaction();
-        var blockRef = (BlockReference)tr.GetObject(blockReferenceId, OpenMode.ForRead);
-        var blockTransform = blockRef.BlockTransform;
-        var definition = (BlockTableRecord)tr.GetObject(blockRef.BlockTableRecord, OpenMode.ForRead);
+        None,
+        ClosedRectangle,
+        LineExtents
+    }
 
-        var hasExtents = false;
-        var combined = default(Extents3d);
-
-        foreach (ObjectId entityId in definition)
-        {
-            var entity = tr.GetObject(entityId, OpenMode.ForRead, false) as Entity;
-            if (entity == null)
-            {
-                continue;
-            }
-
-            // 只统计 Polyline 和 Line，排除文字、属性等非线条图素
-            if (entity is not Polyline and not Line)
-            {
-                continue;
-            }
-
-            if (!IsEntityVisible(entity))
-            {
-                continue;
-            }
-
-            try
-            {
-                var transformed = TransformWorldExtents(entity.GeometricExtents, blockTransform);
-                if (!HasValidExtents(transformed))
-                {
-                    continue;
-                }
-
-                if (!hasExtents)
-                {
-                    combined = transformed;
-                    hasExtents = true;
-                }
-                else
-                {
-                    combined.AddExtents(transformed);
-                }
-            }
-            catch
-            {
-            }
-        }
-
-        tr.Commit();
-
-        if (!hasExtents || !HasValidExtents(combined))
+    /// <summary>
+    /// 在指定入库基准定义空间内识别打印范围：优先最大闭合矩形，失败后回退到可见线类图素包围盒。
+    /// 返回局部坐标而不是世界包围盒，确保块整体旋转时 referenceFrame 不会被二次放大。
+    /// </summary>
+    private static bool TryGetBlockFrame(
+        Database database,
+        ObjectId rootDefinitionId,
+        out LocalRectangle frame,
+        out BlockFrameSource source)
+    {
+        frame = new LocalRectangle();
+        source = BlockFrameSource.None;
+        if (rootDefinitionId.IsNull)
         {
             return false;
         }
 
-        extents = combined;
+        using var tr = database.TransactionManager.StartTransaction();
+        var rectangles = new List<LocalRectangle>();
+        var hasLineExtents = false;
+        var lineExtents = default(Extents3d);
+        CollectBlockFrameGeometry(
+            tr,
+            rootDefinitionId,
+            Matrix3d.Identity,
+            rectangles,
+            ref hasLineExtents,
+            ref lineExtents,
+            new HashSet<ObjectId>(),
+            depth: 0);
+        tr.Commit();
+
+        if (rectangles.Count > 0)
+        {
+            frame = rectangles
+                .OrderByDescending(RectangleGeometry.GetActualArea)
+                .First();
+            source = BlockFrameSource.ClosedRectangle;
+            return frame.HasArea();
+        }
+
+        if (!hasLineExtents || !HasValidExtents(lineExtents))
+        {
+            return false;
+        }
+
+        frame = CreateRectangleFromExtents(lineExtents);
+        source = BlockFrameSource.LineExtents;
         return true;
+    }
+
+    /// <summary>
+    /// 递归收集块内闭合矩形和线类图素。每层先在本层定义空间识别矩形，再把四角变换到根定义空间；
+    /// 这样非等比缩放的块实例不会反过来影响“源多段线是否为矩形”的判断。
+    /// </summary>
+    private static void CollectBlockFrameGeometry(
+        Transaction tr,
+        ObjectId definitionId,
+        Matrix3d definitionToRoot,
+        ICollection<LocalRectangle> rectangles,
+        ref bool hasLineExtents,
+        ref Extents3d lineExtents,
+        ISet<ObjectId> visitedDefinitions,
+        int depth)
+    {
+        if (depth > 12 || definitionId.IsNull || !visitedDefinitions.Add(definitionId))
+        {
+            return;
+        }
+
+        try
+        {
+            var definition = (BlockTableRecord)tr.GetObject(definitionId, OpenMode.ForRead);
+            foreach (ObjectId entityId in definition)
+            {
+                if (tr.GetObject(entityId, OpenMode.ForRead, false) is not Entity entity
+                    || !IsEntityVisible(entity))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    var localRectangle = new LocalRectangle();
+                    var isClosedRectangle = entity switch
+                    {
+                        Polyline polyline => RectangleGeometry.TryGetRectangle(
+                            polyline,
+                            Matrix3d.Identity,
+                            requireClosed: true,
+                            out localRectangle),
+                        Polyline2d polyline2d => RectangleGeometry.TryGetRectangleFrom2d(
+                            tr,
+                            polyline2d,
+                            Matrix3d.Identity,
+                            requireClosed: true,
+                            out localRectangle),
+                        Polyline3d polyline3d => RectangleGeometry.TryGetRectangleFrom3d(
+                            tr,
+                            polyline3d,
+                            Matrix3d.Identity,
+                            requireClosed: true,
+                            out localRectangle),
+                        _ => false
+                    };
+
+                    if (isClosedRectangle)
+                    {
+                        rectangles.Add(RectangleGeometry.TransformRectangle(localRectangle, definitionToRoot));
+                    }
+
+                    // 合并包盒只统计线类实体，排除文字和属性，作为找不到闭合矩形时的兼容回退。
+                    if (entity is Line or Polyline or Polyline2d or Polyline3d)
+                    {
+                        var transformedExtents = TransformWorldExtents(entity.GeometricExtents, definitionToRoot);
+                        if (HasValidExtents(transformedExtents))
+                        {
+                            if (!hasLineExtents)
+                            {
+                                lineExtents = transformedExtents;
+                                hasLineExtents = true;
+                            }
+                            else
+                            {
+                                lineExtents.AddExtents(transformedExtents);
+                            }
+                        }
+                    }
+                }
+                catch
+                {
+                    // 个别损坏实体或无效外包框不应中断整个图框录入。
+                }
+
+                if (entity is not BlockReference nested || depth >= 12)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    CollectBlockFrameGeometry(
+                        tr,
+                        nested.BlockTableRecord,
+                        nested.BlockTransform * definitionToRoot,
+                        rectangles,
+                        ref hasLineExtents,
+                        ref lineExtents,
+                        visitedDefinitions,
+                        depth + 1);
+                }
+                catch
+                {
+                    // 循环引用由 visited 处理；不可读取的嵌套定义直接跳过。
+                }
+            }
+        }
+        finally
+        {
+            // visited 只约束当前递归路径，允许同一定义从其他实例路径再次进入。
+            visitedDefinitions.Remove(definitionId);
+        }
+    }
+
+    private static LocalRectangle CreateRectangleFromExtents(Extents3d extents)
+    {
+        var rectangle = LocalRectangle.FromPoints(
+            extents.MinPoint.X,
+            extents.MinPoint.Y,
+            extents.MaxPoint.X,
+            extents.MaxPoint.Y);
+        var width = rectangle.MaxX - rectangle.MinX;
+        var height = rectangle.MaxY - rectangle.MinY;
+        rectangle.ActualWidth = Math.Max(width, height);
+        rectangle.ActualHeight = Math.Min(width, height);
+        rectangle.CornerPoints = new[]
+        {
+            rectangle.MinX, rectangle.MinY,
+            rectangle.MaxX, rectangle.MinY,
+            rectangle.MaxX, rectangle.MaxY,
+            rectangle.MinX, rectangle.MaxY
+        };
+        return rectangle;
     }
 
     /// <summary>

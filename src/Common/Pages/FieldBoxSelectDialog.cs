@@ -50,29 +50,39 @@ public sealed class FieldBoxSelectDialog : Form
     public LocalRectangle Info1Region { get; private set; } = new();
     public LocalRectangle Info2Region { get; private set; } = new();
 
-    // 纸张设置（合并原独立纸张选择界面）：默认按打印范围自动识别，可手动修改。
+    // 纸张设置与矩形框批打共用同一候选识别策略；下拉项直接对应完整纸张结果，
+    // 避免名称、物理尺寸和比例被分别修改后彼此不一致。
     private readonly ComboBox _paperName = new();
-    private readonly NumericUpDown _paperWidth = new();
-    private readonly NumericUpDown _paperHeight = new();
+    private readonly PaperSizeDetector.DetectionOptions _paperDetectionOptions;
+    private IReadOnlyList<PaperDetection> _paperOptions = Array.Empty<PaperDetection>();
 
-    public string PaperName => _paperName.Text.Trim();
-    public double PaperWidthMm => (double)_paperWidth.Value;
-    public double PaperHeightMm => (double)_paperHeight.Value;
+    private PaperDetection? SelectedPaper =>
+        _paperName.SelectedIndex >= 0 && _paperName.SelectedIndex < _paperOptions.Count
+            ? _paperOptions[_paperName.SelectedIndex]
+            : null;
+
+    public string PaperName => SelectedPaper?.PaperName ?? "";
+    public double PaperWidthMm => SelectedPaper?.PaperWidthMm ?? 0d;
+    public double PaperHeightMm => SelectedPaper?.PaperHeightMm ?? 0d;
 
     public FieldBoxSelectDialog(Editor editor, Matrix3d inverseBlockTransform,
         Matrix3d blockTransform, TransientFrameMarkers markers, LocalRectangle referenceFrame,
-        PaperDetection detected)
+        IReadOnlyList<PaperDetection> paperOptions,
+        PaperSizeDetector.DetectionOptions paperDetectionOptions)
     {
         _editor = editor;
         _inverseBlockTransform = inverseBlockTransform;
         _blockTransform = blockTransform;
         _markers = markers;
+        _paperDetectionOptions = paperDetectionOptions;
         ReferenceFrame = referenceFrame;
 
-        // 用传入的局部坐标 referenceFrame 计算世界坐标角点，用于外框临时标记。
-        var wc1 = new Point3d(referenceFrame.MinX, referenceFrame.MinY, 0).TransformBy(blockTransform);
-        var wc2 = new Point3d(referenceFrame.MaxX, referenceFrame.MaxY, 0).TransformBy(blockTransform);
-        _printAreaCorners = (wc1, wc2);
+        // 用 4 个局部角点完整变换后取得世界包盒；不能只变换一对对角点，
+        // 否则旋转块在窗口重新显示时会把初始红框替换成错误范围。
+        var worldFrame = RectangleGeometry.TransformRectangle(referenceFrame, blockTransform);
+        _printAreaCorners = (
+            new Point3d(worldFrame.MinX, worldFrame.MinY, 0),
+            new Point3d(worldFrame.MaxX, worldFrame.MaxY, 0));
 
         Text = "设置图框字段与纸张";
         UiLayout.ConfigureForm(this, 460, 436, 430, 410);
@@ -142,7 +152,7 @@ public sealed class FieldBoxSelectDialog : Form
         // 纸张：默认按打印范围自动识别，重新框选打印范围时同步刷新，也可手动修改。
         table.Controls.Add(MakeLabel("纸张"), 0, 8);
         table.Controls.Add(MakePaperRow(), 1, 8);
-        ApplyDetectedPaper(detected);
+        ApplyPaperOptions(paperOptions);
 
         // 提示
         var hint = new Label
@@ -218,6 +228,17 @@ public sealed class FieldBoxSelectDialog : Form
     }
 
     /// <summary>
+    /// CAD 模态窗口建立自己的消息循环后再强制重绘一次，确保窗口首次出现时红色打印范围已经可见。
+    /// OnVisibleChanged 继续负责从 CAD 框选返回后的刷新，两者职责不同。
+    /// </summary>
+    protected override void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+        RefreshAllMarkers();
+        _markers.RefreshDisplay(regenerate: true);
+    }
+
+    /// <summary>
     /// 根据已存储的世界坐标角点，重新绘制所有已选字段及打印范围的临时红色标识。
     /// </summary>
     private void RefreshAllMarkers()
@@ -266,7 +287,10 @@ public sealed class FieldBoxSelectDialog : Form
             // 打印范围变化后重新识别纸张，与原独立纸张界面使用最终外框检测的行为一致。
             var detectedWidth = Math.Abs(second.Value.X - first.Value.X);
             var detectedHeight = Math.Abs(second.Value.Y - first.Value.Y);
-            ApplyDetectedPaper(PaperSizeDetector.Detect(detectedWidth, detectedHeight));
+            ApplyPaperOptions(PaperSizeDetector.DetectCandidatesOrFallback(
+                detectedWidth,
+                detectedHeight,
+                _paperDetectionOptions));
         }
         finally
         {
@@ -462,86 +486,50 @@ public sealed class FieldBoxSelectDialog : Form
         return panel;
     }
 
-    /// <summary>
-    /// 纸张行布局：纸张名称下拉框 + 宽/高输入框，与原独立纸张选择界面的控件一致。
-    /// </summary>
+    /// <summary>纸张行只显示候选下拉框；纸张物理尺寸和比例由所选候选完整携带。</summary>
     private Control MakePaperRow()
     {
         _paperName.Dock = DockStyle.Fill;
-        _paperName.DropDownStyle = ComboBoxStyle.DropDown;
-        _paperName.Items.AddRange(new object[] { "A0", "A1", "A2", "A3", "A0+", "A1+", "A2+", "A3+", "自定义" });
-        _paperName.SelectedIndexChanged += (_, _) => ApplyPaperPreset(_paperName.Text);
-
-        ConfigurePaperNumber(_paperWidth);
-        ConfigurePaperNumber(_paperHeight);
+        _paperName.DropDownStyle = ComboBoxStyle.DropDownList;
+        _paperName.DropDownWidth = UiLayout.Scale(330);
 
         var panel = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 5,
+            ColumnCount = 1,
             RowCount = 1,
             Margin = Padding.Empty,
             Padding = Padding.Empty
         };
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(64)));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(64)));
 
         panel.Controls.Add(_paperName, 0, 0);
-        panel.Controls.Add(MakeInlineLabel("宽"), 1, 0);
-        panel.Controls.Add(_paperWidth, 2, 0);
-        panel.Controls.Add(MakeInlineLabel("高"), 3, 0);
-        panel.Controls.Add(_paperHeight, 4, 0);
 
         return panel;
     }
 
-    private static Label MakeInlineLabel(string text) => new()
+    private void ApplyPaperOptions(IReadOnlyList<PaperDetection> paperOptions)
     {
-        Text = text,
-        AutoSize = true,
-        Dock = DockStyle.Fill,
-        TextAlign = ContentAlignment.MiddleLeft,
-        Margin = new Padding(UiLayout.Scale(6), 0, UiLayout.Scale(2), 0)
-    };
-
-    private static void ConfigurePaperNumber(NumericUpDown input)
-    {
-        input.DecimalPlaces = 2;
-        input.Minimum = 1;
-        input.Maximum = 5000;
-        input.Increment = 1;
-        input.Dock = DockStyle.Fill;
-    }
-
-    private void ApplyDetectedPaper(PaperDetection detected)
-    {
-        _paperName.Text = string.IsNullOrWhiteSpace(detected.PaperName)
-                || detected.PaperWidthMm <= 0
-                || detected.PaperHeightMm <= 0
-                || detected.PaperName.StartsWith("未", StringComparison.Ordinal)
-            ? "自定义"
-            : detected.PaperName;
-
-        SetPaperDimensions(
-            detected.PaperWidthMm > 0 ? detected.PaperWidthMm : 420,
-            detected.PaperHeightMm > 0 ? detected.PaperHeightMm : 297);
-    }
-
-    private void ApplyPaperPreset(string paperName)
-    {
-        var (width, height) = PaperSizeDetector.GetDefaultSize(paperName.Trim(), PaperWidthMm, PaperHeightMm);
-        if (width > 0 && height > 0)
+        if (paperOptions.Count == 0)
         {
-            SetPaperDimensions(width, height);
+            throw new ArgumentException("至少需要一个纸张候选项。", nameof(paperOptions));
         }
-    }
 
-    private void SetPaperDimensions(double width, double height)
-    {
-        _paperWidth.Value = UiLayout.Clamp(_paperWidth, width);
-        _paperHeight.Value = UiLayout.Clamp(_paperHeight, height);
+        _paperOptions = paperOptions;
+        _paperName.BeginUpdate();
+        try
+        {
+            _paperName.Items.Clear();
+            foreach (var paper in _paperOptions)
+            {
+                _paperName.Items.Add(PaperSizeDetector.FormatOption(paper));
+            }
+
+            _paperName.SelectedIndex = 0;
+        }
+        finally
+        {
+            _paperName.EndUpdate();
+        }
     }
 }
