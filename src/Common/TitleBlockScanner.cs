@@ -127,18 +127,25 @@ public static class TitleBlockScanner
                 // dynamic-block container whose visible inner block was registered instead.
                 Matrix3d effectiveBlockTransform = blockRef.BlockTransform;
                 string effectiveBlockName = blockName;
+                ObjectId frameDefinitionId = blockRef.BlockTableRecord;
                 // 嵌套匹配时需记录从内层块定义到外层块定义空间的累积变换，用于后续 region 坐标对齐。
                 Matrix3d nestedToOuter = Matrix3d.Identity;
                 bool isNestedMatch = false;
                 if (definition == null)
                 {
                     definition = ResolveNestedLibraryMatch(
-                        tr, blockRef, blockName, library, out var nestedTransform);
+                        tr,
+                        blockRef,
+                        blockName,
+                        library,
+                        out var nestedTransform,
+                        out var nestedDefinitionId);
                     if (definition != null)
                     {
                         effectiveBlockTransform = nestedTransform * blockRef.BlockTransform;
                         effectiveBlockName = definition.BlockName;
                         nestedToOuter = nestedTransform;
+                        frameDefinitionId = nestedDefinitionId;
                         isNestedMatch = true;
                     }
                 }
@@ -296,6 +303,14 @@ public static class TitleBlockScanner
                     boundaryNote += "；图框库坐标模式: 块内坐标";
                 }
 
+                // 与图框录入共用同一套最大闭合矩形/线包围盒规则，同时把真实源实体句柄交给打印阶段临时移层。
+                BlockFrameGeometry.TryGetFrame(
+                    tr,
+                    frameDefinitionId,
+                    out _,
+                    out _,
+                    out var frameBoundaryHandles);
+
                 jobs.Add(new PlotJob
                 {
                     SourceFile = sourceName,
@@ -303,6 +318,7 @@ public static class TitleBlockScanner
                     IsPaperSpace = !layout.ModelType,
                     BlockName = effectiveBlockName,
                     BlockHandle = blockRef.Handle.ToString(),
+                    FrameBoundaryHandles = frameBoundaryHandles,
                     MatchIndex = matchIndex++,
                     DrawingNumber = number,
                     Title = title,
@@ -800,9 +816,11 @@ public static class TitleBlockScanner
         BlockReference outerRef,
         string outerBlockName,
         TitleBlockLibrary library,
-        out Matrix3d nestedTransform)
+        out Matrix3d nestedTransform,
+        out ObjectId matchedDefinitionId)
     {
         nestedTransform = Matrix3d.Identity;
+        matchedDefinitionId = ObjectId.Null;
 
         var definitionId = outerRef.BlockTableRecord;
         if (definitionId.IsNull)
@@ -811,7 +829,16 @@ public static class TitleBlockScanner
         }
 
         var definition = (BlockTableRecord)tr.GetObject(definitionId, OpenMode.ForRead);
-        return ResolveNestedLibraryMatchRecursive(tr, definition, Matrix3d.Identity, outerBlockName, library, out nestedTransform, new HashSet<ObjectId>(), 0);
+        return ResolveNestedLibraryMatchRecursive(
+            tr,
+            definition,
+            Matrix3d.Identity,
+            outerBlockName,
+            library,
+            out nestedTransform,
+            out matchedDefinitionId,
+            new HashSet<ObjectId>(),
+            0);
     }
 
     private static TitleBlockDefinition? ResolveNestedLibraryMatchRecursive(
@@ -821,10 +848,12 @@ public static class TitleBlockScanner
         string outerBlockName,
         TitleBlockLibrary library,
         out Matrix3d nestedTransform,
+        out ObjectId matchedDefinitionId,
         ISet<ObjectId> visited,
         int depth)
     {
         nestedTransform = Matrix3d.Identity;
+        matchedDefinitionId = ObjectId.Null;
         if (depth > 6 || !visited.Add(definition.ObjectId))
         {
             return null;
@@ -862,6 +891,7 @@ public static class TitleBlockScanner
             if (match != null)
             {
                 nestedTransform = nested.BlockTransform * accumulatedTransform;
+                matchedDefinitionId = nested.BlockTableRecord;
                 return match;
             }
 
@@ -870,10 +900,20 @@ public static class TitleBlockScanner
             {
                 var nestedDef = (BlockTableRecord)tr.GetObject(nested.BlockTableRecord, OpenMode.ForRead);
                 var innerTransform = nested.BlockTransform * accumulatedTransform;
-                var deeper = ResolveNestedLibraryMatchRecursive(tr, nestedDef, innerTransform, outerBlockName, library, out var deeperTransform, visited, depth + 1);
+                var deeper = ResolveNestedLibraryMatchRecursive(
+                    tr,
+                    nestedDef,
+                    innerTransform,
+                    outerBlockName,
+                    library,
+                    out var deeperTransform,
+                    out var deeperDefinitionId,
+                    visited,
+                    depth + 1);
                 if (deeper != null)
                 {
                     nestedTransform = deeperTransform;
+                    matchedDefinitionId = deeperDefinitionId;
                     return deeper;
                 }
             }

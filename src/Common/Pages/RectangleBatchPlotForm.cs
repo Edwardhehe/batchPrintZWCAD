@@ -1841,6 +1841,7 @@ public sealed class RectangleBatchPlotForm : Form
                 != updated.RecognizeFourLineRectangleFrames;
             _settings.PaperMatchToleranceMm = updated.PaperMatchToleranceMm;
             _settings.RecognizeFourLineRectangleFrames = updated.RecognizeFourLineRectangleFrames;
+            _settings.HideFrameBoundaryWhenPlotting = updated.HideFrameBoundaryWhenPlotting;
             _settings.LongPaperSnapToleranceMm = updated.LongPaperSnapToleranceMm;
             _settings.LongPaperNameFormat = updated.LongPaperNameFormat;
             _settings.SortOrderHorizontalFirst = updated.SortOrderHorizontalFirst;

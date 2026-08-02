@@ -50,6 +50,11 @@ public sealed class AppSettings
     /// 默认关闭，避免改变既有图纸的扫描结果。
     /// </summary>
     public bool RecognizeFourLineRectangleFrames { get; set; }
+    /// <summary>
+    /// 正式批量打印时是否临时把已识别的图框外边框移到不打印层。
+    /// 首次使用默认关闭，由用户明确勾选后才隐藏边框；实体和临时图层状态必须在成功、失败或取消后恢复。
+    /// </summary>
+    public bool HideFrameBoundaryWhenPlotting { get; set; } = false;
     public bool AddSequenceWhenPdfExists { get; set; } = false;
     /// <summary>记录批打印窗口上一次“合并 PDF”的勾选状态；首次使用默认为不勾选。</summary>
     public bool MergePdf { get; set; }

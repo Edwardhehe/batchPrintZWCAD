@@ -43,6 +43,8 @@ public sealed class LocalRectangle
     public double ActualHeight { get; set; }
     /// <summary>矩形 4 个实际角点（WCS），格式 [x0,y0,x1,y1,x2,y2,x3,y3]。null 表示无。</summary>
     public double[]? CornerPoints { get; set; }
+    /// <summary>形成该矩形边界的 CAD 实体句柄；闭合 PL 为一个，四线拼框为四个。</summary>
+    internal string[]? BoundaryEntityHandles { get; set; }
 
     public static LocalRectangle FromPoints(double x1, double y1, double x2, double y2)
     {
@@ -138,6 +140,11 @@ public sealed class PlotJob
     public bool RequiresCustomPaperRegistration { get; set; }
     /// <summary>打印区域 4 个实际 WCS 角点，格式 [x0,y0,x1,y1,x2,y2,x3,y3]。null 时用 Min/Max。</summary>
     public double[]? CornerPoints { get; set; }
+    /// <summary>
+    /// 扫描阶段确认的图框外边框实体句柄。句柄只用于同一源 DWG 内的临时移层，
+    /// 不保存 ObjectId，避免外部图纸重新打开后引用失效。
+    /// </summary>
+    public string[]? FrameBoundaryHandles { get; set; }
 }
 
 public enum TitleBlockScanScope

@@ -27,6 +27,7 @@ public sealed class SettingsForm : Form
 
     private readonly NumericUpDown _paperTolerance = new();
     private readonly CheckBox _recognizeFourLineRectangleFrames = new();
+    private readonly CheckBox _hideFrameBoundaryWhenPlotting = new();
     private readonly ComboBox _longPaperNameFormat = new();
     private readonly NumericUpDown _longPaperSnapTolerance = new();
     private readonly CheckBox _addSequenceWhenPdfExists = new();
@@ -182,8 +183,17 @@ public sealed class SettingsForm : Form
         var frameRecognitionTable = CreateSettingsTable(1);
         UiLayout.AddRow(frameRecognitionTable, 0, "", _recognizeFourLineRectangleFrames);
 
-        var plotTable = CreateSettingsTable(1);
+        _hideFrameBoundaryWhenPlotting.Text = "不打印图框的外边框";
+        _hideFrameBoundaryWhenPlotting.AutoSize = true;
+        _hideFrameBoundaryWhenPlotting.Dock = DockStyle.Fill;
+        var hideFrameTip = new ToolTip();
+        hideFrameTip.SetToolTip(
+            _hideFrameBoundaryWhenPlotting,
+            "勾选后，正式打印期间把识别到的图框外边框临时移到“LA-临时不打印层”；打印完成、失败或取消后立即恢复。");
+
+        var plotTable = CreateSettingsTable(2);
         UiLayout.AddRow(plotTable, 0, "", _openExternalDwgForPlot);
+        UiLayout.AddRow(plotTable, 1, "", _hideFrameBoundaryWhenPlotting);
 
         var outputTable = CreateSettingsTable(1);
         UiLayout.AddRow(outputTable, 0, "", _addSequenceWhenPdfExists);
@@ -1012,6 +1022,7 @@ public sealed class SettingsForm : Form
     {
         _paperTolerance.Value = UiLayout.Clamp(_paperTolerance, settings.PaperMatchToleranceMm);
         _recognizeFourLineRectangleFrames.Checked = settings.RecognizeFourLineRectangleFrames;
+        _hideFrameBoundaryWhenPlotting.Checked = settings.HideFrameBoundaryWhenPlotting;
         _addSequenceWhenPdfExists.Checked = settings.AddSequenceWhenPdfExists;
         _useFileNameAsPdfBookmark.Checked = settings.UseFileNameAsPdfBookmark;
         _mergePdfByPaperSize.Checked = settings.MergePdfByPaperSize;
@@ -1065,6 +1076,7 @@ public sealed class SettingsForm : Form
 
         current.PaperMatchToleranceMm = (double)_paperTolerance.Value;
         current.RecognizeFourLineRectangleFrames = _recognizeFourLineRectangleFrames.Checked;
+        current.HideFrameBoundaryWhenPlotting = _hideFrameBoundaryWhenPlotting.Checked;
         current.AddSequenceWhenPdfExists = _addSequenceWhenPdfExists.Checked;
         current.UseFileNameAsPdfBookmark = _useFileNameAsPdfBookmark.Checked;
         current.MergePdfByPaperSize = _mergePdfByPaperSize.Checked;

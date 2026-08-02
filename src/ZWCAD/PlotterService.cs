@@ -366,6 +366,9 @@ public static class PlotterService
         job.PaperSizeText = refreshed.PaperSizeText;
         job.PaperWidthMm = refreshed.PaperWidthMm;
         job.PaperHeightMm = refreshed.PaperHeightMm;
+        job.FrameBoundaryHandles = refreshed.FrameBoundaryHandles == null
+            ? null
+            : (string[])refreshed.FrameBoundaryHandles.Clone();
     }
 
     private static Document? FindOpenDocument(string file)
@@ -414,6 +417,8 @@ public static class PlotterService
         try
         {
             using var tr = db.TransactionManager.StartTransaction();
+            var frameLayerApplied = settings.HideFrameBoundaryWhenPlotting
+                && TemporaryFramePlotLayer.Apply(tr, db, job);
             var layout = FindLayoutForJob(tr, db, job);
             using var plotSettings = new PlotSettings(layout.ModelType);
             plotSettings.CopyFrom(layout);
@@ -474,7 +479,11 @@ public static class PlotterService
             PrepareOutputFile(job.OutputPath);
             RunPlot(plotInfo, documentName, job.OutputPath, job.DrawingNumber);
 
-            tr.Commit();
+            // 临时移层与绘图处在同一事务；绘图结束后不提交即可原子恢复实体和临时图层。
+            if (!frameLayerApplied)
+            {
+                tr.Commit();
+            }
             WaitForPlotIdle();
             ValidatePlotOutput(job.OutputPath);
         }
@@ -747,12 +756,14 @@ public static class PlotterService
         try
         {
             using var tr = db.TransactionManager.StartTransaction();
+            var singleSettings = AppSettingsStore.Load();
+            var frameLayerApplied = singleSettings.HideFrameBoundaryWhenPlotting
+                && TemporaryFramePlotLayer.Apply(tr, db, job);
             var layout = FindLayoutForJob(tr, db, job);
             using var plotSettings = new PlotSettings(layout.ModelType);
             plotSettings.CopyFrom(layout);
 
             var validator = PlotSettingsValidator.Current;
-            var singleSettings = AppSettingsStore.Load();
             var media = job.RequireExactPaperSize
                 ? TrySelectExactSingleMediaWithoutRefresh(
                     validator, plotSettings, job, singleSettings, deviceName, layout.ModelType)
@@ -802,7 +813,13 @@ public static class PlotterService
             }.Validate(plotInfo);
 
             RunPreview(plotInfo, documentName);
-            tr.Commit();
+
+            // 预览必须和正式输出使用同一套外框可打印状态；应用临时移层后不提交事务，
+            // 预览关闭、失败或取消时均由 CAD 原子回滚，避免修改用户图纸。
+            if (!frameLayerApplied)
+            {
+                tr.Commit();
+            }
             WaitForPlotIdle();
         }
         finally

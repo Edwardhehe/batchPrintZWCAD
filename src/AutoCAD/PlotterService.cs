@@ -100,15 +100,15 @@ public static class PlotterService
                 {
                     if (group.Key == "__CURRENT__")
                     {
-                        PlotDocumentJobs(currentDocument, groupJobs, deviceName, styleSheet, beforeJob, results, cancellationToken);
+                        PlotDocumentJobs(currentDocument, groupJobs, deviceName, styleSheet, settings, beforeJob, results, cancellationToken);
                     }
                     else if (group.Key.StartsWith("__DB__:", StringComparison.OrdinalIgnoreCase))
                     {
-                        PlotSideDatabaseJobs(groupJobs, groupJobs[0].SourceFile, deviceName, styleSheet, beforeJob, results, cancellationToken);
+                        PlotSideDatabaseJobs(groupJobs, groupJobs[0].SourceFile, deviceName, styleSheet, settings, beforeJob, results, cancellationToken);
                     }
                     else
                     {
-                        PlotOpenedDocumentJobs(groupJobs, groupJobs[0].SourceFile, deviceName, styleSheet, beforeJob, results, cancellationToken);
+                        PlotOpenedDocumentJobs(groupJobs, groupJobs[0].SourceFile, deviceName, styleSheet, settings, beforeJob, results, cancellationToken);
                     }
                 }
                 catch (OperationCanceledException)
@@ -193,6 +193,7 @@ public static class PlotterService
         string sourceFile,
         string deviceName,
         string styleSheet,
+        AppSettings settings,
         Action<PlotJob>? beforeJob,
         List<PlotJobResult> results,
         CancellationToken cancellationToken)
@@ -203,7 +204,7 @@ public static class PlotterService
 
         try
         {
-            PlotDocumentJobs(doc, jobs, deviceName, styleSheet, beforeJob, results, cancellationToken);
+            PlotDocumentJobs(doc, jobs, deviceName, styleSheet, settings, beforeJob, results, cancellationToken);
         }
         finally
         {
@@ -219,6 +220,7 @@ public static class PlotterService
         IReadOnlyList<PlotJob> jobs,
         string deviceName,
         string styleSheet,
+        AppSettings settings,
         Action<PlotJob>? beforeJob,
         List<PlotJobResult> results,
         CancellationToken cancellationToken)
@@ -240,7 +242,7 @@ public static class PlotterService
                 {
                     ActivateLayout(doc.Database, job);
                     PrepareEditorViewForPlot(doc, job);
-                    PlotDatabase(doc.Database, doc.Name, job, deviceName, styleSheet, doc);
+                    PlotDatabase(doc.Database, doc.Name, job, deviceName, styleSheet, settings, doc);
                 }
 
                 results.Add(new PlotJobResult { Job = job });
@@ -258,6 +260,7 @@ public static class PlotterService
         string sourceFile,
         string deviceName,
         string styleSheet,
+        AppSettings settings,
         Action<PlotJob>? beforeJob,
         List<PlotJobResult> results,
         CancellationToken cancellationToken)
@@ -274,7 +277,7 @@ public static class PlotterService
             try
             {
                 beforeJob?.Invoke(job);
-                PlotDatabase(db, Path.GetFileName(sourceFile), job, deviceName, styleSheet, null);
+                PlotDatabase(db, Path.GetFileName(sourceFile), job, deviceName, styleSheet, settings, null);
                 results.Add(new PlotJobResult { Job = job });
             }
             catch (OperationCanceledException) { throw; }
@@ -285,7 +288,7 @@ public static class PlotterService
         }
     }
 
-    private static void PlotDatabase(Database db, string documentName, PlotJob job, string deviceName, string styleSheet, Document? plotDocument)
+    private static void PlotDatabase(Database db, string documentName, PlotJob job, string deviceName, string styleSheet, AppSettings settings, Document? plotDocument)
     {
         if (string.IsNullOrWhiteSpace(deviceName))
         {
@@ -299,6 +302,8 @@ public static class PlotterService
         try
         {
             using var tr = db.TransactionManager.StartTransaction();
+            var frameLayerApplied = settings.HideFrameBoundaryWhenPlotting
+                && TemporaryFramePlotLayer.Apply(tr, db, job);
             var layout = FindLayoutForJob(tr, db, job);
             var window = GetPlotWindow(job, plotDocument);
             using var plot = CreateValidatedPlot(layout, job, window, deviceName, styleSheet);
@@ -306,7 +311,11 @@ public static class PlotterService
             PrepareOutputFile(job.OutputPath);
             RunPlot(plot.Info, documentName, job.OutputPath, job.DrawingNumber);
 
-            tr.Commit();
+            // 临时移层与绘图必须处于同一事务。绘图引擎结束后故意不提交，让 CAD 原子回滚实体、图层及锁定状态。
+            if (!frameLayerApplied)
+            {
+                tr.Commit();
+            }
             WaitForPlotIdle();
             ValidatePlotOutput(job.OutputPath);
         }
@@ -1157,6 +1166,9 @@ public static class PlotterService
                 job.PaperSizeText = refreshed.PaperSizeText;
                 job.ScaleText = refreshed.ScaleText;
                 job.SizeText = refreshed.SizeText;
+                job.FrameBoundaryHandles = refreshed.FrameBoundaryHandles == null
+                    ? null
+                    : (string[])refreshed.FrameBoundaryHandles.Clone();
             }
         }
         catch (Exception ex)
@@ -1206,11 +1218,20 @@ public static class PlotterService
         try
         {
             using var tr = db.TransactionManager.StartTransaction();
+            var settings = AppSettingsStore.Load();
+            var frameLayerApplied = settings.HideFrameBoundaryWhenPlotting
+                && TemporaryFramePlotLayer.Apply(tr, db, job);
             var layout = FindLayoutForJob(tr, db, job);
             var window = GetPlotWindow(job, plotDocument);
             using var plot = CreateValidatedPlot(layout, job, window, deviceName, styleSheet);
             RunPreview(plot.Info, documentName);
-            tr.Commit();
+
+            // 预览必须和正式输出使用同一套外框可打印状态；应用临时移层后不提交事务，
+            // 预览关闭、失败或取消时均由 CAD 原子回滚，避免修改用户图纸。
+            if (!frameLayerApplied)
+            {
+                tr.Commit();
+            }
             WaitForPlotIdle();
         }
         finally

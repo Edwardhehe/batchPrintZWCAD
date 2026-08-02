@@ -161,6 +161,10 @@ internal static class RectangleGeometry
             corners[2].X, corners[2].Y,
             corners[3].X, corners[3].Y
         };
+        // 几何变换只改变坐标，不改变形成边框的源实体；缓存块定义结果时必须一并保留句柄。
+        result.BoundaryEntityHandles = rectangle.BoundaryEntityHandles == null
+            ? null
+            : (string[])rectangle.BoundaryEntityHandles.Clone();
         return result;
     }
 

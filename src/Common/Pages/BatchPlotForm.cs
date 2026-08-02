@@ -1734,6 +1734,7 @@ public sealed class BatchPlotForm : Form
     {
         var updated = AppSettingsStore.Load();
         _settings.PaperMatchToleranceMm = updated.PaperMatchToleranceMm;
+        _settings.HideFrameBoundaryWhenPlotting = updated.HideFrameBoundaryWhenPlotting;
         _settings.AddSequenceWhenPdfExists = updated.AddSequenceWhenPdfExists;
         _settings.MergePdf = updated.MergePdf;
         _settings.UseFileNameAsPdfBookmark = updated.UseFileNameAsPdfBookmark;
