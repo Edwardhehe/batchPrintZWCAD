@@ -522,8 +522,7 @@ public sealed class RectangleBatchPlotForm : Form
 
     private void ScanSelectedWindow()
     {
-        Hide();
-        System.Windows.Forms.Application.DoEvents();
+        CadWindowFocus.HideForCadInput(this);
         try
         {
             var editor = _document.Editor;
@@ -577,8 +576,7 @@ public sealed class RectangleBatchPlotForm : Form
         }
         finally
         {
-            Show();
-            Activate();
+            CadWindowFocus.RestoreDialog(this);
         }
     }
 
@@ -1161,8 +1159,7 @@ public sealed class RectangleBatchPlotForm : Form
 
             var selectedRows = _grid.SelectedRows.Cast<DataGridViewRow>().ToList();
             var currentCell = _grid.CurrentCell;
-            Hide();
-            System.Windows.Forms.Application.DoEvents();
+            CadWindowFocus.HideForCadInput(this);
             try
             {
                 SaveCurrentPlotOptions();
@@ -1184,8 +1181,7 @@ public sealed class RectangleBatchPlotForm : Form
             }
             finally
             {
-                Show();
-                Activate();
+                CadWindowFocus.RestoreDialog(this);
                 RestoreGridSelection(selectedRows, currentCell);
             }
         }

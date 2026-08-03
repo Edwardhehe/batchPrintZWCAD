@@ -664,8 +664,7 @@ public sealed class BatchPlotForm : Form
             return;
         }
 
-        Hide();
-        System.Windows.Forms.Application.DoEvents();
+        CadWindowFocus.HideForCadInput(this);
         try
         {
             var editor = _currentDocument.Editor;
@@ -722,8 +721,7 @@ public sealed class BatchPlotForm : Form
         }
         finally
         {
-            Show();
-            Activate();
+            CadWindowFocus.RestoreDialog(this);
         }
     }
 
@@ -1676,8 +1674,7 @@ public sealed class BatchPlotForm : Form
         bool pickTextAppearance,
         string? columnKey)
     {
-        Hide();
-        System.Windows.Forms.Application.DoEvents();
+        CadWindowFocus.HideForCadInput(this);
         try
         {
             var document = GetActiveCadDocument();
@@ -1715,8 +1712,7 @@ public sealed class BatchPlotForm : Form
         }
         finally
         {
-            Show();
-            Activate();
+            CadWindowFocus.RestoreDialog(this);
         }
     }
 
@@ -2312,8 +2308,7 @@ public sealed class BatchPlotForm : Form
         try
         {
             _grid.ClearSelection();
-            Hide();
-            System.Windows.Forms.Application.DoEvents();
+            CadWindowFocus.HideForCadInput(this);
             // 预览任一图纸前也按当前勾选集合一次性准备全部纸张；当前行即使未勾选，也必须纳入本次准备。
             var previewJobs = _jobs
                 .Where(candidate => candidate.Selected || ReferenceEquals(candidate, job))
@@ -2331,10 +2326,9 @@ public sealed class BatchPlotForm : Form
         }
         finally
         {
-            if (wasVisible && !Visible)
+            if (wasVisible)
             {
-                Show();
-                Activate();
+                CadWindowFocus.RestoreDialog(this);
             }
             RestoreGridSelection(selectedRows, currentCell);
         }
