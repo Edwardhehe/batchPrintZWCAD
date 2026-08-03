@@ -659,6 +659,7 @@ public static class AcadPlotterInstaller
 
     /// <summary>
     /// 新安装同样只以随包 PIA2 为结构来源，当前 DWG To PDF.pc3 仅提供驱动路径。
+    /// 误删该文件时回退到 Plotters 目录下其他含有 PDF 驱动的 pc3，避免插件完全不可用。
     /// </summary>
     private static bool TryInstallForcedPia2PdfPlotter(
         string plottersDirectory,
@@ -667,12 +668,43 @@ public static class AcadPlotterInstaller
         out string message)
     {
         var sourcePc3 = Path.Combine(plottersDirectory, "DWG To PDF.pc3");
+        if (!File.Exists(sourcePc3))
+        {
+            sourcePc3 = FindPdfDriverPc3(plottersDirectory)
+                ?? sourcePc3; // 实在找不到时仍用原名，让 TryWriteLaPia2PairFromTemplate 给出明确错误
+        }
+
         return TryWriteLaPia2PairFromTemplate(
             PreferredPdfPlotter,
             targetPc3,
             targetPmp,
             sourcePc3,
             out message);
+    }
+
+    /// <summary>
+    /// 在 Plotters 目录中搜索任意包含 PDF 驱动路径的 pc3 文件，作为 DWG To PDF 误删后的回退。
+    /// </summary>
+    private static string? FindPdfDriverPc3(string plottersDirectory)
+    {
+        try
+        {
+            foreach (var candidate in Directory.EnumerateFiles(plottersDirectory, "*.pc3", SearchOption.TopDirectoryOnly))
+            {
+                var driverPath = ReadDriverPath(candidate);
+                if (!string.IsNullOrWhiteSpace(driverPath)
+                    && driverPath.IndexOf("pdf", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return candidate;
+                }
+            }
+        }
+        catch
+        {
+            // 目录不可读时不做回退，后续仍由 TryWriteLaPia2PairFromTemplate 报明确错误。
+        }
+
+        return null;
     }
 
     private static bool IsSupportedLaPlotter(string deviceName)

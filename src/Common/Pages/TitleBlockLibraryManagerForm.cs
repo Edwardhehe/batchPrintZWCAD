@@ -136,6 +136,7 @@ public sealed class TitleBlockLibraryManagerForm : Form
     {
         _grid.Columns.Clear();
         _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.BlockName), HeaderText = "块名", Width = UiLayout.Scale(190) });
+        _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.CreatedAt), HeaderText = "加入时间", Width = UiLayout.Scale(170), ReadOnly = true });
         _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.PaperName), HeaderText = "图幅", Width = UiLayout.Scale(80) });
         _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.PaperWidthMm), HeaderText = "纸宽mm", Width = UiLayout.Scale(90) });
         _grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(TitleBlockRow.PaperHeightMm), HeaderText = "纸高mm", Width = UiLayout.Scale(90) });
