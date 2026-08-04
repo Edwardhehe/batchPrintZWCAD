@@ -69,10 +69,14 @@ public sealed partial class BatchPlotCommands
                 blockName = CadTextExtractor.GetBlockName(blockRef, tr);
                 blockTransform = blockRef.BlockTransform;
                 frameDefinitionId = blockRef.BlockTableRecord;
-                // “可拉伸”与“可见性切换基础图幅”是两个独立特性。这里只检查距离拉伸；
-                // A1/A2/A3 等可见状态仍由下面的复合块名分别入库和匹配。
-                isStretchableBlock = HasStretchDistanceProperty(blockRef);
+                // “可拉伸”与“可见性切换基础图幅”是两个独立特性。这里检查距离拉伸和
+                // 查寻列表（加长列表）定长拉伸；A1/A2/A3 等可见状态仍由下面的复合块名分别入库和匹配。
+                var hasLookupStretch = HasLookupStretchProperty(blockRef);
+                isStretchableBlock = HasStretchDistanceProperty(blockRef) || hasLookupStretch;
                 var hasPaperVisibilityStates = HasVisibilityStateProperty(blockRef);
+                // 求值定义里被隐藏的内层块参照是“可见性切换内层图框”的直接证据，
+                // 与属性名是否叫“可见”无关，自定义属性名的可见性块也能识别。
+                var hasNestedVisibilityStates = HasHiddenNestedBlockReference(tr, blockRef);
 
                 // 纸张候选顺序必须与矩形框批打一致：模型空间优先 1:100、再 1:1；
                 // 布局空间优先 1:1、再 1:100。以所选块实际所属布局判断，不能只看当前 TileMode。
@@ -83,7 +87,11 @@ public sealed partial class BatchPlotCommands
 
                 // 动态块通过可见性状态切换不同尺寸
                 // 入库块名使用“外层块名+内层可见嵌套块名”复合名，变换矩阵取内层嵌套块的
-                if (hasPaperVisibilityStates
+                // 查寻列表拉伸块的外框在外层自身求值定义里，进入内层复合身份会丢掉加长后的实际长度；
+                // 但求值定义里存在被隐藏的内层块参照时，说明是可见性状态在切换内层图框，
+                // 不同可见内层块本质是不同图框，必须按“外层+可见内层”复合名各自独立入库。
+                if ((hasNestedVisibilityStates || !hasLookupStretch)
+                    && hasPaperVisibilityStates
                     && TryGetVisibleNestedBlock(
                         tr,
                         blockRef,
@@ -392,7 +400,7 @@ public sealed partial class BatchPlotCommands
                     nestedName,
                     nested.BlockTransform,
                     nested.BlockTableRecord,
-                    HasStretchDistanceProperty(nested),
+                    HasStretchDistanceProperty(nested) || HasLookupStretchProperty(nested),
                     frameArea));
             }
         }
@@ -417,6 +425,38 @@ public sealed partial class BatchPlotCommands
     }
 
     /// <summary>
+    /// 判断动态块当前求值定义里是否存在被隐藏的内层块参照。存在即说明该块通过可见性状态
+    /// 在内层图框之间切换：不同可见内层块本质是不同图框，必须走“外层+可见内层”复合名
+    /// 分别入库；查寻列表（加长）拉伸块没有这种隐藏内层块，不能因此混入复合身份。
+    /// </summary>
+    private static bool HasHiddenNestedBlockReference(Transaction tr, BlockReference blockRef)
+    {
+        try
+        {
+            if (!blockRef.IsDynamicBlock || blockRef.BlockTableRecord.IsNull)
+            {
+                return false;
+            }
+
+            var definition = (BlockTableRecord)tr.GetObject(blockRef.BlockTableRecord, OpenMode.ForRead);
+            foreach (ObjectId id in definition)
+            {
+                if (tr.GetObject(id, OpenMode.ForRead, false) is BlockReference nested
+                    && !IsEntityVisible(nested))
+                {
+                    return true;
+                }
+            }
+        }
+        catch
+        {
+            // 读取失败时不改变原有判定路径。
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// 判断块参照本身是否带可写的距离参数。距离参数代表自由拉伸能力；可见性参数只负责
     /// A1/A2/A3 等基础图幅切换，绝不能在这里等同为拉伸。
     /// </summary>
@@ -437,6 +477,57 @@ public sealed partial class BatchPlotCommands
                 }
 
                 if (property.UnitsType == DynamicBlockReferencePropertyUnitsType.Distance)
+                {
+                    return true;
+                }
+            }
+        }
+        catch
+        {
+            // 老版本宿主无法读取动态属性时保持固定坐标模式，不能误改普通动态块的锚点。
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// 判断块参照是否带查寻（lookup）类自定义列表属性。这类属性在属性面板里表现为
+    /// “自定义”分组下的下拉列表，常用于“定长拉伸”图框（加长列表），每档对应一个固定
+    /// 加长长度。它们没有距离参数，但必须按可拉伸模板入库，扫描时才能从每个参照各自的
+    /// 求值定义取到加长后的实际外框。显式命名为“可见/Visibility”的字符串列表属于
+    /// 图幅可见性切换，不算查寻拉伸。
+    /// </summary>
+    private static bool HasLookupStretchProperty(BlockReference blockRef)
+    {
+        try
+        {
+            if (!blockRef.IsDynamicBlock)
+            {
+                return false;
+            }
+
+            foreach (DynamicBlockReferenceProperty property in blockRef.DynamicBlockReferencePropertyCollection)
+            {
+                if (property.ReadOnly)
+                {
+                    continue;
+                }
+
+                if (property.UnitsType != DynamicBlockReferencePropertyUnitsType.NoUnits
+                    || property.Value is not string)
+                {
+                    continue;
+                }
+
+                var propertyName = property.PropertyName ?? "";
+                if (propertyName.IndexOf("可见", StringComparison.OrdinalIgnoreCase) >= 0
+                    || propertyName.IndexOf("visibility", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    continue;
+                }
+
+                var allowedValues = property.GetAllowedValues();
+                if (allowedValues != null && allowedValues.Length > 1)
                 {
                     return true;
                 }
