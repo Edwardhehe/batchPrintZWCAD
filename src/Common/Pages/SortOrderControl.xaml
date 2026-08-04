@@ -27,16 +27,30 @@
     <Grid Margin="12,10,12,8">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
         <!-- 标题 -->
-        <TextBlock Grid.Row="0" Text="选择图纸排列顺序" Margin="0,0,0,10"
+        <TextBlock x:Name="DialogTitleText" Grid.Row="0" Text="选择批量打印排序方式" Margin="0,0,0,10"
                    FontWeight="SemiBold" Foreground="#FF222222"/>
 
-        <!-- 两种排序方式并排 -->
-        <Grid Grid.Row="1">
+        <!-- 仅图框块批量打印显示主排序依据；矩形框始终按位置排序。 -->
+        <StackPanel x:Name="SortBasisPanel" Grid.Row="1" Margin="0,0,0,10">
+            <TextBlock Text="排序依据" Margin="0,0,0,5" Foreground="#FF333333"/>
+            <StackPanel Orientation="Horizontal">
+                <RadioButton x:Name="DrawingNumberSortRadio" GroupName="SortBasis" IsChecked="True"
+                             Content="按图号排序" Margin="0,0,24,0"/>
+                <RadioButton x:Name="SpatialSortRadio" GroupName="SortBasis"
+                             Content="按图纸位置排序"/>
+            </StackPanel>
+            <TextBlock Text="按图号排序时，图号和图名都相同的图纸仍按下面的位置顺序排列。"
+                       Foreground="DimGray" FontSize="10" Margin="0,5,0,0" TextWrapping="Wrap"/>
+        </StackPanel>
+
+        <!-- 位置顺序：既用于完整的位置排序，也用于同图号同图名时的兜底排序。 -->
+        <Grid Grid.Row="2">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="*"/>
@@ -110,7 +124,7 @@
         </Grid>
 
         <!-- 按钮行 -->
-        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right"
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right"
                     Margin="0,10,0,0">
             <Button Content="确定" Width="76" Height="26" Click="OnOkClick" Margin="0,0,4,0"/>
             <Button Content="取消" Width="76" Height="26" Click="OnCancelClick"/>

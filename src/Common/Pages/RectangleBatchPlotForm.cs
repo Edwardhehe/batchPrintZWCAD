@@ -84,7 +84,7 @@ public sealed class RectangleBatchPlotForm : Form
 
     private void InitializeComponents()
     {
-        Text = "LA矩形框批量打印 V1.15.0";
+        Text = "LA矩形框批量打印 V1.15.1";
         FormBorderStyle = System.Windows.Forms.FormBorderStyle.Sizable;
         ClientSize = new Size(UiLayout.Scale(900), UiLayout.Scale(520));
         MinimumSize = new Size(UiLayout.Scale(720), UiLayout.Scale(460));
@@ -1814,7 +1814,11 @@ public sealed class RectangleBatchPlotForm : Form
 
     private void ShowSortSettings()
     {
-        using var dialog = new SortOrderDialog(_settings.SortOrderHorizontalFirst);
+        // 矩形框没有图号/图名业务字段，始终只允许选择图纸位置的排列方向。
+        using var dialog = new SortOrderDialog(
+            _settings.SortOrderHorizontalFirst,
+            showSortBasis: false,
+            sortMode: TitleBlockSortMode.Spatial);
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
         _settings.SortOrderHorizontalFirst = dialog.HorizontalFirst;
         AppSettingsStore.Save(_settings);

@@ -19,6 +19,15 @@ public enum LongPaperNameFormat
     Reserved5 = 5,
 }
 
+/// <summary>图框块批量打印的主排序依据。</summary>
+public enum TitleBlockSortMode
+{
+    /// <summary>先按图号、图名排序；两者相同时再按图纸位置排序。</summary>
+    DrawingNumber = 0,
+    /// <summary>完全忽略图号和图名，只按图纸在当前图形中的位置排序。</summary>
+    Spatial = 1
+}
+
 public sealed class DirectoryColumnSetting
 {
     public string Key { get; set; } = "";
@@ -69,6 +78,8 @@ public sealed class AppSettings
     public bool AddFileNameSequence { get; set; }
     public bool LeavePaperMargin { get; set; }
     public double PaperMarginMm { get; set; } = 1;
+    /// <summary>图框块批量打印的主排序依据；矩形框批量打印不读取此设置。</summary>
+    public TitleBlockSortMode TitleBlockBatchSortMode { get; set; } = TitleBlockSortMode.DrawingNumber;
     /// <summary>图框库批量打印空间排序方向：true=从左到右从上到下，false=从上到下从左到右。</summary>
     public bool SortOrderHorizontalFirst { get; set; }
     /// <summary>加长图图名命名格式：分数（配置1）或小数（配置2）等。</summary>
@@ -165,6 +176,13 @@ public static class AppSettingsStore
 
     private static AppSettings Normalize(AppSettings settings)
     {
+        // 旧版 Settings.json 不包含该字段时会得到枚举默认值 DrawingNumber；
+        // 对异常整数再做一次兜底，避免损坏配置让排序行为不可预测。
+        if (!Enum.IsDefined(typeof(TitleBlockSortMode), settings.TitleBlockBatchSortMode))
+        {
+            settings.TitleBlockBatchSortMode = TitleBlockSortMode.DrawingNumber;
+        }
+
         if (settings.PaperMatchToleranceMm <= 0)
         {
             settings.PaperMatchToleranceMm = 1.0;

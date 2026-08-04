@@ -51,6 +51,7 @@ public sealed class BatchPlotForm : Form
     private bool _sequenceOverlayFollowsCurrentJobs;
     private bool _outputDirectoryIsCustom;
     private bool _updatingPrintSelection;
+    private bool _allowDoubleClickTextEdit;
     private List<PlotJob>? _pendingPrintToggleJobs;
     private DrawingNumberReorderDialog? _renumberDialog;
     private Dictionary<PlotJob, string>? _renumberOriginalNumbers;
@@ -79,9 +80,9 @@ public sealed class BatchPlotForm : Form
     private void InitializeComponents()
     {
 #if AUTOCAD
-        Text = "LA图框块批量打印 V1.15.0";
+        Text = "LA图框块批量打印 V1.15.1";
 #else
-        Text = "LA图框块批量打印 V1.15.0";
+        Text = "LA图框块批量打印 V1.15.1";
 #endif
         FormBorderStyle = System.Windows.Forms.FormBorderStyle.Sizable;
         ClientSize = new Size(UiLayout.Scale(900), UiLayout.Scale(520));
@@ -327,6 +328,8 @@ public sealed class BatchPlotForm : Form
         UiLayout.StyleGrid(_grid, Font);
         AddColumns();
         _grid.DataSource = _jobs;
+        _grid.CellBeginEdit += GridCellBeginEdit;
+        _grid.CellDoubleClick += GridCellDoubleClick;
         _grid.CellEndEdit += GridCellEndEdit;
         _grid.CellContentClick += GridCellContentClick;
         _grid.CellValueChanged += GridCellValueChanged;
@@ -377,7 +380,7 @@ public sealed class BatchPlotForm : Form
         sortSettingsButton.Click += (_, _) => ShowSortSettings();
         fileNameSettingsButton.Click += (_, _) => ShowSettingsAtTab(1);
         directorySettingsButton.Click += (_, _) => ShowSettingsAtTab(2);
-        tips.SetToolTip(sortSettingsButton, "选择图框空间排列顺序，并按选定方向重排当前清单。");
+        tips.SetToolTip(sortSettingsButton, "选择按图号或按图纸位置排序，并设置位置排列方向。");
         tips.SetToolTip(fileNameSettingsButton, "配置输出文件名格式、序号位数等，直接跳转到文件名标签页。");
         tips.SetToolTip(directorySettingsButton, "配置图纸目录列宽、字高等，直接跳转到目录标签页。");
         quickBar.Controls.Add(sortSettingsButton);
@@ -430,8 +433,12 @@ public sealed class BatchPlotForm : Form
         });
         _grid.Columns.Add(new DataGridViewCheckBoxColumn { DataPropertyName = nameof(PlotJob.Selected), HeaderText = "打印", Width = UiLayout.Scale(58) });
         _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.DisplayOutputFileName), "PDF文件名", 220));
-        _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.DrawingNumber), "图号", 160, readOnly: false));
-        _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.Title), "图名", 240, readOnly: false));
+        var drawingNumberColumn = MakeTextColumn(nameof(PlotJob.DrawingNumber), "图号", 160, readOnly: false);
+        drawingNumberColumn.ToolTipText = "双击修改图号；对应 DWG 已打开时同步反写 CAD。";
+        _grid.Columns.Add(drawingNumberColumn);
+        var titleColumn = MakeTextColumn(nameof(PlotJob.Title), "图名", 240, readOnly: false);
+        titleColumn.ToolTipText = "双击修改图名；对应 DWG 已打开时同步反写 CAD。";
+        _grid.Columns.Add(titleColumn);
         _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.PaperName), "图幅", 82));
         _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.ScaleText), "比例", 82));
         _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.SizeText), "实际尺寸", 150));
@@ -873,14 +880,8 @@ public sealed class BatchPlotForm : Form
             UpdateAutomaticOutputDirectory();
         }
 
-        var sorted = _jobs
-            .OrderByDescending(x => x.SortPriority)
-            .ThenBy(x => x.DrawingNumber, NaturalStringComparer.Instance)
-            .ThenBy(x => x.Title, StringComparer.CurrentCultureIgnoreCase)
-            .ToList();
-
-        // 图号相同且图名也相同时，按排序设置的空间方向（摆放顺序）作为最终排序依据。
-        sorted = SpatiallyBreakTies(sorted);
+        // 所有会改变清单的入口最终都回到这里，确保表格、红框序号、输出文件名和打印顺序使用同一结果。
+        var sorted = SortTitleBlockJobs(_jobs.ToList());
 
         _jobs.Clear();
         var sequenceDigits = FileNameSanitizer.ResolveSequenceDigits(
@@ -1258,7 +1259,10 @@ public sealed class BatchPlotForm : Form
         _renumberCurrentJobs = currentJobs;
         _renumberOriginalNumbers = currentJobs.ToDictionary(j => j, j => j.DrawingNumber);
         var detectedPrefix = DetectCommonDrawingNumberPrefix(currentJobs);
-        _renumberDialog = new DrawingNumberReorderDialog(currentJobs.Count, detectedPrefix);
+        _renumberDialog = new DrawingNumberReorderDialog(
+            currentJobs.Count,
+            detectedPrefix,
+            _settings.SortOrderHorizontalFirst);
         _renumberDialog.PreviewRequested += PreviewRenumberDrawingNumbers;
         _renumberDialog.FormClosed += RenumberDialogClosed;
         _renumberDialog.Show(this);
@@ -1272,8 +1276,8 @@ public sealed class BatchPlotForm : Form
             return;
         }
 
-        var sorted = SortSpatially(_renumberCurrentJobs, _settings.SortOrderHorizontalFirst);
-        ApplyRenumbering(sorted, _renumberDialog.Prefix, _renumberDialog.Suffix, _renumberDialog.StartNumber);
+        var sorted = SortRenumberJobsByLayout(_renumberCurrentJobs, _renumberDialog.HorizontalFirst);
+        ApplyRenumbering(sorted, _renumberDialog.Prefix, _renumberDialog.Suffix, _renumberDialog.StartNumber, _renumberDialog.Digits);
         _grid.Refresh();
         ShowRenumberPreviewOverlay(sorted);
     }
@@ -1301,14 +1305,17 @@ public sealed class BatchPlotForm : Form
             return;
         }
 
-        var finalSorted = SortSpatially(currentJobs, _settings.SortOrderHorizontalFirst);
-        ApplyRenumbering(finalSorted, dialog.Prefix, dialog.Suffix, dialog.StartNumber);
+        var finalSorted = SortRenumberJobsByLayout(currentJobs, dialog.HorizontalFirst);
+        ApplyRenumbering(finalSorted, dialog.Prefix, dialog.Suffix, dialog.StartNumber, dialog.Digits);
         foreach (var job in currentJobs)
         {
             // 图号重排后，打印顺序应重新按新图号计算，清掉右键“移到第一个”的手动优先级。
             job.SortPriority = 0;
         }
         _grid.Refresh();
+        // 图号重排窗口中的方向同时作为下次默认值，并与其它位置排序入口保持一致。
+        _settings.SortOrderHorizontalFirst = dialog.HorizontalFirst;
+        AppSettingsStore.Save(_settings);
         SortAndRefreshOutputPaths();
         ShowSequenceOverlayForCurrentJobs();
 
@@ -1316,13 +1323,18 @@ public sealed class BatchPlotForm : Form
         var updated = CadTextUpdater.UpdateDrawingNumbers(finalSorted, _currentDocument,
             failure => AppendLog("WARN", failure));
 
-        AppendLog("INFO", $"图号重排完成，{finalSorted.Count} 张图框按" + (_settings.SortOrderHorizontalFirst ? "从左到右、从上到下" : "从上到下、从左到右") + $"排序，已反写 CAD {updated} 处。");
+        AppendLog("INFO", $"图号重排完成，{finalSorted.Count} 张图框按布局顺序、" + (_settings.SortOrderHorizontalFirst ? "从左到右、从上到下" : "从上到下、从左到右") + $"排序，已反写 CAD {updated} 处。");
         dialog.Dispose();
     }
 
-    private static void ApplyRenumbering(IReadOnlyList<PlotJob> sorted, string prefix, string suffix, int start)
+    private static void ApplyRenumbering(IReadOnlyList<PlotJob> sorted, string prefix, string suffix, int start, int digits = 0)
     {
-        var digits = Math.Max(2, (sorted.Count + start - 1).ToString().Length);
+        if (digits <= 0)
+        {
+            var maxNumber = sorted.Count + start - 1;
+            digits = Math.Max(2, maxNumber.ToString().Length);
+        }
+
         for (var i = 0; i < sorted.Count; i++)
         {
             sorted[i].DrawingNumber = prefix + (start + i).ToString($"D{digits}") + suffix;
@@ -1354,10 +1366,74 @@ public sealed class BatchPlotForm : Form
         return common;
     }
 
-    /// <summary>空间排序，与矩形框批量打印共用 SpatialSorter 统一算法。</summary>
-    private static List<PlotJob> SortSpatially(IReadOnlyList<PlotJob> jobs, bool horizontalFirst)
+    /// <summary>
+     /// 图号重排只处理当前 DWG：先按 CAD 布局 TabOrder（模型空间在前）分组，
+    /// 再在每个布局内部按窗口选择的空间方向排序，禁止跨布局直接比较坐标。
+    /// </summary>
+    private List<PlotJob> SortRenumberJobsByLayout(IReadOnlyList<PlotJob> jobs, bool horizontalFirst)
     {
-        return SpatialSorter.Sort(jobs, horizontalFirst);
+        var tabOrders = ReadCurrentLayoutTabOrders();
+        var result = new List<PlotJob>(jobs.Count);
+        var layoutGroups = jobs
+            .GroupBy(job => job.SpaceName ?? "", StringComparer.Ordinal)
+            .OrderBy(group => tabOrders.TryGetValue(group.Key, out var tabOrder) ? tabOrder : int.MaxValue)
+            .ThenBy(group => group.Key, StringComparer.Ordinal);
+
+        foreach (var layoutGroup in layoutGroups)
+        {
+            result.AddRange(SpatialSorter.Sort(layoutGroup.ToList(), horizontalFirst));
+        }
+
+        return result;
+    }
+
+    private Dictionary<string, int> ReadCurrentLayoutTabOrders()
+    {
+        var result = new Dictionary<string, int>(StringComparer.Ordinal);
+        try
+        {
+            using var tr = _currentDocument.Database.TransactionManager.StartTransaction();
+            var blockTable = (BlockTable)tr.GetObject(_currentDocument.Database.BlockTableId, OpenMode.ForRead);
+            foreach (ObjectId recordId in blockTable)
+            {
+                var owner = (BlockTableRecord)tr.GetObject(recordId, OpenMode.ForRead);
+                if (!owner.IsLayout)
+                {
+                    continue;
+                }
+
+                var layout = (Layout)tr.GetObject(owner.LayoutId, OpenMode.ForRead);
+                result[layout.LayoutName] = layout.TabOrder;
+            }
+
+            tr.Commit();
+        }
+        catch (Exception ex)
+        {
+            // 极少数宿主在非命令上下文读取布局失败时，仍按布局名稳定分组，绝不退回跨布局混排。
+            AppendLog("WARN", "读取布局顺序失败，图号重排将按布局名排序: " + ex.Message);
+        }
+
+        return result;
+    }
+
+    /// <summary>按当前图框块排序设置生成最终清单顺序。</summary>
+    private List<PlotJob> SortTitleBlockJobs(IReadOnlyList<PlotJob> jobs)
+    {
+        if (_settings.TitleBlockBatchSortMode == TitleBlockSortMode.Spatial)
+        {
+            // 位置模式不得把图号、图名作为任何级别的排序键；人工“移到第一个”优先级仍保留。
+            return SortSpatialGroups(jobs);
+        }
+
+        var sorted = jobs
+            .OrderByDescending(x => x.SortPriority)
+            .ThenBy(x => x.DrawingNumber, NaturalStringComparer.Instance)
+            .ThenBy(x => x.Title, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+
+        // 图号和图名都相同时，用位置顺序作最后的业务排序依据。
+        return SpatiallyBreakTies(sorted);
     }
 
     /// <summary>
@@ -1383,13 +1459,93 @@ public sealed class BatchPlotForm : Form
             var group = sortedJobs.GetRange(i, j - i);
             if (group.Count > 1)
             {
-                // 空间方向由排序设置控制
-                group = SpatialSorter.Sort(group, _settings.SortOrderHorizontalFirst);
+                // 不同 DWG/布局的坐标系互不相关，只允许在同一源图、同一空间内比较位置。
+                group = SortSpatialGroups(group);
             }
             result.AddRange(group);
             i = j;
         }
         return result;
+    }
+
+    /// <summary>
+    /// 按“源 DWG → 布局 → 图中位置”排序。源文件沿用加入清单的顺序，布局沿用扫描顺序，
+    /// 从而避免把两个不同图形中相同坐标的图框错误地交叉排列。
+    /// </summary>
+    private List<PlotJob> SortSpatialGroups(IReadOnlyList<PlotJob> jobs)
+    {
+        var result = new List<PlotJob>(jobs.Count);
+        foreach (var priorityGroup in jobs
+            .GroupBy(job => job.SortPriority)
+            .OrderByDescending(group => group.Key))
+        {
+            var sourceGroups = priorityGroup
+                .GroupBy(job => GetSourceGroupKey(job.SourceFile), StringComparer.OrdinalIgnoreCase)
+                .OrderBy(group => GetSourceGroupOrder(group.Key))
+                .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase);
+
+            foreach (var sourceGroup in sourceGroups)
+            {
+                // MatchIndex 保留扫描器识别到布局的先后，仅作为跨布局的稳定顺序；
+                // 图号重排另行读取真实 TabOrder，不依赖这里的扫描次序。
+                var spaceGroups = sourceGroup
+                    .GroupBy(job => job.SpaceName ?? "", StringComparer.Ordinal)
+                    .OrderBy(group => group.Min(job => job.MatchIndex))
+                    .ThenBy(group => group.Key, StringComparer.Ordinal);
+
+                foreach (var spaceGroup in spaceGroups)
+                {
+                    result.AddRange(SpatialSorter.Sort(spaceGroup.ToList(), _settings.SortOrderHorizontalFirst));
+                }
+            }
+        }
+
+        return result;
+    }
+
+    private int GetSourceGroupOrder(string sourceFile)
+    {
+        for (var index = 0; index < _selectedDwgFiles.Count; index++)
+        {
+            if (AreSamePath(_selectedDwgFiles[index], sourceFile))
+            {
+                return index;
+            }
+        }
+
+        // 当前图直接扫描时 _selectedDwgFiles 为空，应排在其它无法识别来源的任务之前。
+        if (AreSamePath(_currentDocument.Database.Filename, sourceFile)
+            || string.Equals(_currentDocument.Name, sourceFile, StringComparison.OrdinalIgnoreCase))
+        {
+            return -1;
+        }
+
+        return int.MaxValue;
+    }
+
+    private static string GetSourceGroupKey(string? sourceFile)
+    {
+        if (string.IsNullOrWhiteSpace(sourceFile))
+        {
+            return "";
+        }
+
+        try
+        {
+            return Path.GetFullPath(sourceFile);
+        }
+        catch
+        {
+            return sourceFile?.Trim() ?? "";
+        }
+    }
+
+    private static bool AreSamePath(string? left, string? right)
+    {
+        return string.Equals(
+            GetSourceGroupKey(left),
+            GetSourceGroupKey(right),
+            StringComparison.OrdinalIgnoreCase);
     }
 
     private void ClearJobs()
@@ -1650,28 +1806,23 @@ public sealed class BatchPlotForm : Form
 
     private void ShowSortSettings()
     {
-        using var dialog = new SortOrderDialog(_settings.SortOrderHorizontalFirst);
+        using var dialog = new SortOrderDialog(
+            _settings.SortOrderHorizontalFirst,
+            showSortBasis: true,
+            sortMode: _settings.TitleBlockBatchSortMode);
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
 
-        _settings.SortOrderHorizontalFirst = _settings.SortOrderHorizontalFirst;
+        _settings.TitleBlockBatchSortMode = dialog.SortMode;
+        _settings.SortOrderHorizontalFirst = dialog.HorizontalFirst;
         AppSettingsStore.Save(_settings);
 
-        // 按所选方向对当前清单做空间排序
-        if (_jobs.Count == 0) return;
-        var allJobs = _jobs.ToList();
-        var layoutOrder = allJobs.Select(j => j.SpaceName).Distinct().ToList();
-        var sorted = new System.Collections.Generic.List<PlotJob>();
-        foreach (var space in layoutOrder)
-        {
-            var group = allJobs.Where(j => string.Equals(j.SpaceName, space, StringComparison.Ordinal)).ToList();
-            sorted.AddRange(SpatialSorter.Sort(group, _settings.SortOrderHorizontalFirst));
-        }
-
-        _jobs.Clear();
-        foreach (var job in sorted) _jobs.Add(job);
+        // 最终排序只能经过统一入口，否则位置预排会被随后的图号排序覆盖。
         SortAndRefreshOutputPaths();
+        var modeName = _settings.TitleBlockBatchSortMode == TitleBlockSortMode.Spatial
+            ? "按图纸位置"
+            : "按图号（同号同名按位置）";
         var orderName = _settings.SortOrderHorizontalFirst ? "从左到右，从上到下" : "从上到下，从左到右";
-        AppendLog("INFO", $"已按\"{orderName}\"重排图框顺序。");
+        AppendLog("INFO", $"已按\"{modeName}；{orderName}\"重排图框顺序。");
     }
 
     private void PickDirectorySettingFromCad(
@@ -1768,6 +1919,8 @@ public sealed class BatchPlotForm : Form
         _settings.DirectoryColumns = updated.DirectoryColumns.Select(x => x.Clone()).ToList();
         _settings.LongPaperNameFormat = updated.LongPaperNameFormat;
         _settings.LongPaperSnapToleranceMm = updated.LongPaperSnapToleranceMm;
+        _settings.TitleBlockBatchSortMode = updated.TitleBlockBatchSortMode;
+        _settings.SortOrderHorizontalFirst = updated.SortOrderHorizontalFirst;
         _mergePdfCheckBox.Checked = updated.MergePdf;
     }
 
@@ -2493,6 +2646,46 @@ public sealed class BatchPlotForm : Form
             job.SortPriority = 0;
         }
         SortAndRefreshOutputPaths();
+    }
+
+    private void GridCellBeginEdit(object? sender, DataGridViewCellCancelEventArgs e)
+    {
+        // 图号、图名只能由双击显式进入编辑；单击只负责选中/高亮，避免误触后直接改字。
+        if (IsDrawingIdentityColumn(e.ColumnIndex) && !_allowDoubleClickTextEdit)
+        {
+            e.Cancel = true;
+        }
+    }
+
+    private void GridCellDoubleClick(object? sender, DataGridViewCellEventArgs e)
+    {
+        if (e.RowIndex < 0 || !IsDrawingIdentityColumn(e.ColumnIndex))
+        {
+            return;
+        }
+
+        try
+        {
+            _allowDoubleClickTextEdit = true;
+            _grid.CurrentCell = _grid.Rows[e.RowIndex].Cells[e.ColumnIndex];
+            _grid.BeginEdit(selectAll: true);
+        }
+        finally
+        {
+            // CellBeginEdit 在 BeginEdit 内同步触发，离开后立即收回授权，后续单击仍不能进入编辑。
+            _allowDoubleClickTextEdit = false;
+        }
+    }
+
+    private bool IsDrawingIdentityColumn(int columnIndex)
+    {
+        if (columnIndex < 0 || columnIndex >= _grid.Columns.Count)
+        {
+            return false;
+        }
+
+        var property = _grid.Columns[columnIndex].DataPropertyName;
+        return property == nameof(PlotJob.DrawingNumber) || property == nameof(PlotJob.Title);
     }
 
     private void AppendLog(string level, string message)

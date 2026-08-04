@@ -18,6 +18,10 @@ public sealed partial class DrawingNumberReorderControl : UserControl
     public string Prefix => PrefixBox.Text.Trim();
     public string Suffix => SuffixBox.Text.Trim();
     public int StartNumber => int.TryParse(StartNumberBox.Text, out var v) ? Math.Max(1, Math.Min(9999, v)) : 1;
+    /// <summary>0 = 自动按总张数推断；>0 = 固定位数。</summary>
+    public int Digits => DigitsCombo?.SelectedIndex > 0 ? DigitsCombo.SelectedIndex : 0;
+    /// <summary>true = 从左到右、从上到下；false = 从上到下、从左到右。</summary>
+    public bool HorizontalFirst => LeftToRightRadio.IsChecked == true;
 
     /// <summary>用户点击"预览顺序"时触发。</summary>
     public event Action? PreviewRequested;
@@ -28,18 +32,29 @@ public sealed partial class DrawingNumberReorderControl : UserControl
     /// <summary>用户点击"取消"或关闭窗口时触发。</summary>
     public event Action? CancelRequested;
 
-    public DrawingNumberReorderControl(int jobCount, string detectedPrefix = "")
+    public DrawingNumberReorderControl(int jobCount, string detectedPrefix = "", bool horizontalFirst = false)
     {
         InitializeComponent();
         _jobCount = jobCount;
         PrefixBox.Text = detectedPrefix;
+        if (horizontalFirst)
+            LeftToRightRadio.IsChecked = true;
+        else
+            TopToBottomRadio.IsChecked = true;
+
+        DigitsCombo.Items.Add("自动（按总张数）");
+        for (var d = 1; d <= 6; d++)
+        {
+            DigitsCombo.Items.Add(d + " 位");
+        }
+        DigitsCombo.SelectedIndex = 0;
         UpdatePreview();
     }
 
     private void UpdatePreview()
     {
         // XAML 解析期间 TextChanged 可能先于其他控件创建触发，此时跳过更新。
-        if (PrefixBox == null || SuffixBox == null || StartNumberBox == null || PreviewLabel == null)
+        if (PrefixBox == null || SuffixBox == null || StartNumberBox == null || PreviewLabel == null || DigitsCombo == null)
             return;
 
         var prefix = Prefix;
@@ -47,7 +62,10 @@ public sealed partial class DrawingNumberReorderControl : UserControl
         var start = StartNumber;
         // 同步 TextBox 避免输入非数字后属性返回的不是文本值
         StartNumberBox.Text = start.ToString(CultureInfo.InvariantCulture);
-        var digits = Math.Max(2, (_jobCount + start - 1).ToString().Length);
+        var maxNumber = _jobCount + start - 1;
+        var digits = Digits > 0
+            ? Digits
+            : Math.Max(2, maxNumber.ToString().Length);
         var samples = Math.Min(5, _jobCount);
         var items = new string[samples];
         for (var i = 0; i < samples; i++)
@@ -60,6 +78,7 @@ public sealed partial class DrawingNumberReorderControl : UserControl
     }
 
     private void OnTextChanged(object sender, RoutedEventArgs e) => UpdatePreview();
+    private void OnDigitsChanged(object sender, RoutedEventArgs e) => UpdatePreview();
 
     private void OnStartNumberPreviewTextInput(object sender, TextCompositionEventArgs e)
     {

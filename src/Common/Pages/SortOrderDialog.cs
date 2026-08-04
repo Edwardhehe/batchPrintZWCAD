@@ -14,6 +14,8 @@ public sealed class SortOrderDialog : Form
 
     /// <summary>true = 从左到右，从上到下；false = 从上到下，从左到右。</summary>
     public bool HorizontalFirst => _wpfControl?.HorizontalFirst ?? false;
+    /// <summary>图框块批量打印的主排序依据。</summary>
+    public TitleBlockSortMode SortMode => _wpfControl?.SortMode ?? TitleBlockSortMode.DrawingNumber;
 
     private static bool _wpfInitialized;
 
@@ -25,7 +27,10 @@ public sealed class SortOrderDialog : Form
             new System.Windows.Application();
     }
 
-    public SortOrderDialog(bool horizontalFirst = false)
+    public SortOrderDialog(
+        bool horizontalFirst = false,
+        bool showSortBasis = false,
+        TitleBlockSortMode sortMode = TitleBlockSortMode.DrawingNumber)
     {
         try
         {
@@ -34,10 +39,11 @@ public sealed class SortOrderDialog : Form
             FormBorderStyle = FormBorderStyle.FixedDialog;
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.CenterParent;
-            UiLayout.ConfigureForm(this, 440, 220, 400, 200);
-            ClientSize = new Size(UiLayout.Scale(440), UiLayout.Scale(220));
+            var dialogHeight = showSortBasis ? 300 : 220;
+            UiLayout.ConfigureForm(this, 440, dialogHeight, 400, 200);
+            ClientSize = new Size(UiLayout.Scale(440), UiLayout.Scale(dialogHeight));
 
-            _wpfControl = new SortOrderControl(horizontalFirst);
+            _wpfControl = new SortOrderControl(horizontalFirst, showSortBasis, sortMode);
             _wpfControl.OkRequested += () => { DialogResult = DialogResult.OK; Close(); };
             _wpfControl.CancelRequested += () => { DialogResult = DialogResult.Cancel; Close(); };
 

@@ -6,6 +6,19 @@ using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Windows.Forms;
+#if AUTOCAD
+using Autodesk.AutoCAD.ApplicationServices;
+using Autodesk.AutoCAD.DatabaseServices;
+#if ACAD_CORE
+using CadApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
+#else
+using CadApp = Autodesk.AutoCAD.ApplicationServices.Application;
+#endif
+#else
+using ZwSoft.ZwCAD.ApplicationServices;
+using ZwSoft.ZwCAD.DatabaseServices;
+using CadApp = ZwSoft.ZwCAD.ApplicationServices.Application;
+#endif
 
 namespace ZwcadBatchPlot;
 
@@ -20,6 +33,7 @@ public sealed class TitleBlockLibraryManagerForm : Form
     private bool _dirty;
     private int _sortColumnIndex = -1;
     private ListSortDirection _sortDirection = ListSortDirection.Ascending;
+    private HashSet<string> _presentBlockNames = new(StringComparer.OrdinalIgnoreCase);
 
     public bool LibraryChanged { get; private set; }
 
@@ -124,6 +138,9 @@ public sealed class TitleBlockLibraryManagerForm : Form
         _rowMenu.Opening += (_, e) => e.Cancel = _grid.SelectedRows.Count == 0;
         _grid.ContextMenuStrip = _rowMenu;
 
+        _grid.RowPrePaint += GridRowPrePaint;
+        Activated += (_, _) => RefreshPresentBlocks();
+
         _status.Dock = DockStyle.Bottom;
         _status.Height = Math.Max(UiLayout.Scale(28), Font.Height + UiLayout.Scale(10));
         _status.TextAlign = ContentAlignment.MiddleLeft;
@@ -204,6 +221,7 @@ public sealed class TitleBlockLibraryManagerForm : Form
 
                 RefreshDisplayRows();
                 _dirty = false;
+                RefreshPresentBlocks();
                 RefreshStatus();
             }
             finally
@@ -326,6 +344,72 @@ public sealed class TitleBlockLibraryManagerForm : Form
         finally
         {
             CadWindowFocus.RestoreDialog(this);
+        }
+    }
+
+    private void RefreshPresentBlocks()
+    {
+        _presentBlockNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            var doc = CadApp.DocumentManager.MdiActiveDocument;
+            if (doc == null)
+            {
+                return;
+            }
+
+            using var tr = doc.Database.TransactionManager.StartTransaction();
+            var blockTable = (BlockTable)tr.GetObject(doc.Database.BlockTableId, OpenMode.ForRead);
+            foreach (ObjectId ownerId in blockTable)
+            {
+                var owner = (BlockTableRecord)tr.GetObject(ownerId, OpenMode.ForRead);
+                if (!owner.IsLayout)
+                {
+                    continue;
+                }
+
+                foreach (ObjectId id in owner)
+                {
+                    if (tr.GetObject(id, OpenMode.ForRead, false) is not BlockReference blockRef)
+                    {
+                        continue;
+                    }
+
+                    var blockName = CadTextExtractor.GetBlockName(blockRef, tr);
+                    _presentBlockNames.Add(blockName);
+
+                    if (CadTextExtractor.TryGetVisibleNestedBlockName(tr, blockRef, out var innerName))
+                    {
+                        _presentBlockNames.Add(blockName + "+" + innerName);
+                    }
+                }
+            }
+
+            tr.Commit();
+        }
+        catch
+        {
+            // 无激活文档或图纸不可读时不报错，列表行仅不回显粉色。
+        }
+
+        _grid.Invalidate();
+    }
+
+    private void GridRowPrePaint(object? sender, DataGridViewRowPrePaintEventArgs e)
+    {
+        if (e.RowIndex < 0
+            || _grid.Rows[e.RowIndex].DataBoundItem is not TitleBlockRow row
+            || string.IsNullOrWhiteSpace(row.BlockName)
+            || !_presentBlockNames.Contains(row.BlockName))
+        {
+            return;
+        }
+
+        // 当前 CAD 中已存在的图框整行淡粉色，方便用户快速认出新录入条目
+        using var brush = new SolidBrush(Color.FromArgb(255, 230, 230));
+        for (var col = 0; col < _grid.Columns.Count; col++)
+        {
+            _grid.Rows[e.RowIndex].Cells[col].Style.BackColor = Color.FromArgb(255, 230, 230);
         }
     }
 
