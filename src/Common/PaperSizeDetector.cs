@@ -31,10 +31,19 @@ public static class PaperSizeDetector
         /// <summary>图框库固定纸张的物理高度（毫米）。</summary>
         public double PreferredPaperHeightMm { get; set; }
         /// <summary>
+        /// 可自由拉伸模板的基础图幅，例如 A2+ 只允许按 A2 解释；长边仍按当前实例重新计算。
+        /// </summary>
+        public string PreferredPaperBaseName { get; set; } = "";
+        /// <summary>
         /// 矩形框专用：只用短边匹配标准幅面；长边先按标准尺寸或 1/8 加长模数吸附，
         /// 超过容差时保留实测长边并转为任意动态纸张。
         /// </summary>
         public bool UseRectangleShortSideMatching { get; set; }
+        /// <summary>
+        /// 可自由拉伸图框录入专用：纸张只保存 A1+ 这类基础图幅，
+        /// 具体加长分数和物理尺寸由每个块参照的当前外框重新识别。
+        /// </summary>
+        public bool IncludeGenericDynamicTitleBlockPaper { get; set; }
     }
 
     public static readonly DetectionOptions DefaultDetectionOptions = new();
@@ -140,7 +149,10 @@ public static class PaperSizeDetector
             return FallbackDetect(Math.Abs(width), Math.Abs(height));
         }
 
-        return ToDetection(candidates[0]);
+        var detected = ToDetection(candidates[0]);
+        return options.IncludeGenericDynamicTitleBlockPaper
+            ? ToGenericDynamicTitleBlockPaper(detected)
+            : detected;
     }
 
     public static IReadOnlyList<PaperDetection> DetectCandidates(double width, double height)
@@ -178,7 +190,20 @@ public static class PaperSizeDetector
             filtered.Insert(0, preferred);
         }
 
-        return filtered;
+        if (!options.IncludeGenericDynamicTitleBlockPaper)
+        {
+            return filtered;
+        }
+
+        // 可自由拉伸块只保存基础图幅名，不能让当前实例的 A1+1/2 等长度锁死后续实例。
+        return filtered
+            .Select(ToGenericDynamicTitleBlockPaper)
+            .GroupBy(
+                paper => $"{paper.PaperName}|{paper.ScaleValue:0.########}|{paper.PaperWidthMm:0.##}|{paper.PaperHeightMm:0.##}",
+                StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .Take(12)
+            .ToList();
     }
 
     /// <summary>
@@ -277,6 +302,8 @@ public static class PaperSizeDetector
         return candidates
             // 图框库固定纸张优先：物理尺寸与录入纸张一致的候选排在最前，避免零头误差顶掉录入纸张。
             .OrderBy(x => MatchesPreferredPaper(x, options) ? 0 : 1)
+            // A1+/A2+ 已经明确记录了基础图幅，扫描时只重新判断加长长度，不能换比例猜成 A3/A4。
+            .ThenBy(x => MatchesPreferredPaperBase(x, options) ? 0 : 1)
             // 布局中的物理图框应优先按 1:1 解释，避免 297mm 短边被误判成 A1 的 2:1。
             .ThenBy(x => GetScalePreferenceRank(x.Scale, options))
             .ThenBy(x => x.Score)
@@ -306,6 +333,28 @@ public static class PaperSizeDetector
             Note = best.IsLong
                 ? $"{best.Paper.Name} 加长，{best.Reason}，输出纸张 {paperSizeText}"
                 : $"{best.Paper.Name} 标准图幅，{best.Reason}，输出纸张 {paperSizeText}"
+        };
+    }
+
+    private static PaperDetection ToGenericDynamicTitleBlockPaper(PaperDetection paper)
+    {
+        var plusIndex = paper.PaperName.IndexOf('+');
+        var baseName = plusIndex > 0 ? paper.PaperName.Substring(0, plusIndex) : paper.PaperName;
+        if (!Standards.Any(standard => string.Equals(standard.Name, baseName, StringComparison.OrdinalIgnoreCase)))
+        {
+            return paper;
+        }
+
+        return new PaperDetection
+        {
+            PaperName = baseName + "+",
+            ScaleText = paper.ScaleText,
+            ScaleValue = paper.ScaleValue,
+            IsLong = true,
+            PaperWidthMm = paper.PaperWidthMm,
+            PaperHeightMm = paper.PaperHeightMm,
+            RequiresCustomPaper = paper.RequiresCustomPaper,
+            Note = $"可自由拉伸图框按 {baseName}+ 录入，扫描时再判定实际纸张"
         };
     }
 
@@ -559,6 +608,15 @@ public static class PaperSizeDetector
 
         return Math.Abs(candidate.PaperWidthMm - options.PreferredPaperHeightMm) <= toleranceMm
             && Math.Abs(candidate.PaperHeightMm - options.PreferredPaperWidthMm) <= toleranceMm;
+    }
+
+    private static bool MatchesPreferredPaperBase(PaperCandidate candidate, DetectionOptions options)
+    {
+        return !string.IsNullOrWhiteSpace(options.PreferredPaperBaseName)
+            && string.Equals(
+                candidate.Paper.Name,
+                options.PreferredPaperBaseName,
+                StringComparison.OrdinalIgnoreCase);
     }
 
     private static int GetScalePreferenceRank(double scale, DetectionOptions options)

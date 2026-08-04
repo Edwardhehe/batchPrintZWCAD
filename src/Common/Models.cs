@@ -6,6 +6,9 @@ namespace ZwcadBatchPlot;
 
 public sealed class TitleBlockDefinition
 {
+    /// <summary>可自由拉伸图框：字段以当前打印外框右下角为锚点，扫描时重算当前外框。</summary>
+    public const string DynamicRightBottomCoordinateMode = "FrameRightBottomDynamic";
+
     public string BlockName { get; set; } = "";
     public bool HasPrintRegion { get; set; }
     public string CoordinateMode { get; set; } = "Local";
@@ -79,6 +82,11 @@ public sealed class PlotJob
     public bool IsManualWindow { get; set; }
     public string SourceFile { get; set; } = "";
     public string OutputFileName => Path.GetFileName(OutputPath);
+    /// <summary>
+    /// 界面中显示的最终输出文件名。合并 PDF 时后台会临时改写 OutputPath，
+    /// 此值始终保留用户配置所对应的文件名，避免临时序号出现在表格中。
+    /// </summary>
+    public string DisplayOutputFileName { get; set; } = "";
     public long SortPriority { get; set; }
     public string SpaceName { get; set; } = "";
     public bool IsPaperSpace { get; set; }

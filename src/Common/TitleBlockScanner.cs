@@ -168,7 +168,13 @@ public static class TitleBlockScanner
                 try
                 {
                     coordinateMode = GetCoordinateMode(definition);
-                    referenceFrame = ResolveReferenceFrame(definition, blockRef, effectiveBlockTransform);
+                    referenceFrame = ResolveReferenceFrame(
+                        tr,
+                        definition,
+                        blockRef,
+                        frameDefinitionId,
+                        effectiveBlockTransform,
+                        coordinateMode);
                     extents = ResolveWorldExtents(definition, blockRef, effectiveBlockTransform, coordinateMode, referenceFrame);
                     titleRegion = ResolveLocalRegion(definition.TitleRegion, effectiveBlockTransform, coordinateMode, referenceFrame);
                     numberRegion = ResolveLocalRegion(definition.DrawingNumberRegion, effectiveBlockTransform, coordinateMode, referenceFrame);
@@ -227,9 +233,23 @@ public static class TitleBlockScanner
                 var height = CornerDistance(wcsCorners, 1, 2);
 
                 var detectionOptions = PaperSizeDetector.CreateTitleBlockBatchOptions(effectivePaperToleranceMm, !layout.ModelType, storedSettings.LongPaperSnapToleranceMm);
-                // 图框录入时已要求设置固定纸张：识别候选中物理尺寸与录入纸张一致的优先，
-                // 避免把图框零头误差识别成动态加长纸而偏离图框库纸张。
-                if (definition.PaperWidthMm > 0 && definition.PaperHeightMm > 0)
+                if (IsGenericDynamicPaperName(definition.PaperName))
+                {
+                    // A2+ 中的 A2 是录入时已经确认的基础图幅，扫描只允许重新计算长边。
+                    // 比例由“录入打印范围 CAD 尺寸 / 录入纸张毫米尺寸”反推，不能再套模型空间默认 1:100。
+                    detectionOptions.PreferredPaperBaseName = GetGenericDynamicPaperBaseName(definition.PaperName);
+                    var recordedScale = InferRecordedPaperScale(definition);
+                    if (recordedScale > 0)
+                    {
+                        detectionOptions.PreferredScaleValue = recordedScale;
+                    }
+                }
+
+                // 固定图幅可用入库尺寸消除图框零头误差；A1+/A2+ 是可自由拉伸模板，
+                // 入库宽高只代表录入时那一个实例，绝不能参与扫描候选排序。
+                if (!IsGenericDynamicPaperName(definition.PaperName)
+                    && definition.PaperWidthMm > 0
+                    && definition.PaperHeightMm > 0)
                 {
                     detectionOptions.PreferredPaperWidthMm = definition.PaperWidthMm;
                     detectionOptions.PreferredPaperHeightMm = definition.PaperHeightMm;
@@ -502,6 +522,14 @@ public static class TitleBlockScanner
             return RegionCoordinateMode.Frame;
         }
 
+        if (string.Equals(
+                definition.CoordinateMode,
+                TitleBlockDefinition.DynamicRightBottomCoordinateMode,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return RegionCoordinateMode.FrameRightBottomDynamic;
+        }
+
         return string.Equals(definition.CoordinateMode, "World", StringComparison.OrdinalIgnoreCase)
             ? RegionCoordinateMode.World
             : RegionCoordinateMode.Local;
@@ -514,7 +542,7 @@ public static class TitleBlockScanner
             return ToExtents(definition.PrintRegion);
         }
 
-        if (mode == RegionCoordinateMode.Frame)
+        if (mode == RegionCoordinateMode.Frame || mode == RegionCoordinateMode.FrameRightBottomDynamic)
         {
             return TransformRegion(referenceFrame, effectiveBlockTransform);
         }
@@ -529,6 +557,12 @@ public static class TitleBlockScanner
         if (mode == RegionCoordinateMode.Frame)
         {
             return OffsetRegion(region, referenceFrame.MinX, referenceFrame.MinY);
+        }
+
+
+        if (mode == RegionCoordinateMode.FrameRightBottomDynamic)
+        {
+            return OffsetRegion(region, referenceFrame.MaxX, referenceFrame.MinY);
         }
 
         if (mode == RegionCoordinateMode.Local)
@@ -552,9 +586,35 @@ public static class TitleBlockScanner
             points.Max(p => p.Y));
     }
 
-    private static LocalRectangle ResolveReferenceFrame(TitleBlockDefinition definition, BlockReference blockRef, Matrix3d effectiveBlockTransform)
+    private static LocalRectangle ResolveReferenceFrame(
+        Transaction tr,
+        TitleBlockDefinition definition,
+        BlockReference blockRef,
+        ObjectId frameDefinitionId,
+        Matrix3d effectiveBlockTransform,
+        RegionCoordinateMode mode)
     {
         var hasSavedFrame = HasArea(definition.PrintRegion);
+        if (mode == RegionCoordinateMode.FrameRightBottomDynamic)
+        {
+            // 可拉伸模板的录入 PrintRegion 只是回退值。每个块参照都必须从当前求值定义重新取外框。
+            // 若外层还带 A1/A2/A3 可见性切换，前面的嵌套匹配已先选定当前可见内层定义。
+            if (BlockFrameGeometry.TryGetFrame(
+                    tr,
+                    frameDefinitionId,
+                    out var liveFrame,
+                    out _,
+                    out _))
+            {
+                return liveFrame;
+            }
+
+            if (hasSavedFrame)
+            {
+                return definition.PrintRegion;
+            }
+        }
+
         LocalRectangle blockFrame;
         try
         {
@@ -695,6 +755,13 @@ public static class TitleBlockScanner
             ? detected.PaperName
             : definition.PaperName;
 
+        // A1+ 类不带具体分数的名称是“可变长度模板”，不是固定纸张。
+        // 库中的宽高只用于录入回显，批打时必须完整使用当前外框的检测结果。
+        if (IsGenericDynamicPaperName(name))
+        {
+            return detected;
+        }
+
         if (ShouldPreferDetectedLongPaper(name, definition, detected))
         {
             return new PaperDetection
@@ -754,11 +821,59 @@ public static class TitleBlockScanner
         return paperName.IndexOf('+') > 0;
     }
 
+    private static bool IsGenericDynamicPaperName(string paperName)
+    {
+        return !string.IsNullOrWhiteSpace(paperName)
+               && paperName.EndsWith("+", StringComparison.Ordinal);
+    }
+
+    private static string GetGenericDynamicPaperBaseName(string paperName)
+    {
+        return IsGenericDynamicPaperName(paperName)
+            ? paperName.Substring(0, paperName.Length - 1)
+            : "";
+    }
+
+    /// <summary>
+    /// 图框库没有单独保存比例字段；可拉伸模板可由录入外框尺寸和录入纸张尺寸稳定反推比例。
+    /// 同时比较同向和宽高互换两种解释，以兼容横向/纵向图框。
+    /// </summary>
+    private static double InferRecordedPaperScale(TitleBlockDefinition definition)
+    {
+        if (!definition.PrintRegion.HasArea()
+            || definition.PaperWidthMm <= 0
+            || definition.PaperHeightMm <= 0)
+        {
+            return 0;
+        }
+
+        var frameWidth = Math.Abs(definition.PrintRegion.MaxX - definition.PrintRegion.MinX);
+        var frameHeight = Math.Abs(definition.PrintRegion.MaxY - definition.PrintRegion.MinY);
+        var directX = frameWidth / definition.PaperWidthMm;
+        var directY = frameHeight / definition.PaperHeightMm;
+        var swappedX = frameWidth / definition.PaperHeightMm;
+        var swappedY = frameHeight / definition.PaperWidthMm;
+
+        var directError = RelativeScaleDifference(directX, directY);
+        var swappedError = RelativeScaleDifference(swappedX, swappedY);
+        var scale = directError <= swappedError
+            ? (directX + directY) / 2d
+            : (swappedX + swappedY) / 2d;
+        return double.IsNaN(scale) || double.IsInfinity(scale) || scale <= 0 ? 0 : scale;
+    }
+
+    private static double RelativeScaleDifference(double left, double right)
+    {
+        var denominator = Math.Max(Math.Max(Math.Abs(left), Math.Abs(right)), 1e-9d);
+        return Math.Abs(left - right) / denominator;
+    }
+
     private enum RegionCoordinateMode
     {
         Local,
         World,
-        Frame
+        Frame,
+        FrameRightBottomDynamic
     }
 
     private static void LogScanWarnings(string sourceName, IReadOnlyCollection<string> warnings)

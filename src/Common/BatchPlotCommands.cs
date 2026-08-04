@@ -591,6 +591,31 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
             region.MaxY - referenceFrame.MinY);
     }
 
+    /// <summary>
+    /// 动态加长图框的标题栏通常跟随右边界移动；横向以外框右边、纵向以外框下边存储相对坐标。
+    /// </summary>
+    private static LocalRectangle ToFrameRightBottomRelative(LocalRectangle region, LocalRectangle referenceFrame)
+    {
+        return LocalRectangle.FromPoints(
+            region.MinX - referenceFrame.MaxX,
+            region.MinY - referenceFrame.MinY,
+            region.MaxX - referenceFrame.MaxX,
+            region.MaxY - referenceFrame.MinY);
+    }
+
+    private static bool IsGenericDynamicPaperName(string paperName)
+    {
+        return !string.IsNullOrWhiteSpace(paperName)
+               && paperName.EndsWith("+", StringComparison.Ordinal);
+    }
+
+    private static string GetGenericDynamicPaperBaseName(string paperName)
+    {
+        return IsGenericDynamicPaperName(paperName)
+            ? paperName.Substring(0, paperName.Length - 1)
+            : "";
+    }
+
     private static void AddBlockLog(string message)
     {
         try

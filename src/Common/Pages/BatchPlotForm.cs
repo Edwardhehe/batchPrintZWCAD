@@ -83,8 +83,11 @@ public sealed class BatchPlotForm : Form
 #else
         Text = "LA图框块批量打印 V1.15.0";
 #endif
-        FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
+        FormBorderStyle = System.Windows.Forms.FormBorderStyle.Sizable;
         ClientSize = new Size(UiLayout.Scale(900), UiLayout.Scale(520));
+        MinimumSize = new Size(UiLayout.Scale(720), UiLayout.Scale(460));
+        MaximizeBox = true;
+        SizeGripStyle = SizeGripStyle.Show;
         StartPosition = FormStartPosition.CenterScreen;
         Font = UiLayout.DefaultFont;
         var tips = new ToolTip
@@ -426,7 +429,7 @@ public sealed class BatchPlotForm : Form
             Width = UiLayout.Scale(64)
         });
         _grid.Columns.Add(new DataGridViewCheckBoxColumn { DataPropertyName = nameof(PlotJob.Selected), HeaderText = "打印", Width = UiLayout.Scale(58) });
-        _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.OutputFileName), "PDF文件名", 220));
+        _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.DisplayOutputFileName), "PDF文件名", 220));
         _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.DrawingNumber), "图号", 160, readOnly: false));
         _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.Title), "图名", 240, readOnly: false));
         _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.PaperName), "图幅", 82));
@@ -906,6 +909,8 @@ public sealed class BatchPlotForm : Form
                 var sequenceNumber = _settings.FileNameSequenceStartNumber + index;
                 job.OutputPath = BuildOutputPath(job, sequenceNumber, sequenceDigits, reservedPaths);
             }
+            // 表格显示最终命名结果；合并 PDF 的临时路径不得覆盖这个值。
+            job.DisplayOutputFileName = job.OutputFileName;
             _jobs.Add(job);
         }
 
@@ -1817,26 +1822,13 @@ public sealed class BatchPlotForm : Form
             return;
         }
 
-        _mergedOutputPath = "";
-        if (IsPdfOutput && _mergePdfCheckBox.Checked)
-        {
-            using var mergeDialog = new SaveFileDialog
-            {
-                Filter = "PDF 文件 (*.pdf)|*.pdf",
-                InitialDirectory = Directory.Exists(_outputDirectory.Text) ? _outputDirectory.Text : "",
-                FileName = GetDefaultMergedFileName(),
-                Title = "保存合并 PDF"
-            };
-            if (mergeDialog.ShowDialog(this) != DialogResult.OK)
-            {
-                return;
-            }
-
-            _mergedOutputPath = mergeDialog.FileName;
-        }
-
         SaveCurrentSettings();
         SortAndRefreshOutputPaths();
+        // 保存策略已经决定每张图的最终目录；合并 PDF 直接放到同一目录，
+        // 并使用源 CAD 文件名，不再重复询问用户保存位置。
+        _mergedOutputPath = IsPdfOutput && _mergePdfCheckBox.Checked
+            ? GetAutomaticMergedOutputPath(selected)
+            : "";
         foreach (var directory in selected
                      .Select(job => Path.GetDirectoryName(job.OutputPath))
                      .Where(path => !string.IsNullOrWhiteSpace(path))
@@ -2000,7 +1992,7 @@ public sealed class BatchPlotForm : Form
 
         var outputNameColumn = _grid.Columns
             .Cast<DataGridViewColumn>()
-            .FirstOrDefault(x => string.Equals(x.DataPropertyName, nameof(PlotJob.OutputFileName), StringComparison.Ordinal));
+            .FirstOrDefault(x => string.Equals(x.DataPropertyName, nameof(PlotJob.DisplayOutputFileName), StringComparison.Ordinal));
         if (outputNameColumn != null)
         {
             outputNameColumn.HeaderText = SelectedOutputFormat + "文件名";
@@ -2382,16 +2374,32 @@ public sealed class BatchPlotForm : Form
         }
     }
 
-    private string GetDefaultMergedFileName()
+    private string GetAutomaticMergedOutputPath(IReadOnlyList<PlotJob> selected)
     {
-        var source = _jobs
-            .Where(job => job.Selected)
-            .Select(job => job.SourceFile)
-            .FirstOrDefault(path => !string.IsNullOrWhiteSpace(path));
-        var baseName = string.IsNullOrWhiteSpace(source)
-            ? "合并图纸"
-            : Path.GetFileNameWithoutExtension(source);
-        return FileNameSanitizer.Clean(baseName) + "_合并.pdf";
+        var firstJob = selected.FirstOrDefault();
+        var directory = firstJob == null ? "" : Path.GetDirectoryName(firstJob.OutputPath) ?? "";
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            directory = firstJob == null ? _outputDirectory.Text.Trim() : GetOutputDirectory(firstJob);
+        }
+
+        var source = firstJob?.SourceFile;
+        if (string.IsNullOrWhiteSpace(source))
+        {
+            source = _currentDocument.Database.Filename;
+        }
+        if (string.IsNullOrWhiteSpace(source))
+        {
+            source = _currentDocument.Name;
+        }
+
+        var baseName = FileNameSanitizer.Clean(Path.GetFileNameWithoutExtension(source));
+        if (string.IsNullOrWhiteSpace(baseName))
+        {
+            baseName = "合并图纸";
+        }
+
+        return Path.Combine(directory, baseName + ".pdf");
     }
 
     private static string CreateTemporaryPdfDirectory(string purpose)

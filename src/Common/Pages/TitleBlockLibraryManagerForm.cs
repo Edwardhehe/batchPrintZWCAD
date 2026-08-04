@@ -35,7 +35,9 @@ public sealed class TitleBlockLibraryManagerForm : Form
     {
         Text = "图框信息库管理";
         UiLayout.ConfigureForm(this, 760, 360, 700, 320);
-        FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
+        FormBorderStyle = System.Windows.Forms.FormBorderStyle.Sizable;
+        MaximizeBox = true;
+        SizeGripStyle = SizeGripStyle.Show;
 
         var top = new FlowLayoutPanel
         {

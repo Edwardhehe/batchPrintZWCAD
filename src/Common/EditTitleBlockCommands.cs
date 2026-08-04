@@ -122,8 +122,18 @@ public sealed partial class BatchPlotCommands
                 settings.PaperMatchToleranceMm,
                 match.IsPaperSpace,
                 settings.LongPaperSnapToleranceMm);
-            paperDetectionOptions.PreferredPaperWidthMm = existing.PaperWidthMm;
-            paperDetectionOptions.PreferredPaperHeightMm = existing.PaperHeightMm;
+            paperDetectionOptions.IncludeGenericDynamicTitleBlockPaper =
+                mode == EditCoordinateMode.FrameRightBottomDynamic;
+            if (mode == EditCoordinateMode.FrameRightBottomDynamic)
+            {
+                paperDetectionOptions.PreferredPaperBaseName = GetGenericDynamicPaperBaseName(existing.PaperName);
+            }
+            // 可拉伸模板的录入宽高不是固定纸张，编辑回显时也不能用它压过当前实例的实际外框。
+            if (mode != EditCoordinateMode.FrameRightBottomDynamic)
+            {
+                paperDetectionOptions.PreferredPaperWidthMm = existing.PaperWidthMm;
+                paperDetectionOptions.PreferredPaperHeightMm = existing.PaperHeightMm;
+            }
             var paperOptions = PaperSizeDetector.DetectCandidatesOrFallback(
                     detectedWidth,
                     detectedHeight,
@@ -150,23 +160,26 @@ public sealed partial class BatchPlotCommands
             }
 
             referenceFrame = dialog.ReferenceFrame;
+            var usesVariableLengthTemplate = IsGenericDynamicPaperName(dialog.PaperName);
             var now = DateTime.Now;
             var updated = new TitleBlockDefinition
             {
                 BlockName = existing.BlockName,
                 HasPrintRegion = true,
-                CoordinateMode = "Frame",
+                CoordinateMode = usesVariableLengthTemplate
+                    ? TitleBlockDefinition.DynamicRightBottomCoordinateMode
+                    : "Frame",
                 PrintRegion = referenceFrame,
                 PaperName = dialog.PaperName,
                 PaperWidthMm = dialog.PaperWidthMm,
                 PaperHeightMm = dialog.PaperHeightMm,
-                TitleRegion = ToFrameRelative(dialog.TitleRegion, referenceFrame),
-                DrawingNumberRegion = ToFrameRelative(dialog.DrawingNumberRegion, referenceFrame),
-                DateRegion = ToOptionalFrameRelative(dialog.DateRegion, referenceFrame),
-                RevisionRegion = ToOptionalFrameRelative(dialog.RevisionRegion, referenceFrame),
-                PhaseRegion = ToOptionalFrameRelative(dialog.PhaseRegion, referenceFrame),
-                Info1Region = ToOptionalFrameRelative(dialog.Info1Region, referenceFrame),
-                Info2Region = ToOptionalFrameRelative(dialog.Info2Region, referenceFrame),
+                TitleRegion = ToStoredFrameRelative(dialog.TitleRegion, referenceFrame, usesVariableLengthTemplate),
+                DrawingNumberRegion = ToStoredFrameRelative(dialog.DrawingNumberRegion, referenceFrame, usesVariableLengthTemplate),
+                DateRegion = ToOptionalStoredFrameRelative(dialog.DateRegion, referenceFrame, usesVariableLengthTemplate),
+                RevisionRegion = ToOptionalStoredFrameRelative(dialog.RevisionRegion, referenceFrame, usesVariableLengthTemplate),
+                PhaseRegion = ToOptionalStoredFrameRelative(dialog.PhaseRegion, referenceFrame, usesVariableLengthTemplate),
+                Info1Region = ToOptionalStoredFrameRelative(dialog.Info1Region, referenceFrame, usesVariableLengthTemplate),
+                Info2Region = ToOptionalStoredFrameRelative(dialog.Info2Region, referenceFrame, usesVariableLengthTemplate),
                 CreatedAt = existing.CreatedAt == default ? now : existing.CreatedAt,
                 UpdatedAt = now
             };
@@ -188,9 +201,24 @@ public sealed partial class BatchPlotCommands
         }
     }
 
-    private static LocalRectangle ToOptionalFrameRelative(LocalRectangle region, LocalRectangle referenceFrame)
+    private static LocalRectangle ToOptionalStoredFrameRelative(
+        LocalRectangle region,
+        LocalRectangle referenceFrame,
+        bool useRightBottomAnchor)
     {
-        return region.HasArea() ? ToFrameRelative(region, referenceFrame) : new LocalRectangle();
+        return region.HasArea()
+            ? ToStoredFrameRelative(region, referenceFrame, useRightBottomAnchor)
+            : new LocalRectangle();
+    }
+
+    private static LocalRectangle ToStoredFrameRelative(
+        LocalRectangle region,
+        LocalRectangle referenceFrame,
+        bool useRightBottomAnchor)
+    {
+        return useRightBottomAnchor
+            ? ToFrameRightBottomRelative(region, referenceFrame)
+            : ToFrameRelative(region, referenceFrame);
     }
 
     private static EditCoordinateMode GetEditCoordinateMode(TitleBlockDefinition definition)
@@ -198,6 +226,14 @@ public sealed partial class BatchPlotCommands
         if (string.Equals(definition.CoordinateMode, "Frame", StringComparison.OrdinalIgnoreCase))
         {
             return EditCoordinateMode.Frame;
+        }
+
+        if (string.Equals(
+                definition.CoordinateMode,
+                TitleBlockDefinition.DynamicRightBottomCoordinateMode,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return EditCoordinateMode.FrameRightBottomDynamic;
         }
 
         return string.Equals(definition.CoordinateMode, "World", StringComparison.OrdinalIgnoreCase)
@@ -212,6 +248,17 @@ public sealed partial class BatchPlotCommands
         EditCoordinateMode mode,
         Matrix3d inverse)
     {
+        if (mode == EditCoordinateMode.FrameRightBottomDynamic
+            && BlockFrameGeometry.TryGetFrame(
+                database,
+                match.FrameDefinitionId,
+                out var liveFrame,
+                out _,
+                out _))
+        {
+            return liveFrame;
+        }
+
         if (definition.HasPrintRegion && definition.PrintRegion.HasArea())
         {
             return mode == EditCoordinateMode.World
@@ -254,6 +301,15 @@ public sealed partial class BatchPlotCommands
                 storedRegion.MinX + referenceFrame.MinX,
                 storedRegion.MinY + referenceFrame.MinY,
                 storedRegion.MaxX + referenceFrame.MinX,
+                storedRegion.MaxY + referenceFrame.MinY);
+        }
+
+        if (mode == EditCoordinateMode.FrameRightBottomDynamic)
+        {
+            return LocalRectangle.FromPoints(
+                storedRegion.MinX + referenceFrame.MaxX,
+                storedRegion.MinY + referenceFrame.MinY,
+                storedRegion.MaxX + referenceFrame.MaxX,
                 storedRegion.MaxY + referenceFrame.MinY);
         }
 
@@ -489,6 +545,7 @@ public sealed partial class BatchPlotCommands
     {
         Local,
         World,
-        Frame
+        Frame,
+        FrameRightBottomDynamic
     }
 }

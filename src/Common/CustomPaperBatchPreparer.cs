@@ -48,8 +48,14 @@ public static class CustomPaperBatchPreparer
                 job.EffectivePaperHeightMm = 0;
             }
 
+            // 加长纸即使精确命中 1/8 模数，也不代表当前绘图器已预置该长度。
+            // 例如随包 ZWCAD PMP 的 A1 只预置到 2523x594（3 倍长），
+            // 2943.5x594 和 3364x594 虽然是合法模数纸，仍必须在打印前补入 PMP。
+            // RegisterCustomPapers 会复用已有尺寸，因此让所有加长纸统一经过注册入口最稳妥。
             job.RequiresCustomPaperRegistration =
-                job.DetectedRequiresCustomPaperRegistration || expandsPaper;
+                job.DetectedRequiresCustomPaperRegistration
+                || IsLongPaper(job)
+                || expandsPaper;
             job.RequireExactPaperSize = false;
             job.UseExactWindowScale = false;
             job.CustomPaperWasAdded = false;
@@ -180,5 +186,13 @@ public static class CustomPaperBatchPreparer
             Registrations = registrations,
             AttachmentMessage = attachmentMessage
         };
+    }
+
+    private static bool IsLongPaper(PlotJob job)
+    {
+        return job.PaperWidthMm > 0d
+               && job.PaperHeightMm > 0d
+               && !string.IsNullOrWhiteSpace(job.PaperName)
+               && job.PaperName.IndexOf('+') > 0;
     }
 }

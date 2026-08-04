@@ -166,7 +166,7 @@ public static class CadTextUpdater
         }
 
         var coordinateMode = GetCoordinateMode(definition);
-        var referenceFrame = ResolveReferenceFrame(definition, blockRef);
+        var referenceFrame = ResolveReferenceFrame(tr, definition, blockRef, coordinateMode);
         var titleRegion = ResolveLocalRegion(definition.TitleRegion, blockRef.BlockTransform, coordinateMode, referenceFrame);
         var numberRegion = ResolveLocalRegion(definition.DrawingNumberRegion, blockRef.BlockTransform, coordinateMode, referenceFrame);
 
@@ -298,7 +298,7 @@ public static class CadTextUpdater
             && string.Equals(blockRef.Handle.ToString(), job.BlockHandle, StringComparison.OrdinalIgnoreCase));
         var byOriginalText = matches.FirstOrDefault(blockRef =>
         {
-            var referenceFrame = ResolveReferenceFrame(definition, blockRef);
+            var referenceFrame = ResolveReferenceFrame(tr, definition, blockRef, coordinateMode);
             var titleRegion = ResolveLocalRegion(definition.TitleRegion, blockRef.BlockTransform, coordinateMode, referenceFrame);
             var numberRegion = ResolveLocalRegion(definition.DrawingNumberRegion, blockRef.BlockTransform, coordinateMode, referenceFrame);
             return string.Equals(CadTextExtractor.ExtractRegionText(tr, blockRef, owner, numberRegion), job.CadDrawingNumber, StringComparison.Ordinal)
@@ -410,6 +410,14 @@ public static class CadTextUpdater
             return RegionCoordinateMode.Frame;
         }
 
+        if (string.Equals(
+                definition.CoordinateMode,
+                TitleBlockDefinition.DynamicRightBottomCoordinateMode,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return RegionCoordinateMode.FrameRightBottomDynamic;
+        }
+
         return string.Equals(definition.CoordinateMode, "World", StringComparison.OrdinalIgnoreCase)
             ? RegionCoordinateMode.World
             : RegionCoordinateMode.Local;
@@ -420,6 +428,11 @@ public static class CadTextUpdater
         if (mode == RegionCoordinateMode.Frame)
         {
             return OffsetRegion(region, referenceFrame.MinX, referenceFrame.MinY);
+        }
+
+        if (mode == RegionCoordinateMode.FrameRightBottomDynamic)
+        {
+            return OffsetRegion(region, referenceFrame.MaxX, referenceFrame.MinY);
         }
 
         if (mode == RegionCoordinateMode.Local)
@@ -443,8 +456,23 @@ public static class CadTextUpdater
             points.Max(p => p.Y));
     }
 
-    private static LocalRectangle ResolveReferenceFrame(TitleBlockDefinition definition, BlockReference blockRef)
+    private static LocalRectangle ResolveReferenceFrame(
+        Transaction tr,
+        TitleBlockDefinition definition,
+        BlockReference blockRef,
+        RegionCoordinateMode mode)
     {
+        if (mode == RegionCoordinateMode.FrameRightBottomDynamic
+            && BlockFrameGeometry.TryGetFrame(
+                tr,
+                blockRef.BlockTableRecord,
+                out var liveFrame,
+                out _,
+                out _))
+        {
+            return liveFrame;
+        }
+
         var blockFrame = TransformExtents(blockRef.GeometricExtents, blockRef.BlockTransform.Inverse());
         if (HasArea(definition.PrintRegion))
         {
@@ -552,6 +580,7 @@ public static class CadTextUpdater
     {
         Local,
         World,
-        Frame
+        Frame,
+        FrameRightBottomDynamic
     }
 }
