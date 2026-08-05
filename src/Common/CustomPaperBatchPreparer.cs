@@ -135,11 +135,13 @@ public static class CustomPaperBatchPreparer
         var registrations = PmpCustomPaper.RegisterCustomPapers(installedPmp, requests)
             ?? throw new InvalidOperationException(
                 $"{pmpFileName} 批量注册 {outputKind} 正负留白纸张失败，已停止打印，避免回退到错误纸张。");
-        var anyAdded = registrations.Any(registration => registration.WasAdded);
-        var forceDeviceReload = anyAdded;
+        var forceDeviceReload = registrations.Any(registration => registration.WasAdded);
         var attachmentMessage = "";
 
 #if AUTOCAD
+        // AutoCAD 会在会话内缓存设备介质目录。即使纸张已存在于 PMP，也必须让每批首张重新加载设备，
+        // 否则换图或换批次复用自定义纸时可能继续使用旧目录。中望保留原来的“仅新增时刷新”逻辑。
+        forceDeviceReload = registrations.Count > 0;
         // PDF 的跨版本 PC3 需要现有兼容层修正 PMP 关联。DWF PC3 继承其原生驱动，
         // 不能套用 DWG To PDF 的驱动路径；它只需保持安装时建立的 LA_dwf.pmp 关联。
         if (isPdfDevice)

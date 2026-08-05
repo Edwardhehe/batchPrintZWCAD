@@ -376,6 +376,21 @@ public static class PlotterService
                     MediaMatchingPolicy = MatchingPolicy.MatchEnabled
                 }.Validate(info);
 
+                if (job.RequireExactPaperSize
+                    && job.UseExactWindowScale
+                    && !IsRasterPlotDevice(deviceName)
+                    && settings.PlotPaperUnits == PlotPaperUnit.Inches)
+                {
+                    // AutoCAD 2024 会在 PlotInfo 校验阶段把部分毫米自定义介质重新匹配为英寸介质。
+                    // 必须按最终单位重写比例并重新居中，否则毫米分子会被按英寸解释，内容放大 25.4 倍。
+                    ConfigurePlotScale(validator, settings, window, job, deviceName);
+                    ResetAndCenterPlot(validator, settings);
+                    new PlotInfoValidator
+                    {
+                        MediaMatchingPolicy = MatchingPolicy.MatchEnabled
+                    }.Validate(info);
+                }
+
                 return new ValidatedPlot
                 {
                     Info = info,
@@ -440,11 +455,15 @@ public static class PlotterService
         }
 
         EnsureRequiredMediaSize(settings, media, deviceName);
+        // AutoCAD 2024 的部分布局在尚无有效窗口时直接切换为 Window 会抛 eInvalidInput。
+        // 必须先写入 DCS 窗口，再切换打印类型；柱状图 299x212mm 自定义纸已做宿主验证。
         validator.SetPlotWindowArea(settings, window);
         validator.SetPlotType(settings, Autodesk.AutoCAD.DatabaseServices.PlotType.Window);
         ConfigurePlotScale(validator, settings, window, job, deviceName);
-        validator.SetPlotCentered(settings, true);
         validator.SetPlotRotation(settings, rotation);
+        // 初次校验前只按最终旋转居中。部分 90° 自定义介质此时不接受显式 SetPlotOrigin(0,0)。
+        // 若校验后单位被改成 Inches，再在上面的二次校验分支统一清零原点并重新居中。
+        validator.SetPlotCentered(settings, true);
 
         if (!string.IsNullOrWhiteSpace(styleSheet))
         {
@@ -488,7 +507,7 @@ public static class PlotterService
                 throw new InvalidOperationException("纸张或打印窗口尺寸无效，无法计算扩大纸张留白比例。");
             var scale = originalShortMm / windowShortSide;
             validator.SetUseStandardScale(settings, false);
-            validator.SetCustomPrintScale(settings, new CustomScale(scale, 1d));
+            validator.SetCustomPrintScale(settings, new CustomScale(ToPlotPaperUnitScale(settings, scale), 1d));
             return;
         }
 
@@ -505,7 +524,7 @@ public static class PlotterService
         // 保持原图框窗口不变，只缩小打印比例。扩大窗口会把图框外的相邻对象带入 PDF。
         var scaleReduced = usableShortSide / windowShort;
         validator.SetUseStandardScale(settings, false);
-        validator.SetCustomPrintScale(settings, new CustomScale(scaleReduced, 1d));
+        validator.SetCustomPrintScale(settings, new CustomScale(ToPlotPaperUnitScale(settings, scaleReduced), 1d));
     }
 
     private static void SetExactWindowScale(
@@ -526,7 +545,23 @@ public static class PlotterService
 
         var scale = Math.Min(paperLong / windowLong, paperShort / windowShort);
         validator.SetUseStandardScale(settings, false);
-        validator.SetCustomPrintScale(settings, new CustomScale(scale, 1d));
+        validator.SetCustomPrintScale(settings, new CustomScale(ToPlotPaperUnitScale(settings, scale), 1d));
+    }
+
+    private static double ToPlotPaperUnitScale(PlotSettings settings, double millimetersPerDrawingUnit)
+    {
+        // CustomScale 分子服从最终 PlotPaperUnits。部分自定义 PC3 虽显示毫米尺寸，AutoCAD 校验后仍使用 Inches。
+        return settings.PlotPaperUnits == PlotPaperUnit.Inches
+            ? millimetersPerDrawingUnit / 25.4d
+            : millimetersPerDrawingUnit;
+    }
+
+    private static void ResetAndCenterPlot(PlotSettingsValidator validator, PlotSettings settings)
+    {
+        // CopyFrom(layout) 可能带入旧偏移；旋转、比例和窗口全部确定后再清零并居中。
+        validator.SetPlotCentered(settings, false);
+        validator.SetPlotOrigin(settings, Point2d.Origin);
+        validator.SetPlotCentered(settings, true);
     }
 
     private static MediaChoice ChooseMedia(
@@ -659,6 +694,7 @@ public static class PlotterService
             {
                 // PMP 是 PC3 的附属配置。先让 AutoCAD 全局重新枚举 PC3，再刷新当前 PlotSettings。
                 PlotConfigManager.RefreshList(RefreshCode.RefreshPC3DevicesList);
+                PlotConfigManager.SetCurrentConfig(Path.GetFileName(deviceName)).RefreshMediaNameList();
             }
             catch
             {
