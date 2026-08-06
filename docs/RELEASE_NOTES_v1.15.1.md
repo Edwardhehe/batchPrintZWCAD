@@ -25,6 +25,6 @@
 
 ## 本地发布包
 
-- `ZwcadBatchPlot-v1.15.1.zip`
-- `AcadBatchPlot-AutoCAD2015-2024-v1.15.1.zip`
-- `AcadBatchPlot-AutoCAD2025-2027-v1.15.1.zip`
+- `LA批打印-ZWCAD-v1.15.1.zip`
+- `LA批打印-AutoCAD2015-2024-v1.15.1.zip`
+- `LA批打印-AutoCAD2025-2027-v1.15.1.zip`

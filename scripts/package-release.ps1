@@ -111,7 +111,7 @@ try {
 
     Add-ReleasePackage `
         -FolderName 'ZWCAD' `
-        -ArchiveName "ZwcadBatchPlot-v$Version.zip" `
+        -ArchiveName "LA批打印-ZWCAD-v$Version.zip" `
         -BuildOutput $zwcadOutput `
         -MainDll 'BatchPlotter.dll' `
         -InstallerSource (Join-Path $root 'installer')
@@ -119,7 +119,7 @@ try {
     # AutoCAD 2015-2024 共用同一个 net48 DLL，只生成一个完整兼容包。
     Add-ReleasePackage `
         -FolderName 'AutoCAD2015-2024' `
-        -ArchiveName "AcadBatchPlot-AutoCAD2015-2024-v$Version.zip" `
+        -ArchiveName "LA批打印-AutoCAD2015-2024-v$Version.zip" `
         -BuildOutput $legacyAcadOutput `
         -MainDll 'AcadBatchPlot.dll' `
         -InstallerSource (Join-Path $root 'installer_acad')
@@ -127,7 +127,7 @@ try {
     # AutoCAD 2025-2027 共用同一个 .NET 8 Core DLL 和运行时依赖。
     Add-ReleasePackage `
         -FolderName 'AutoCAD2025-2027' `
-        -ArchiveName "AcadBatchPlot-AutoCAD2025-2027-v$Version.zip" `
+        -ArchiveName "LA批打印-AutoCAD2025-2027-v$Version.zip" `
         -BuildOutput $coreAcadOutput `
         -MainDll 'AcadBatchPlot.Core.dll' `
         -InstallerSource (Join-Path $root 'installer_acad')
