@@ -1087,7 +1087,8 @@ public static class AcadPlotterInstaller
             new PaperSpec { Name = "A1", Width = 841, Height = 594 },
             new PaperSpec { Name = "A0", Width = 1189, Height = 841 }
         };
-        var multipliers = Enumerable.Range(8, 17).Select(unit => unit / 8d);
+        // 覆盖 1L～4L；A1+3 等图幅的总长为基础图幅 4 倍，3L 上限会因长宽比不足产生留白。
+        var multipliers = Enumerable.Range(8, 25).Select(unit => unit / 8d);
 
         foreach (var paper in basePapers)
         {

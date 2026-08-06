@@ -422,6 +422,7 @@ public static class PlotterService
             var layout = FindLayoutForJob(tr, db, job);
             using var plotSettings = new PlotSettings(layout.ModelType);
             plotSettings.CopyFrom(layout);
+            var plotWindow = GetPlotWindow(job, plotDocument);
 
             var validator = PlotSettingsValidator.Current;
             var media = job.RequireExactPaperSize
@@ -442,7 +443,7 @@ public static class PlotterService
             }
             TrySetPlotPaperUnits(validator, plotSettings, PlotPaperUnit.Millimeters);
 
-            media ??= SelectMedia(validator, plotSettings, job, settings, deviceName, layout.ModelType);
+            media ??= SelectMedia(validator, plotSettings, job, settings, deviceName, layout.ModelType, plotWindow);
             if (media == null)
             {
                 var allMedia = validator.GetCanonicalMediaNameList(plotSettings).Cast<string>().ToList();
@@ -458,12 +459,11 @@ public static class PlotterService
                 validator.SetCurrentStyleSheet(plotSettings, styleSheet);
             }
 
-            var plotWindow = GetPlotWindow(job, plotDocument);
             validator.SetPlotWindowArea(plotSettings, plotWindow);
             validator.SetPlotType(plotSettings, ZwSoft.ZwCAD.DatabaseServices.PlotType.Window);
             ConfigurePlotScale(validator, plotSettings, plotWindow, job);
             validator.SetPlotCentered(plotSettings, true);
-            validator.SetPlotRotation(plotSettings, DetectRotation(media, job, plotWindow));
+            validator.SetPlotRotation(plotSettings, DetectRotation(media, job, plotWindow, deviceName));
 
             var plotInfo = new PlotInfo
             {
@@ -762,6 +762,7 @@ public static class PlotterService
             var layout = FindLayoutForJob(tr, db, job);
             using var plotSettings = new PlotSettings(layout.ModelType);
             plotSettings.CopyFrom(layout);
+            var plotWindow = GetPlotWindow(job, plotDocument);
 
             var validator = PlotSettingsValidator.Current;
             var media = job.RequireExactPaperSize
@@ -782,7 +783,7 @@ public static class PlotterService
             }
             TrySetPlotPaperUnits(validator, plotSettings, PlotPaperUnit.Millimeters);
 
-            media ??= SelectMedia(validator, plotSettings, job, singleSettings, deviceName, layout.ModelType);
+            media ??= SelectMedia(validator, plotSettings, job, singleSettings, deviceName, layout.ModelType, plotWindow);
             if (media == null)
             {
                 throw new InvalidOperationException($"未找到匹配 {job.PaperSizeText} 的打印纸张。");
@@ -795,12 +796,11 @@ public static class PlotterService
                 validator.SetCurrentStyleSheet(plotSettings, styleSheet);
             }
 
-            var plotWindow = GetPlotWindow(job, plotDocument);
             validator.SetPlotWindowArea(plotSettings, plotWindow);
             validator.SetPlotType(plotSettings, ZwSoft.ZwCAD.DatabaseServices.PlotType.Window);
             ConfigurePlotScale(validator, plotSettings, plotWindow, job);
             validator.SetPlotCentered(plotSettings, true);
-            validator.SetPlotRotation(plotSettings, DetectRotation(media, job, plotWindow));
+            validator.SetPlotRotation(plotSettings, DetectRotation(media, job, plotWindow, deviceName));
 
             var plotInfo = new PlotInfo
             {
@@ -979,21 +979,33 @@ public static class PlotterService
         PlotJob job,
         AppSettings settings,
         string deviceName,
-        bool modelType)
+        bool modelType,
+        Extents2d rasterWindow)
     {
         var media = GetMediaNames(validator, plotSettings, deviceName, modelType);
-        return SelectMediaFromNames(media, job, settings, deviceName);
+        var windowWidth = Math.Abs(rasterWindow.MaxPoint.X - rasterWindow.MinPoint.X);
+        var windowHeight = Math.Abs(rasterWindow.MaxPoint.Y - rasterWindow.MinPoint.Y);
+        return SelectMediaFromNames(media, job, settings, deviceName, windowWidth, windowHeight);
     }
 
     private static MediaSelection? SelectMediaFromNames(
         IReadOnlyList<string> media,
         PlotJob job,
         AppSettings settings,
-        string deviceName)
+        string deviceName,
+        double rasterWindowWidth = 0d,
+        double rasterWindowHeight = 0d)
     {
         if (media.Count == 0)
         {
             return null;
+        }
+
+        if (IsRasterPlotDevice(deviceName))
+        {
+            RasterPlotOrientation.GetDcsOrientedPaperSize(
+                job, rasterWindowWidth, rasterWindowHeight, out var rasterWidth, out var rasterHeight);
+            return FindRasterMediaByAspectRatio(media, rasterWidth, rasterHeight);
         }
 
         var tolerance = job.RequireExactPaperSize
@@ -1035,9 +1047,7 @@ public static class PlotterService
             }
         }
 
-        return IsRasterPlotDevice(deviceName)
-            ? FindRasterMediaByAspectRatio(media, job.PaperWidthMm, job.PaperHeightMm)
-            : null;
+        return null;
     }
 
     private static MediaSelection? FindRasterMediaByAspectRatio(
@@ -1068,6 +1078,8 @@ public static class PlotterService
                      / Math.Min(item.Size.Value.Width, item.Size.Value.Height)) / targetAspect))
             })
             .OrderBy(item => item.AspectError)
+            // 同比例介质优先选择与 DCS 窗口相同的方向；只有设备缺少该方向时才旋转。
+            .ThenBy(item => (item.Width >= item.Height) == (targetWidth >= targetHeight) ? 0 : 1)
             .ThenByDescending(item => item.Width * item.Height)
             .Select(item => new MediaSelection
             {
@@ -1270,11 +1282,21 @@ public static class PlotterService
             + "已停止打印，禁止生成错误页幅。");
     }
 
-    private static PlotRotation DetectRotation(MediaSelection? media, PlotJob job, Extents2d window)
+    private static PlotRotation DetectRotation(
+        MediaSelection? media,
+        PlotJob job,
+        Extents2d window,
+        string deviceName)
     {
         var paperRotation = media?.NeedsRotation == true
             ? PlotRotation.Degrees090
             : PlotRotation.Degrees000;
+        if (IsRasterPlotDevice(deviceName))
+        {
+            // 栅格目标方向来自 PlotWindowArea 使用的同一 DCS 窗口，禁止再用 WCS 或默认纸张方向翻转。
+            return paperRotation;
+        }
+
         // 扩大纸张模式下以有效尺寸（含留白）判断横竖方向，保证与实际纸张方向一致。
         var paperWidth = job.EffectivePaperWidthMm > 0 ? job.EffectivePaperWidthMm : job.PaperWidthMm;
         var paperHeight = job.EffectivePaperHeightMm > 0 ? job.EffectivePaperHeightMm : job.PaperHeightMm;
@@ -1293,6 +1315,11 @@ public static class PlotterService
             return paperRotation;
         }
 
+        return ToggleQuarterTurn(paperRotation);
+    }
+
+    private static PlotRotation ToggleQuarterTurn(PlotRotation paperRotation)
+    {
         return paperRotation == PlotRotation.Degrees090
             ? PlotRotation.Degrees000
             : PlotRotation.Degrees090;

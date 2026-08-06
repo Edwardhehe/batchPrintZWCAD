@@ -352,11 +352,11 @@ public static class PlotterService
         string styleSheet)
     {
         var validator = PlotSettingsValidator.Current;
-        var media = ChooseMedia(validator, layout, deviceName, job, out var usedCachedCatalog);
+        var media = ChooseMedia(validator, layout, deviceName, job, window, out var usedCachedCatalog);
         media.FromCachedCatalog = usedCachedCatalog;
         var errors = new List<string>();
 
-        var preferredRotation = ResolveWindowRotation(media.PreferredRotation, job, window);
+        var preferredRotation = ResolvePlotRotation(deviceName, media.PreferredRotation, job, window);
         foreach (var rotation in RotationOrder(preferredRotation))
         {
             var settings = new PlotSettings(layout.ModelType);
@@ -569,6 +569,7 @@ public static class PlotterService
         Layout layout,
         string deviceName,
         PlotJob job,
+        Extents2d window,
         out bool usedCachedCatalog)
     {
         var catalog = GetMediaCatalog(
@@ -603,6 +604,16 @@ public static class PlotterService
                 PreferredRotation = rotatedError < directError ? PlotRotation.Degrees090 : PlotRotation.Degrees000
             };
         }).ToList();
+
+        if (IsRasterPlotDevice(deviceName))
+        {
+            var windowWidth = Math.Abs(window.MaxPoint.X - window.MinPoint.X);
+            var windowHeight = Math.Abs(window.MaxPoint.Y - window.MinPoint.Y);
+            RasterPlotOrientation.GetDcsOrientedPaperSize(
+                job, windowWidth, windowHeight, out var rasterWidth, out var rasterHeight);
+            return BestRasterMedia(choices, rasterWidth, rasterHeight)
+                   ?? throw new InvalidOperationException($"栅格输出设备没有可用像素介质: {deviceName}");
+        }
 
         var matchTolerance = job.RequireExactPaperSize ? ExactMediaToleranceMm : MediaMatchToleranceMm;
         var exact = choices
@@ -640,12 +651,6 @@ public static class PlotterService
         if (exact != null)
         {
             return exact;
-        }
-
-        if (IsRasterPlotDevice(deviceName))
-        {
-            return BestRasterMedia(choices, targetWidth, targetHeight)
-                   ?? throw new InvalidOperationException($"栅格输出设备没有可用像素介质: {deviceName}");
         }
 
         if (IsLongPaperName(job.PaperName ?? "") && targetWidth > 0 && targetHeight > 0)
@@ -841,6 +846,8 @@ public static class PlotterService
             .OrderBy(choice => Math.Abs(Math.Log(
                 (Math.Max(choice.WidthMm, choice.HeightMm)
                  / Math.Min(choice.WidthMm, choice.HeightMm)) / targetAspect)))
+            // 相同长宽比通常同时存在横版和竖版；先选与 DCS 窗口同方向的像素画布。
+            .ThenBy(choice => (choice.WidthMm >= choice.HeightMm) == (targetWidth >= targetHeight) ? 0 : 1)
             .ThenByDescending(choice => choice.WidthMm * choice.HeightMm)
             .Select(choice =>
             {
@@ -1213,6 +1220,21 @@ public static class PlotterService
         }
     }
 
+    private static PlotRotation ResolvePlotRotation(
+        string deviceName,
+        PlotRotation paperRotation,
+        PlotJob job,
+        Extents2d window)
+    {
+        if (IsRasterPlotDevice(deviceName))
+        {
+            // 栅格介质已按 DCS 窗口方向选择；这里只保留设备缺少对应方向时的兜底旋转。
+            return paperRotation;
+        }
+
+        return ResolveWindowRotation(paperRotation, job, window);
+    }
+
     private static PlotRotation ResolveWindowRotation(
         PlotRotation paperRotation,
         PlotJob job,
@@ -1235,6 +1257,11 @@ public static class PlotterService
             return paperRotation;
         }
 
+        return ToggleQuarterTurn(paperRotation);
+    }
+
+    private static PlotRotation ToggleQuarterTurn(PlotRotation paperRotation)
+    {
         return paperRotation switch
         {
             PlotRotation.Degrees000 => PlotRotation.Degrees090,

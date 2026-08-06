@@ -118,6 +118,26 @@ public sealed partial class BatchPlotCommands
 
             AddBlockLog("Selected block: " + blockName);
 
+            // 动态块的可见性状态可能形成“外层块名+内层块名”的复合身份，
+            // 必须等最终身份解析完成后立即检查重名；若用户不覆盖，就不要继续识别外框和录入字段。
+            var existingLibrary = TitleBlockLibraryStore.Load();
+            if (existingLibrary.Blocks.Any(x =>
+                    string.Equals(x.BlockName, blockName, StringComparison.OrdinalIgnoreCase)))
+            {
+                var overwrite = MessageBox.Show(
+                    $"图框库中已存在同名图框: {blockName}\n是否重新录入？\n选择“是”将覆盖原有图框设置。",
+                    "批量打印",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question,
+                    MessageBoxDefaultButton.Button2);
+                if (overwrite != DialogResult.Yes)
+                {
+                    AddBlockLog("Duplicate block name; user chose not to overwrite.");
+                    editor.WriteMessage($"\n已取消录入，图框库中的 {blockName} 保持不变。");
+                    return;
+                }
+            }
+
             inverse = blockTransform.Inverse();
 
             // 自动范围优先使用块内面积最大的闭合矩形；找不到时再合并可见线类图素的包围盒。
@@ -242,25 +262,6 @@ public sealed partial class BatchPlotCommands
             }
 
             var usesVariableLengthTemplate = isStretchableBlock;
-
-            // 可见性状态可能形成不同的复合块名，因此按最终匹配身份做覆盖确认。
-            var existingLibrary = TitleBlockLibraryStore.Load();
-            if (existingLibrary.Blocks.Any(x =>
-                    string.Equals(x.BlockName, blockName, StringComparison.OrdinalIgnoreCase)))
-            {
-                var overwrite = MessageBox.Show(
-                    $"图框库中已存在同名图框: {blockName}\n是否重新录入？\n选择“是”将覆盖原有图框设置。",
-                    "批量打印",
-                    MessageBoxButtons.YesNo,
-                    MessageBoxIcon.Question,
-                    MessageBoxDefaultButton.Button2);
-                if (overwrite != DialogResult.Yes)
-                {
-                    AddBlockLog("Duplicate block name; user chose not to overwrite.");
-                    editor.WriteMessage($"\n已取消录入，图框库中的 {blockName} 保持不变。");
-                    return;
-                }
-            }
 
             AddBlockLog($"Title region: ({titleRegion.MinX:0.###},{titleRegion.MinY:0.###})-({titleRegion.MaxX:0.###},{titleRegion.MaxY:0.###})");
             AddBlockLog($"Number region: ({numberRegion.MinX:0.###},{numberRegion.MinY:0.###})-({numberRegion.MaxX:0.###},{numberRegion.MaxY:0.###})");
