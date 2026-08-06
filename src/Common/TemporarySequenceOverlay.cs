@@ -1,24 +1,25 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 #if AUTOCAD
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.Colors;
 using Autodesk.AutoCAD.DatabaseServices;
-using Autodesk.AutoCAD.EditorInput;
 using Autodesk.AutoCAD.Geometry;
 using CadRuntimeException = Autodesk.AutoCAD.Runtime.Exception;
 #else
 using ZwSoft.ZwCAD.ApplicationServices;
 using ZwSoft.ZwCAD.Colors;
 using ZwSoft.ZwCAD.DatabaseServices;
-using ZwSoft.ZwCAD.EditorInput;
 using ZwSoft.ZwCAD.Geometry;
 using CadRuntimeException = ZwSoft.ZwCAD.Runtime.Exception;
 #endif
 
 namespace ZwcadBatchPlot;
 
+/// <summary>
+/// 在当前图纸中显示打印任务的临时红框、序号和行高亮。
+/// 覆盖层只接受任务列表驱动，禁止监听或过滤 CAD 的 ERASE/DELETE，避免模型窗口开着时干扰正常编辑。
+/// </summary>
 public sealed class TemporarySequenceOverlay : IDisposable
 {
     private const string LayerName = "ZBP_TEMP_SEQUENCE_OVERLAY";
@@ -26,22 +27,7 @@ public sealed class TemporarySequenceOverlay : IDisposable
     private readonly Document _document;
     private readonly List<ObjectId> _entityIds = new();
     private readonly Dictionary<PlotJob, OverlayEntityGroup> _entityGroups = new();
-    // 红框实体 → 打印任务的映射，用户删除红框时据此定位需要移除的 Job
-    private readonly Dictionary<ObjectId, PlotJob> _frameJobs = new();
-    // 本次 ERASE 命令中已被删除红框对应的 Job，命令结束时统一通知窗体
-    private readonly HashSet<PlotJob> _erasedFrameJobs = new();
-    // 全局红框注册表（静态，跨窗口共享）：ERASE 选择过滤时用于判定“是不是本插件的临时红框”
-    private static readonly object RegisteredFramesSync = new();
-    private static readonly HashSet<ObjectId> RegisteredFrameIds = new();
     private PlotJob? _highlightedJob;
-    // 当前是否正处于 ERASE/DELETE 命令中（只有此期间才做选择过滤与删除监听）
-    private bool _eraseCommandActive;
-    // 覆盖层自身正在增删实体（如 Clear），此时忽略 ObjectErased 事件，避免误判为用户删除
-    private bool _changingOverlay;
-    private bool _disposed;
-
-    // 用户在图纸中删除了某个红框时触发，参数为对应的打印任务；窗体订阅后同步移除表格行
-    public event Action<PlotJob>? FrameErased;
 
     private sealed class OverlayEntityGroup
     {
@@ -54,13 +40,6 @@ public sealed class TemporarySequenceOverlay : IDisposable
     public TemporarySequenceOverlay(Document document)
     {
         _document = document;
-        // 监听 ERASE/DELETE 命令生命周期与选择集变化，实现“只允许删红框、删红框即删对应打印任务”
-        _document.CommandWillStart += DocumentCommandWillStart;
-        _document.CommandEnded += DocumentCommandEnded;
-        _document.CommandCancelled += DocumentCommandCancelled;
-        _document.CommandFailed += DocumentCommandCancelled;
-        _document.Editor.SelectionAdded += EditorSelectionAdded;
-        _document.Database.ObjectErased += DatabaseObjectErased;
     }
 
     public void Show(IReadOnlyList<PlotJob> jobs, int highlightIndex)
@@ -168,9 +147,6 @@ public sealed class TemporarySequenceOverlay : IDisposable
                 HighlightFrameWidth = highlightFrameWidth
             };
             group.FrameId = AddEntity(tr, owner, frame);
-            // 记录红框与 Job 的对应关系，并登记到全局注册表，供 ERASE 过滤和删除回调使用
-            _frameJobs[group.FrameId] = job;
-            RegisterFrame(group.FrameId);
 
             var center = new Point3d((minX + maxX) / 2d, (minY + maxY) / 2d, 0);
             // 默认临时标注显示打印顺序；图号重排预览时可临时显示预计写入的新图号。
@@ -191,8 +167,6 @@ public sealed class TemporarySequenceOverlay : IDisposable
             return;
         }
 
-        // 标记覆盖层正在自我清理，期间的 ObjectErased 事件不算“用户删除红框”
-        _changingOverlay = true;
         try
         {
             using var docLock = _document.LockDocument();
@@ -217,13 +191,9 @@ public sealed class TemporarySequenceOverlay : IDisposable
         }
         finally
         {
-            // 从全局注册表注销全部红框，避免残留 ObjectId 干扰后续 ERASE 过滤
-            UnregisterFrames(_frameJobs.Keys);
             _entityIds.Clear();
             _entityGroups.Clear();
-            _frameJobs.Clear();
             _highlightedJob = null;
-            _changingOverlay = false;
             if (repaint)
             {
                 Regen();
@@ -231,152 +201,8 @@ public sealed class TemporarySequenceOverlay : IDisposable
         }
     }
 
-    // ERASE/DELETE 命令即将开始：进入监听状态，并过滤命令前已选中的对象（PICKFIRST 选择集）
-    private void DocumentCommandWillStart(object sender, CommandEventArgs e)
-    {
-        if (_disposed || !IsEraseCommand(e.GlobalCommandName))
-        {
-            return;
-        }
-
-        _eraseCommandActive = true;
-        _erasedFrameJobs.Clear();
-        FilterImpliedSelection();
-    }
-
-    // ERASE 命令正常结束：此时删除已成为事实，统一通知窗体移除对应打印任务行
-    private void DocumentCommandEnded(object sender, CommandEventArgs e)
-    {
-        if (!_eraseCommandActive || !IsEraseCommand(e.GlobalCommandName))
-        {
-            return;
-        }
-
-        _eraseCommandActive = false;
-        var erasedJobs = _erasedFrameJobs.ToList();
-        _erasedFrameJobs.Clear();
-        foreach (var job in erasedJobs)
-        {
-            FrameErased?.Invoke(job);
-        }
-    }
-
-    // ERASE 命令被取消或失败：删除已被 CAD 回滚，丢弃暂存的删除记录，不通知窗体
-    private void DocumentCommandCancelled(object sender, CommandEventArgs e)
-    {
-        if (!_eraseCommandActive || !IsEraseCommand(e.GlobalCommandName))
-        {
-            return;
-        }
-
-        _eraseCommandActive = false;
-        _erasedFrameJobs.Clear();
-    }
-
-    private void EditorSelectionAdded(object sender, SelectionAddedEventArgs e)
-    {
-        if (!_eraseCommandActive)
-        {
-            return;
-        }
-
-        // 批量打印窗口打开并执行 ERASE/删除图素时，只允许临时红框进入选择集。
-        // 倒序移除，避免删除一项后后续下标发生变化。
-        for (var i = e.AddedObjects.Count - 1; i >= 0; i--)
-        {
-            if (!IsRegisteredFrame(e.AddedObjects[i].ObjectId))
-            {
-                e.Remove(i);
-            }
-        }
-    }
-
-    // 数据库对象被删除：仅在 ERASE 命令期间、且非覆盖层自身清理时，记录被删红框对应的 Job
-    private void DatabaseObjectErased(object sender, ObjectErasedEventArgs e)
-    {
-        if (!_eraseCommandActive || _changingOverlay || !e.Erased)
-        {
-            return;
-        }
-
-        if (_frameJobs.TryGetValue(e.DBObject.ObjectId, out var job))
-        {
-            _erasedFrameJobs.Add(job);
-        }
-    }
-
-    // 处理“先选后删”场景：把 ERASE 开始前已存在的 PICKFIRST 选择集过滤为只剩红框
-    private void FilterImpliedSelection()
-    {
-        try
-        {
-            var implied = _document.Editor.SelectImplied();
-            if (implied.Status != PromptStatus.OK || implied.Value == null)
-            {
-                return;
-            }
-
-            var frames = implied.Value.GetObjectIds().Where(IsRegisteredFrame).ToArray();
-            _document.Editor.SetImpliedSelection(frames);
-        }
-        catch
-        {
-            // 不同 CAD 版本对 PICKFIRST 的事件时机略有差异；后续 SelectionAdded 仍会继续过滤。
-        }
-    }
-
-    // 判断是否为删除类命令；命令名可能带 "."/"_"/"-" 等前缀（如 _ERASE），先去掉再比较
-    private static bool IsEraseCommand(string? globalCommandName)
-    {
-        var name = (globalCommandName ?? "").Trim().TrimStart('.', '_', '-').ToUpperInvariant();
-        return name == "ERASE" || name == "DELETE";
-    }
-
-    // 以下三个方法维护全局红框注册表；加锁保护，防止多文档/多窗口并发读写
-    private static void RegisterFrame(ObjectId id)
-    {
-        lock (RegisteredFramesSync)
-        {
-            RegisteredFrameIds.Add(id);
-        }
-    }
-
-    private static void UnregisterFrames(IEnumerable<ObjectId> ids)
-    {
-        lock (RegisteredFramesSync)
-        {
-            foreach (var id in ids)
-            {
-                RegisteredFrameIds.Remove(id);
-            }
-        }
-    }
-
-    private static bool IsRegisteredFrame(ObjectId id)
-    {
-        lock (RegisteredFramesSync)
-        {
-            return RegisteredFrameIds.Contains(id);
-        }
-    }
-
-    // 窗体关闭时调用：退订全部 CAD 事件并清除残留红框，防止事件泄漏导致后续命令仍被过滤
-    public void Dispose()
-    {
-        if (_disposed)
-        {
-            return;
-        }
-
-        _disposed = true;
-        _document.CommandWillStart -= DocumentCommandWillStart;
-        _document.CommandEnded -= DocumentCommandEnded;
-        _document.CommandCancelled -= DocumentCommandCancelled;
-        _document.CommandFailed -= DocumentCommandCancelled;
-        _document.Editor.SelectionAdded -= EditorSelectionAdded;
-        _document.Database.ObjectErased -= DatabaseObjectErased;
-        Clear();
-    }
+    // 覆盖层不再接管 CAD 的 ERASE/DELETE；释放时只清理插件创建的临时标识。
+    public void Dispose() => Clear();
 
     private static ObjectId EnsureLayer(Transaction tr, Database db)
     {

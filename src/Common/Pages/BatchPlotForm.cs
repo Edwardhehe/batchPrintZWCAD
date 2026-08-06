@@ -69,8 +69,6 @@ public sealed class BatchPlotForm : Form
     {
         _currentDocument = currentDocument;
         _sequenceOverlay = new TemporarySequenceOverlay(currentDocument);
-        // 订阅红框删除事件：在 CAD 中 ERASE 红框即可同步删除表格中对应的打印任务
-        _sequenceOverlay.FrameErased += SequenceOverlayFrameErased;
         _settings = AppSettingsStore.Load();
         InitializeComponents();
         LoadPlotOptions();
@@ -1120,42 +1118,6 @@ public sealed class BatchPlotForm : Form
 
         SortAndRefreshOutputPaths();
         RefreshSelectedOverlay();
-    }
-
-    // CAD 中红框被 ERASE 删除后的回调：同步从任务列表中移除对应打印任务
-    private void SequenceOverlayFrameErased(PlotJob job)
-    {
-        if (IsDisposed || !IsHandleCreated)
-        {
-            return;
-        }
-
-        void RemoveJob()
-        {
-            if (!_jobs.Contains(job))
-            {
-                return;
-            }
-
-            if (ReferenceEquals(_highlightedJob, job))
-            {
-                _highlightedJob = null;
-            }
-
-            _jobs.Remove(job);
-            // 移除后重新排序、编号并刷新覆盖层，保持表格与 CAD 红框一致
-            SortAndRefreshOutputPaths();
-        }
-
-        // CAD 事件可能来自非 UI 线程，需切回窗体线程再操作绑定列表
-        if (InvokeRequired)
-        {
-            BeginInvoke((Action)RemoveJob);
-        }
-        else
-        {
-            RemoveJob();
-        }
     }
 
     private void GridCellValueChanged(object? sender, DataGridViewCellEventArgs e)
@@ -2719,8 +2681,7 @@ public sealed class BatchPlotForm : Form
     {
         if (disposing)
         {
-            // 窗体销毁时退订事件并释放覆盖层（内部会退订 CAD 文档事件），防止关窗后仍拦截 ERASE 命令
-            _sequenceOverlay.FrameErased -= SequenceOverlayFrameErased;
+            // 关闭窗口时只清理临时红框和序号，不再退订或接管 CAD 删除命令。
             _sequenceOverlay.Dispose();
         }
 
