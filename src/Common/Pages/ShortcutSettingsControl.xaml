@@ -1,0 +1,38 @@
+<UserControl x:Class="ZwcadBatchPlot.ShortcutSettingsControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             FontFamily="Microsoft YaHei" FontSize="12">
+    <Grid Margin="12,10,12,8">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- 说明 -->
+        <TextBlock Grid.Row="0" TextWrapping="Wrap" Foreground="#FF333333" Margin="0,0,0,10"
+                   Text="为常用命令设置简化命令（快捷键）。保存后在 CAD 命令行输入简化命令即可执行对应功能；留空表示不设置。简化命令需以字母开头，只含字母和数字。"/>
+
+        <!-- 列表：左列原始命令，右列简化命令输入框 -->
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <Grid Margin="0,0,0,6">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="150"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="原始命令" FontWeight="SemiBold" Foreground="#FF222222"/>
+                    <TextBlock Grid.Column="1" Text="简化命令" FontWeight="SemiBold" Foreground="#FF222222"/>
+                </Grid>
+                <StackPanel x:Name="RowsPanel"/>
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- 按钮行 -->
+        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right"
+                    Margin="0,10,0,0">
+            <Button Content="确定" Width="76" Height="26" Click="OnOkClick" Margin="0,0,4,0"/>
+            <Button Content="取消" Width="76" Height="26" Click="OnCancelClick"/>
+        </StackPanel>
+    </Grid>
+</UserControl>

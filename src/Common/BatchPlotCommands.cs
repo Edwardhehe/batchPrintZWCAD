@@ -1,5 +1,6 @@
 using System;
 using System.Drawing;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Windows.Forms;
@@ -45,6 +46,8 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
         AcadPlotterInstaller.InstallJpgPlotter();
         AcadPlotterInstaller.RefreshPlotterDevices();
         CadMenuInstaller.Install();
+        // 每次加载时恢复用户设置的简化命令到 PGP 文件（Power 等重置 PGP 后自动修复）。
+        CommandAliasManager.Apply(AppSettingsStore.Load().CommandAliases, out _);
     }
 
     public void Terminate()
@@ -168,11 +171,22 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
     [CommandMethod("_ZBP_INTERNAL_SETTINGS", CommandFlags.Session)]
     public void ShowSettingsLegacy() => ShowSettings();
 
-    [CommandMethod("ZBP_RELOAD_MENU")]
-    public void ReloadMenu() => CadMenuInstaller.Install();
+    [CommandMethod("ZBP_SHORTCUT_SETTINGS", CommandFlags.Session)]
+    public void ShortcutSettings() => ShortcutSettingsCore();
 
-    [CommandMethod("_ZBP_INTERNAL_RELOAD_MENU")]
-    public void ReloadMenuLegacy() => ReloadMenu();
+    [CommandMethod("_ZBP_INTERNAL_SHORTCUT_SETTINGS", CommandFlags.Session)]
+    public void ShortcutSettingsLegacy() => ShortcutSettingsCore();
+
+
+    [CommandMethod("ZBP_ABOUT")]
+    public void About()
+    {
+        using var dialog = new AboutDialog();
+        ShowModalDialog(dialog);
+    }
+
+    [CommandMethod("_ZBP_INTERNAL_ABOUT")]
+    public void AboutLegacy() => About();
 
     [CommandMethod("ZBP_INSTALL_AUTOLOAD")]
     public void InstallAutoload()
@@ -224,6 +238,29 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
     //   TransformPlotWindow   → CoordinateUtils.cs
     //   BuildWcsToDcsMatrix   → CoordinateUtils.cs
     //   BuildUcsToDcsMatrix   → CoordinateUtils.cs
+
+    // ---- 快捷键设置 ----
+
+    private static void ShortcutSettingsCore()
+    {
+        var settings = AppSettingsStore.Load();
+        using var form = new ShortcutSettingsDialog(settings.CommandAliases);
+        if (ShowModalDialog(form) != DialogResult.OK)
+        {
+            return;
+        }
+
+        settings.CommandAliases = CommandAliasManager.NormalizeAliases(
+            form.Aliases.ToDictionary(p => p.Key, p => p.Value, StringComparer.OrdinalIgnoreCase));
+        AppSettingsStore.Save(settings);
+
+        var applied = CommandAliasManager.Apply(settings.CommandAliases, out var message);
+        MessageBox.Show(
+            message,
+            "快捷键设置",
+            MessageBoxButtons.OK,
+            applied ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+    }
 
     // ---- 批量打印面板（图框库匹配） ----
 

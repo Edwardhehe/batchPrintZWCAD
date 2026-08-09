@@ -54,6 +54,8 @@ public sealed class AppSettings
     public string LastPlotDevice { get; set; } = "";
     public string LastStyleSheet { get; set; } = "";
     public double PaperMatchToleranceMm { get; set; } = 1.0;
+    /// <summary>命令快捷键：键为原始命令名（ZBP_*），值为用户设置的简化命令。</summary>
+    public Dictionary<string, string> CommandAliases { get; set; } = new();
     /// <summary>
     /// 矩形框批打是否识别由 4 个独立直线实体或直线型开放 PL 首尾相连组成的矩形。
     /// 默认关闭，避免改变既有图纸的扫描结果。
@@ -192,6 +194,9 @@ public static class AppSettingsStore
         {
             settings.LongPaperSnapToleranceMm = 3.0;
         }
+
+        // 命令快捷键：去掉未知命令、非法别名和被多个命令重复占用的别名。
+        settings.CommandAliases = CommandAliasManager.NormalizeAliases(settings.CommandAliases);
 
         if (settings.DirectoryIndexWidth <= 0)
         {

@@ -108,10 +108,11 @@ public static class CadMenuInstaller
             AddSeparator(menu);
             // 工具类菜单项
             AddMenuItem(menu, "设置", "ZBP_SETTINGS");
+            AddMenuItem(menu, "快捷键设置", "ZBP_SHORTCUT_SETTINGS");
             AddMenuItem(menu, "安装自动加载", "ZBP_INSTALL_AUTOLOAD");
             AddMenuItem(menu, "卸载自动加载", "ZBP_UNINSTALL_AUTOLOAD");
-            AddMenuItem(menu, "打开配置目录", "ZBP_OPEN_CONFIG");
-            AddMenuItem(menu, "刷新菜单", "ZBP_RELOAD_MENU");
+            //AddMenuItem(menu, "打开配置目录", "ZBP_OPEN_CONFIG");
+            AddMenuItem(menu, "关于", "ZBP_ABOUT");
 
             // 已在菜单栏上的弹出菜单不能重复插入，否则部分 CAD 宿主会抛出 COM 反射异常。
             if (!IsMenuOnMenuBar(menu))
