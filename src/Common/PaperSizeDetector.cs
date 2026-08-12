@@ -44,6 +44,10 @@ public static class PaperSizeDetector
         /// 具体加长分数和物理尺寸由每个块参照的当前外框重新识别。
         /// </summary>
         public bool IncludeGenericDynamicTitleBlockPaper { get; set; }
+        /// <summary>
+        /// 在内置比例之外追加参与匹配的自定义比例（设置中的“比例设置”列表）；null 或空表示只用内置比例。
+        /// </summary>
+        public IReadOnlyList<double>? ExtraScales { get; set; }
     }
 
     public static readonly DetectionOptions DefaultDetectionOptions = new();
@@ -89,6 +93,9 @@ public static class PaperSizeDetector
         1d, 2d, 5d, 10d, 20d, 25d, 30d, 40d, 50d, 60d, 75d, 80d, 90d, 100d,
         120d, 125d, 150d, 200d, 250d, 300d, 400d, 500d, 600d, 1000d
     };
+
+    /// <summary>内置支持的比例列表（只读）；用户自定义比例见 <see cref="AppSettings.CustomScales"/>。</summary>
+    public static IReadOnlyList<double> BuiltInScales => CommonScales;
 
     private static readonly int[] IntegerScales = { 1, 2, 4, 5, 8, 10, 20, 25, 50, 100, 200, 500, 1000 };
 
@@ -257,14 +264,15 @@ public static class PaperSizeDetector
     /// 与最近 1/8 模数的差距在吸附容差内按标准加长图输出，超出才保留实测尺寸生成动态纸张。
     /// 布局空间优先 1:1，模型空间沿用常用的 1:100 优先。
     /// </summary>
-    public static DetectionOptions CreateTitleBlockBatchOptions(double paperMatchToleranceMm, bool isPaperSpace, double? longPaperSnapToleranceMm = null)
+    public static DetectionOptions CreateTitleBlockBatchOptions(double paperMatchToleranceMm, bool isPaperSpace, double? longPaperSnapToleranceMm = null, IReadOnlyList<double>? customScales = null)
     {
         return new DetectionOptions
         {
             AllowArbitraryLongSide = true,
             LongPaperShortSideToleranceMm = Math.Max(0.05d, paperMatchToleranceMm),
             LongPaperSnapToleranceMm = longPaperSnapToleranceMm,
-            PreferredScaleValue = isPaperSpace ? 1d : 100d
+            PreferredScaleValue = isPaperSpace ? 1d : 100d,
+            ExtraScales = customScales
         };
     }
 
@@ -272,7 +280,7 @@ public static class PaperSizeDetector
     /// 创建矩形框批打专用识别参数。短边匹配用纸张匹配容差，长边 1/8 模数吸附用专用吸附容差；
     /// 模型空间优先按 1:100 解释，布局空间优先按 1:1 解释，同时把另一常用比例排在其余比例之前。
     /// </summary>
-    public static DetectionOptions CreateRectangleBatchOptions(double paperMatchToleranceMm, bool isPaperSpace, double? longPaperSnapToleranceMm = null)
+    public static DetectionOptions CreateRectangleBatchOptions(double paperMatchToleranceMm, bool isPaperSpace, double? longPaperSnapToleranceMm = null, IReadOnlyList<double>? customScales = null)
     {
         var toleranceMm = Math.Max(0d, paperMatchToleranceMm);
         return new DetectionOptions
@@ -282,7 +290,8 @@ public static class PaperSizeDetector
             LongPaperSnapToleranceMm = longPaperSnapToleranceMm,
             PreferredScaleValues = isPaperSpace
                 ? new[] { 1d, 100d }
-                : new[] { 100d, 1d }
+                : new[] { 100d, 1d },
+            ExtraScales = customScales
         };
     }
 
@@ -291,9 +300,10 @@ public static class PaperSizeDetector
         var actualWidth = Math.Abs(width);
         var actualHeight = Math.Abs(height);
         var candidates = new List<PaperCandidate>();
+        var scales = MergeScales(options.ExtraScales);
         foreach (var paper in Standards)
         {
-            foreach (var scale in CommonScales)
+            foreach (var scale in scales)
             {
                 AddCandidate(candidates, paper, scale, actualWidth, actualHeight, options);
             }
@@ -693,7 +703,80 @@ public static class PaperSizeDetector
         return Math.Abs(value - target) / Math.Max(target, 1);
     }
 
-    private static string ToScaleText(double scale)
+    /// <summary>
+    /// 合并内置比例和用户自定义比例；剔除非法值并按 1e-6 容差去重，避免重复候选干扰排序。
+    /// </summary>
+    private static List<double> MergeScales(IReadOnlyList<double>? extraScales)
+    {
+        var scales = new List<double>(CommonScales);
+        if (extraScales == null)
+        {
+            return scales;
+        }
+
+        foreach (var extra in extraScales)
+        {
+            if (extra > 0 && !scales.Any(x => Math.Abs(x - extra) < 1e-6))
+            {
+                scales.Add(extra);
+            }
+        }
+
+        return scales;
+    }
+
+    /// <summary>
+    /// 解析用户输入的比例文本。单个数 N≥1 表示 1:N；0&lt;N&lt;1 表示放大比例（0.25 → 4:1）；
+    /// 也接受 "1:143"、"4:1"（含全角冒号）写法。返回值语义与内置比例一致：图面尺寸 / 比例 = 纸张毫米尺寸。
+    /// </summary>
+    public static bool TryParseScale(string? text, out double scale)
+    {
+        scale = 0;
+        if (text == null)
+        {
+            return false;
+        }
+
+        var normalized = text.Trim().Replace('：', ':').Replace(" ", "");
+        if (normalized.Length == 0)
+        {
+            return false;
+        }
+        var colonIndex = normalized.IndexOf(':');
+        if (colonIndex >= 0)
+        {
+            var left = normalized.Substring(0, colonIndex);
+            var right = normalized.Substring(colonIndex + 1);
+            if (right.IndexOf(':') >= 0
+                || !TryParseNumber(left, out var leftValue)
+                || !TryParseNumber(right, out var rightValue)
+                || leftValue <= 0
+                || rightValue <= 0)
+            {
+                return false;
+            }
+
+            scale = rightValue / leftValue;
+            return true;
+        }
+
+        if (!TryParseNumber(normalized, out var number) || number <= 0)
+        {
+            return false;
+        }
+
+        scale = number;
+        return true;
+    }
+
+    private static bool TryParseNumber(string text, out double value)
+    {
+        return double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out value)
+            || double.TryParse(text, NumberStyles.Float, CultureInfo.CurrentCulture, out value);
+    }
+
+    /// <summary>把比例数值格式化为 "1:143" 或 "4:1" 形式的显示文本。</summary>
+    public static string ToScaleText(double scale)
     {
         if (Math.Abs(scale - 1) < 0.001)
         {

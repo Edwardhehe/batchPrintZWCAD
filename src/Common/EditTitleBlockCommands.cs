@@ -121,7 +121,8 @@ public sealed partial class BatchPlotCommands
             var paperDetectionOptions = PaperSizeDetector.CreateRectangleBatchOptions(
                 settings.PaperMatchToleranceMm,
                 match.IsPaperSpace,
-                settings.LongPaperSnapToleranceMm);
+                settings.LongPaperSnapToleranceMm,
+                settings.CustomScales);
             paperDetectionOptions.IncludeGenericDynamicTitleBlockPaper =
                 mode == EditCoordinateMode.FrameRightBottomDynamic;
             if (mode == EditCoordinateMode.FrameRightBottomDynamic)

@@ -34,10 +34,11 @@
 | `ZBP_SHOW_PANEL` | 打开批量打印面板（图框库匹配模式） | `BatchPlotCommands.cs` |
 | `ZBP_SINGLE_PLOT` | 单张打印（手动框选） | `BatchPlotCommands.cs` 入口 → `SinglePlotCommands.cs` 实现 |
 | `ZBP_RECTANGLE_BATCH_PLOT` | 批量打印（矩形框扫描模式） | `BatchPlotCommands.cs` |
-| `ZBP_MANAGE_LIBRARY` | 管理图框库 | `BatchPlotCommands.cs` |
+| `ZBP_MANAGE_LIBRARY` | 管理图框库 | `BatchPlotCommands.cs` 入口 → `TitleBlockLibraryManagerForm.cs` + `EditTitleBlockCommands.cs` |
 | `ZBP_SETTINGS` | 设置 | `BatchPlotCommands.cs` |
+| `ZBP_SHORTCUT_SETTINGS` | 快捷键设置（命令别名） | `BatchPlotCommands.cs` 入口 → `ShortcutSettingsDialog.cs` |
 | `ZBP_OPEN_CONFIG` | 打开配置目录 | `BatchPlotCommands.cs` |
-| `ZBP_RELOAD_MENU` | 刷新菜单 | `BatchPlotCommands.cs` |
+| `ZBP_ABOUT` | 关于对话框 | `BatchPlotCommands.cs` |
 | `ZBP_INSTALL_AUTOLOAD` | 安装自动加载 | `BatchPlotCommands.cs` |
 | `ZBP_UNINSTALL_AUTOLOAD` | 卸载自动加载 | `BatchPlotCommands.cs` |
 
@@ -55,6 +56,7 @@
 | [`AddTitleBlockCommands.cs`](src/Common/AddTitleBlockCommands.cs) | `AddTitleBlockCore()` — 新增图框向导：选择块→框选区域→检测纸张→保存到库 |
 | [`SinglePlotCommands.cs`](src/Common/SinglePlotCommands.cs) | `SinglePlotCore()` — 单张打印：UCS框选→检测/自定义纸张→输出PDF |
 | [`CoordinateUtils.cs`](src/Common/CoordinateUtils.cs) | `TransformPlotWindow()` / `BuildWcsToDcsMatrix()` / `BuildUcsToDcsMatrix()` — UCS↔WCS↔DCS 坐标变换 |
+| [`EditTitleBlockCommands.cs`](src/Common/EditTitleBlockCommands.cs) | `EditTitleBlockFromLibrary()` — 从图框库管理界面编辑已有图框记录（partial class） |
 
 所有文件统一在 `namespace ZwcadBatchPlot` 下，通过 `#if AUTOCAD` 条件编译适配双平台。
 
@@ -591,9 +593,74 @@ private static bool IsEntityVisible(Entity entity)
 | 新增图框 | `AddTitleBlockCommands.TryGetVisibleNestedBlock` | 定位当前可见嵌套块名入库 | `IsDynamicBlock` — 普通块直接返回 false |
 | 图框库扫描 | `TitleBlockScanner.ResolveNestedLibraryMatch` | 深入动态块找可见嵌套块的库匹配 | 仅 `definition==null` 时触发 |
 
+### 10.3 可拉伸图框（FrameRightBottomDynamic 坐标模式）
+
+> 部分图框块具有距离拉伸参数或查寻列表（加长列表），可按实际需要拉伸到任意长度。
+
+**检测方法**：
+- `HasStretchDistanceProperty` — 检查动态属性集合中是否有可写的 Distance 类型参数（自由拉伸）
+- `HasLookupStretchProperty` — 检查是否有 NoUnits+string 类型、不含"可见/Visibility"的查寻列表属性（定长加长列表）
+- `HasHiddenNestedBlockReference` — 检查当前求值定义中是否存在被隐藏的内层 BlockReference（可见性切换的结构特征）
+
+**三种类型独立判断**，可组合：外层可见性切换 × 内层可拉伸、纯拉伸、纯可见性等。
+
+**FrameRightBottomDynamic 模式**：字段区域锚定外框右边界（`ToFrameRightBottomRelative`），拉伸后文字自动跟随。纸张存为 `A1+` 泛型形式（不带具体分数），扫描时按当前实例的实际外框重新识别纸张尺寸。
+
+**录入流程**：
+```
+检测块类型 → 三种组合判断 → 确定坐标模式和纸张策略
+  ├─ 可见性切换块 → 复合名入库（外层+内层可见名）
+  ├─ 拉伸块（包括查寻列表）→ FrameRightBottomDynamic + A1+ 泛型纸
+  └─ 组合块 → 可见性匹配走嵌套，拉伸走动态外框
+```
+
+### 10.4 公共矩形几何函数（RectangleGeometry）
+
+矩形框扫描和图框录入共用同一套矩形验证逻辑，已提取到 [`RectangleGeometry.cs`](src/Common/RectangleGeometry.cs)：
+
+- `TryGetRectangle` / `TryGetRectangleFrom2d` / `TryGetRectangleFrom3d` — 从三种多段线类型验证几何矩形
+- `TransformRectangle` — 四角点变换后重算 ActualWidth/ActualHeight 和包围盒
+- `GetActualArea` — 矩形实际面积（优先真实边长）
+
+### 10.5 块定义帧几何（BlockFrameGeometry）
+
+[`BlockFrameGeometry.cs`](src/Common/BlockFrameGeometry.cs) 是图框录入和扫描共享的"找外框"逻辑：
+- 递归遍历块定义，每层先用 `RectangleGeometry` 找闭合矩形
+- 找不到矩形时回退到可见线类图素（Line/Polyline/Polyline2d/Polyline3d）合并包围盒
+- 同时返回构成外框的实体句柄，供打印阶段临时移层使用（`TemporaryFramePlotLayer`）
+
+### 10.6 界面焦点管理（CadWindowFocus）
+
+[`CadWindowFocus.cs`](src/Common/CadWindowFocus.cs) 统一管理 CAD 内嵌 WinForms 的焦点切换：
+- `HideForCadInput(this)` — 隐藏插件窗口并强制把输入焦点交还 CAD 主窗口
+- `RestoreDialog(this)` — CAD 取点结束后恢复原窗口并置顶
+- 所有回到 CAD 取点的流程（框选字段、框选打印范围、生成目录等）统一使用
+
 ---
 
-## 11. ZWCAD vs AutoCAD 差异
+## 11. 快捷键设置（命令别名）
+
+**触发**：用户运行 `ZBP_SHORTCUT_SETTINGS`，或点击菜单"快捷键设置"。
+**实现**：[`ShortcutSettingsControl`](src/Common/Pages/ShortcutSettingsControl.xaml.cs) + [`CommandAliasManager.cs`](src/Common/CommandAliasManager.cs)
+
+**原理**：CAD 的命令别名通过 PGP 程序参数文件（`acad.pgp` / `ZWCAD.pgp`）定义。用户在 WPF 界面为 6 个常用命令设置简化命令（如 `TK` → `ZBP_ADD_TITLE_BLOCK`），保存后写入 PGP 文件末尾的管理块，执行 `REINIT`（勾选 PGP）或重启 CAD 后生效。
+
+```
+ShortcutSettingsDialog (WinForms 壳 + ElementHost)
+  └─ ShortcutSettingsControl (WPF)
+       ├─ 左列：功能名称 + 原始命令名
+       ├─ 右列：简化命令输入框（字母开头、只含字母数字、最长16位）
+       └─ 确定 → NormalizeAliases → AppSettingsStore.Save → CommandAliasManager.Apply
+            ├─ 定位 PGP 文件（ACADPREFIX + ROAMABLEROOTPREFIX 双路径扫描）
+            ├─ 移除旧管理块 → 追加新别名 → 写回
+            └─ 提示 REINIT 或重启 CAD
+```
+
+**启动恢复**：`IExtensionApplication.Initialize()` 中调用 `CommandAliasManager.Apply()`，确保 PGP 别名在 CAD 重装或 PGP 重置后自动恢复。
+
+---
+
+## 12. ZWCAD vs AutoCAD 差异
 
 ### 11.1 条件编译
 
@@ -676,7 +743,13 @@ AutoCAD Core 版本额外使用 `#if ACAD_CORE` 子条件处理 `CadApp.ShowModa
 │   │   ├── PmpPiaConverter.cs          ← 历史兼容工具（LA 安装链路不调用）
 │   │   ├── DwgSplitService.cs          ← DWG 拆分 (模型空间WBLOCK / 布局空间复制)
 │   │   ├── DirectoryTableGenerator.cs  ← 图纸目录表生成: 在CAD中绘制表格 + 框选单元格尺寸
-│   │   ├── TemporarySequenceOverlay.cs ← 打印序号标注: 红框+数字，点击高亮，增量更新
+│   │   ├── TemporarySequenceOverlay.cs ← 打印序号标注: 红框+数字，增量更新
+│   │   ├── TemporaryFramePlotLayer.cs   ← 打印时临时隐藏图框外边框线（事务不提交自动回滚）
+│   │   ├── BlockFrameGeometry.cs        ← 块定义帧几何: 递归找外框+收集边界实体句柄
+│   │   ├── RectangleGeometry.cs         ← 公共矩形几何函数: Polyline/2d/3d→矩形验证
+│   │   ├── CadWindowFocus.cs            ← CAD 焦点管理: HideForCadInput/RestoreDialog
+│   │   ├── CommandAliasManager.cs       ← 命令别名管理: PGP 读写+REINIT
+│   │   ├── RasterPlotOrientation.cs     ← 栅格输出 DCS 方向判断
 │   │   ├── CsvExporter.cs              ← CSV 导出 (UTF-8 BOM)
 │   │   ├── FileNameSanitizer.cs        ← 文件名清洗: 非法字符、路径过长
 │   │   ├── NaturalStringComparer.cs    ← 自然排序: "JZ-02" < "JZ-10"
@@ -692,7 +765,11 @@ AutoCAD Core 版本额外使用 `#if ACAD_CORE` 子条件处理 `CadApp.ShowModa
 │   │       ├── SinglePlotPaperSelectionForm.cs ← 单张打印纸张选择对话框
 │   │       ├── CustomScaleForm.cs          ← 非标图纸整数比例选择对话框
 │   │       ├── FieldBoxSelectDialog.cs     ← 新增图框可选字段框选对话框 (日期/版次/阶段/信息1/信息2)
-│   │       ├── DrawingNumberReorderDialog.cs ← 图号重排对话框 (前缀+起始号+排序方向+预览)
+│   │       ├── DrawingNumberReorderDialog.cs ← 图号重排对话框 (WinForms壳)
+│   │       ├── DrawingNumberReorderControl.xaml + .cs ← 图号重排 WPF 控件
+│   │       ├── ShortcutSettingsDialog.cs ← 快捷键设置 (WinForms壳)
+│   │       ├── ShortcutSettingsControl.xaml + .cs ← 快捷键设置 WPF 控件
+│   │       ├── AboutDialog.cs + AboutControl.xaml + .cs ← 关于对话框 (WPF)
 │   │       └── UiLayout.cs                ← WinForms 布局: DPI缩放、按钮创建、窗口配置
 │   │
 │   ├── PianNoCN/                    ← PIA 2.0 文件格式序列化（仅 AutoCAD 编译, namespace PiaNO）
@@ -821,6 +898,12 @@ public sealed class PlotJob
     // 留边支持
     public bool LeavePaperMargin { get; set; }
     public double PaperMarginMm { get; set; }
+
+    // 输出文件名（表格显示用，不受合并 PDF 临时路径覆盖）
+    public string DisplayOutputFileName { get; set; }
+
+    // 图框外边框实体句柄（打印时临时移层用）
+    public string[]? FrameBoundaryHandles { get; set; }
 }
 ```
 
@@ -877,7 +960,16 @@ public sealed class AppSettings
     // 纸张匹配
     public double PaperMatchToleranceMm { get; set; } = 1.0;
     public double LongPaperSnapToleranceMm { get; set; } = 3.0;
-    public bool AllowStandardPaperNameFallback { get; set; } = true;
+    public bool RecognizeFourLineRectangleFrames { get; set; }
+
+    // 排序
+    public bool SortOrderHorizontalFirst { get; set; }
+
+    // 命令快捷键
+    public Dictionary<string, string> CommandAliases { get; set; } = new();
+
+    // 图框外边框不打印
+    public bool HideFrameBoundaryForPlot { get; set; } = true;
 
     // 目录表格
     public double DirectoryIndexWidth { get; set; } = 900;

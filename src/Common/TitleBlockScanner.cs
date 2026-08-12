@@ -232,7 +232,7 @@ public static class TitleBlockScanner
                 var width = CornerDistance(wcsCorners, 0, 1);
                 var height = CornerDistance(wcsCorners, 1, 2);
 
-                var detectionOptions = PaperSizeDetector.CreateTitleBlockBatchOptions(effectivePaperToleranceMm, !layout.ModelType, storedSettings.LongPaperSnapToleranceMm);
+                var detectionOptions = PaperSizeDetector.CreateTitleBlockBatchOptions(effectivePaperToleranceMm, !layout.ModelType, storedSettings.LongPaperSnapToleranceMm, storedSettings.CustomScales);
                 if (IsGenericDynamicPaperName(definition.PaperName))
                 {
                     // A2+ 中的 A2 是录入时已经确认的基础图幅，扫描只允许重新计算长边。

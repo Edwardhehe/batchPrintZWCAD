@@ -206,7 +206,8 @@ public sealed partial class BatchPlotCommands
             var paperDetectionOptions = PaperSizeDetector.CreateRectangleBatchOptions(
                 settings.PaperMatchToleranceMm,
                 isPaperSpace,
-                settings.LongPaperSnapToleranceMm);
+                settings.LongPaperSnapToleranceMm,
+                settings.CustomScales);
             // 只有可自由拉长的块才按 A1+ 入库；仅在 A1/A2/A3 间切换的可见性块仍保存固定纸张。
             paperDetectionOptions.IncludeGenericDynamicTitleBlockPaper = isStretchableBlock;
             var paperOptions = PaperSizeDetector.DetectCandidatesOrFallback(

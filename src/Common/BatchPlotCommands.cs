@@ -126,6 +126,7 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
 
             if (!form.RequestPickDirectoryRowHeight
                 && !form.RequestPickDirectoryTextAppearance
+                && !form.RequestPickScaleFromCad
                 && string.IsNullOrWhiteSpace(form.RequestedDirectoryColumnKey))
             {
                 return;
@@ -146,7 +147,11 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
             var settings = AppSettingsStore.Load();
             bool ok;
             string message;
-            if (form.RequestPickDirectoryTextAppearance)
+            if (form.RequestPickScaleFromCad)
+            {
+                ok = ScaleSettingsPicker.PromptScaleFromFrame(doc, settings, out settings, out message);
+            }
+            else if (form.RequestPickDirectoryTextAppearance)
             {
                 ok = DirectoryTableGenerator.PromptTextAppearance(doc, settings, out _, out message);
             }

@@ -121,6 +121,11 @@ public sealed class AppSettings
     public bool DirectoryDrawHeader { get; set; } = true;
     public bool DirectoryDrawGridLines { get; set; } = true;
     public List<DirectoryColumnSetting> DirectoryColumns { get; set; } = new();
+    /// <summary>
+    /// 用户自定义打印比例，语义与内置比例一致：图面尺寸 / 比例 = 纸张毫米尺寸。
+    /// &gt;1 表示 1:N（如 143 表示 1:143）；&lt;1 表示放大比例（如 0.25 表示 4:1）。
+    /// </summary>
+    public List<double> CustomScales { get; set; } = new();
 }
 
 public static class AppSettingsStore
@@ -316,7 +321,34 @@ public static class AppSettingsStore
             settings.FileNameSequenceStartNumber = 1;
         }
 
+        settings.CustomScales = NormalizeCustomScales(settings.CustomScales);
+
         return settings;
+    }
+
+    /// <summary>
+    /// 自定义比例兜底校验：剔除非法值、按 1e-6 容差去重、剔除与内置比例重复的项并升序排列。
+    /// </summary>
+    private static List<double> NormalizeCustomScales(List<double>? scales)
+    {
+        var normalized = new List<double>();
+        if (scales != null)
+        {
+            foreach (var scale in scales)
+            {
+                if (scale <= 0
+                    || normalized.Any(x => Math.Abs(x - scale) < 1e-6)
+                    || PaperSizeDetector.BuiltInScales.Any(x => Math.Abs(x - scale) < 1e-6))
+                {
+                    continue;
+                }
+
+                normalized.Add(scale);
+            }
+        }
+
+        normalized.Sort();
+        return normalized;
     }
 
     private static List<DirectoryColumnSetting> NormalizeDirectoryColumns(AppSettings settings)

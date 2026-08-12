@@ -54,12 +54,17 @@ public sealed class SettingsForm : Form
     private readonly NumericUpDown _fileNameSequenceDigits = new();
     private readonly CheckBox _autoFileNameSequenceDigits = new();
 
+    // 比例设置
+    private readonly ListBox _scaleList = new();
+    private readonly TextBox _scaleInput = new();
+
     public string? RequestedDirectoryColumnKey { get; private set; }
     public bool RequestPickDirectoryRowHeight { get; private set; }
     public bool RequestPickDirectoryTextAppearance { get; private set; }
+    public bool RequestPickScaleFromCad { get; private set; }
 
     /// <summary>
-    /// 设置/获取下次打开设置窗口时默认显示的标签页索引（0=常规, 1=文件名, 2=图纸目录）。
+    /// 设置/获取下次打开设置窗口时默认显示的标签页索引（0=常规, 1=文件名, 2=图纸目录, 3=比例设置）。
     /// 调用方在窗体关闭后读取 <see cref="SelectedTabIndex"/> 并传入下一次构造，实现图中交互后回到原标签页。
     /// </summary>
     public static int InitialTabIndex { get; set; }
@@ -98,6 +103,7 @@ public sealed class SettingsForm : Form
         _tabs.TabPages.Add(BuildGeneralTab());
         _tabs.TabPages.Add(BuildFileNameTab());
         _tabs.TabPages.Add(BuildDirectoryTab());
+        _tabs.TabPages.Add(BuildScaleTab());
 
         var hint = new Label
         {
@@ -255,6 +261,230 @@ public sealed class SettingsForm : Form
         content.AutoSize = true;
         group.Controls.Add(content);
         return group;
+    }
+
+    private TabPage BuildScaleTab()
+    {
+        var page = new TabPage("比例设置")
+        {
+            Padding = new Padding(UiLayout.Scale(10))
+        };
+        var root = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 3,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty
+        };
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(64)));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(64)));
+
+        _scaleList.Dock = DockStyle.Fill;
+        _scaleList.SelectionMode = SelectionMode.MultiExtended;
+        _scaleList.IntegralHeight = false;
+        var listGroup = new GroupBox
+        {
+            Text = "支持的比例（内置比例不可删除）",
+            Dock = DockStyle.Fill,
+            Padding = new Padding(UiLayout.Scale(6))
+        };
+        listGroup.Controls.Add(_scaleList);
+        root.Controls.Add(listGroup, 0, 0);
+
+        var addTable = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 3,
+            RowCount = 2,
+            Margin = Padding.Empty,
+            Padding = new Padding(0, UiLayout.Scale(6), 0, 0)
+        };
+        addTable.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(180)));
+        addTable.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(96)));
+        addTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        addTable.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(30)));
+        addTable.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        _scaleInput.Dock = DockStyle.Fill;
+        addTable.Controls.Add(_scaleInput, 0, 0);
+        var addButton = UiLayout.CreateButton("添加", 82);
+        addButton.Dock = DockStyle.Left;
+        addButton.Click += (_, _) => AddCustomScale();
+        addTable.Controls.Add(addButton, 1, 0);
+        addTable.Controls.Add(new Label
+        {
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleLeft,
+            ForeColor = Color.DimGray,
+            Text = "输入 143 表示 1:143；输入 0.25 表示 4:1；也支持 1:143 写法"
+        }, 2, 0);
+        var addHint = new Label
+        {
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleLeft,
+            ForeColor = Color.DimGray,
+            Text = "添加后的比例随“保存”持久化，矩形框和图框块识别都会使用。"
+        };
+        addTable.Controls.Add(addHint, 0, 1);
+        addTable.SetColumnSpan(addHint, 3);
+        root.Controls.Add(addTable, 0, 1);
+
+        var pickTable = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 3,
+            RowCount = 1,
+            Margin = Padding.Empty,
+            Padding = new Padding(0, UiLayout.Scale(6), 0, 0)
+        };
+        pickTable.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(110)));
+        pickTable.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(110)));
+        pickTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        var pickButton = UiLayout.CreateButton("图中拾取…", 96);
+        pickButton.Dock = DockStyle.Left;
+        pickButton.Click += (_, _) => RequestScaleFromCad();
+        pickTable.Controls.Add(pickButton, 0, 0);
+        var removeButton = UiLayout.CreateButton("删除所选", 96);
+        removeButton.Dock = DockStyle.Left;
+        removeButton.Click += (_, _) => RemoveSelectedCustomScales();
+        pickTable.Controls.Add(removeButton, 1, 0);
+        pickTable.Controls.Add(new Label
+        {
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleLeft,
+            ForeColor = Color.DimGray,
+            Text = "图中拾取：在图中框选一个图框并选择 A0~A4 图幅，按短边自动计算比例"
+        }, 2, 0);
+        root.Controls.Add(pickTable, 0, 2);
+
+        page.Controls.Add(root);
+        return page;
+    }
+
+    /// <summary>比例列表项；自定义项可删除，内置项只读展示。</summary>
+    private sealed class ScaleListItem
+    {
+        public ScaleListItem(double value, bool isCustom)
+        {
+            Value = value;
+            IsCustom = isCustom;
+        }
+
+        public double Value { get; }
+        public bool IsCustom { get; }
+
+        public override string ToString()
+        {
+            return PaperSizeDetector.ToScaleText(Value) + (IsCustom ? "（自定义）" : "");
+        }
+    }
+
+    private void ReloadScaleList(AppSettings settings)
+    {
+        _scaleList.Items.Clear();
+        foreach (var scale in PaperSizeDetector.BuiltInScales)
+        {
+            _scaleList.Items.Add(new ScaleListItem(scale, false));
+        }
+
+        foreach (var scale in settings.CustomScales)
+        {
+            _scaleList.Items.Add(new ScaleListItem(scale, true));
+        }
+    }
+
+    private List<double> ReadCustomScalesFromList()
+    {
+        return _scaleList.Items
+            .Cast<ScaleListItem>()
+            .Where(x => x.IsCustom)
+            .Select(x => x.Value)
+            .ToList();
+    }
+
+    private void AddCustomScale()
+    {
+        if (!PaperSizeDetector.TryParseScale(_scaleInput.Text, out var scale))
+        {
+            MessageBox.Show(
+                "无法识别比例输入。请输入 143（表示 1:143）、0.25（表示 4:1）或 1:143 形式。",
+                Text,
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+            return;
+        }
+
+        if (_scaleList.Items.Cast<ScaleListItem>().Any(x => Math.Abs(x.Value - scale) < 1e-6))
+        {
+            MessageBox.Show(
+                $"比例 {PaperSizeDetector.ToScaleText(scale)} 已在列表中，无需重复添加。",
+                Text,
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+            return;
+        }
+
+        // 自定义项按值升序插入，与保存时 NormalizeCustomScales 的排序一致，避免重开窗口后顺序变化。
+        var insertIndex = _scaleList.Items.Count;
+        for (var i = 0; i < _scaleList.Items.Count; i++)
+        {
+            if (_scaleList.Items[i] is ScaleListItem existing && existing.IsCustom && existing.Value > scale)
+            {
+                insertIndex = i;
+                break;
+            }
+        }
+
+        var added = new ScaleListItem(scale, true);
+        _scaleList.Items.Insert(insertIndex, added);
+        _scaleList.SelectedItem = added;
+        _scaleInput.Clear();
+        _scaleInput.Focus();
+    }
+
+    private void RemoveSelectedCustomScales()
+    {
+        var selected = _scaleList.SelectedItems.Cast<ScaleListItem>().ToList();
+        if (selected.Count == 0)
+        {
+            return;
+        }
+
+        if (selected.Any(x => !x.IsCustom))
+        {
+            MessageBox.Show(
+                "内置比例不可删除，只能移除“（自定义）”比例。",
+                Text,
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+            return;
+        }
+
+        foreach (var item in selected)
+        {
+            _scaleList.Items.Remove(item);
+        }
+    }
+
+    private void RequestScaleFromCad()
+    {
+        if (GetActiveDocument() == null)
+        {
+            MessageBox.Show("当前没有可用的 CAD 文档。", "批量打印设置", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        if (!TryReadSettingsFromControls(out var settings))
+        {
+            return;
+        }
+
+        // 与目录行高/列宽交互一致：先保存当前页面编辑并退出模态窗体，再回到 CAD 命令上下文框选。
+        AppSettingsStore.Save(settings);
+        RequestPickScaleFromCad = true;
+        DialogResult = DialogResult.OK;
+        Close();
     }
 
     private TabPage BuildFileNameTab()
@@ -1052,6 +1282,7 @@ public sealed class SettingsForm : Form
         _longPaperSnapTolerance.Value = UiLayout.Clamp(
             _longPaperSnapTolerance,
             settings.LongPaperSnapToleranceMm);
+        ReloadScaleList(settings);
     }
 
     private void SaveSettings()
@@ -1108,6 +1339,7 @@ public sealed class SettingsForm : Form
         current.DirectoryColumns = directoryColumns;
         current.LongPaperNameFormat = (LongPaperNameFormat)Math.Max(0, Math.Min(5, _longPaperNameFormat.SelectedIndex));
         current.LongPaperSnapToleranceMm = (double)_longPaperSnapTolerance.Value;
+        current.CustomScales = ReadCustomScalesFromList();
         return true;
     }
 
