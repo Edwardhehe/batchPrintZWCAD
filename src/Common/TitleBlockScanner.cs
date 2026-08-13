@@ -258,7 +258,7 @@ public static class TitleBlockScanner
                     width,
                     height,
                     detectionOptions);
-                var paper = ApplyFixedPaper(definition, detectedPaper);
+                var paper = ApplyFixedPaper(definition, detectedPaper, width, height);
                 string title;
                 string number;
                 string date = "";
@@ -744,7 +744,7 @@ public static class TitleBlockScanner
             && Math.Abs(region.MaxY - region.MinY) > 1e-6;
     }
 
-    private static PaperDetection ApplyFixedPaper(TitleBlockDefinition definition, PaperDetection detected)
+    private static PaperDetection ApplyFixedPaper(TitleBlockDefinition definition, PaperDetection detected, double frameWidth, double frameHeight)
     {
         if (definition.PaperWidthMm <= 0 || definition.PaperHeightMm <= 0)
         {
@@ -762,7 +762,9 @@ public static class TitleBlockScanner
             return detected;
         }
 
-        if (ShouldPreferDetectedLongPaper(name, definition, detected))
+        // 任意纸张（识别不到标准纸张时按用户比例录入）：始终固定使用库中纸张尺寸，
+        // 不允许自动识别的加长图/动态纸覆盖，打印往录入纸张尺寸靠并按当前外框重算比例。
+        if (!IsCustomPaperName(name) && ShouldPreferDetectedLongPaper(name, definition, detected))
         {
             return new PaperDetection
             {
@@ -777,6 +779,27 @@ public static class TitleBlockScanner
             };
         }
 
+        // 任意纸张：比例按当前外框实际边长与库纸张重算（同向/宽高互换取误差小者），
+        // 块参照被缩放时比例仍正确；RequiresCustomPaper 触发 PMP 注册与精确等比打印链路。
+        if (IsCustomPaperName(name))
+        {
+            var frameScale = InferFrameScale(frameWidth, frameHeight, definition.PaperWidthMm, definition.PaperHeightMm);
+            if (frameScale > 0)
+            {
+                return new PaperDetection
+                {
+                    PaperName = name,
+                    ScaleText = PaperSizeDetector.ToScaleText(frameScale),
+                    ScaleValue = frameScale,
+                    IsLong = false,
+                    PaperWidthMm = definition.PaperWidthMm,
+                    PaperHeightMm = definition.PaperHeightMm,
+                    RequiresCustomPaper = true,
+                    Note = $"任意纸张来自图框库，输出纸张 {definition.PaperWidthMm:0.##} x {definition.PaperHeightMm:0.##} mm；比例按当前图框边界重新计算为 {PaperSizeDetector.ToScaleText(frameScale)}"
+                };
+            }
+        }
+
         return new PaperDetection
         {
             PaperName = name,
@@ -787,6 +810,34 @@ public static class TitleBlockScanner
             PaperHeightMm = definition.PaperHeightMm,
             Note = $"固定纸张来自图框库，输出纸张 {definition.PaperWidthMm:0.##} x {definition.PaperHeightMm:0.##} mm；比例按图框边界自动识别为 {detected.ScaleText}"
         };
+    }
+
+    private static bool IsCustomPaperName(string paperName)
+    {
+        return string.Equals(paperName, PaperSizeDetector.CustomPaperName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// 按当前图框外框实际边长与库纸张尺寸反推比例；同向和宽高互换两种解释取误差小者，
+    /// 与 <see cref="InferRecordedPaperScale"/> 同理，但输入为扫描时的当前外框而非录入外框。
+    /// </summary>
+    private static double InferFrameScale(double frameWidth, double frameHeight, double paperWidthMm, double paperHeightMm)
+    {
+        if (frameWidth <= 0 || frameHeight <= 0 || paperWidthMm <= 0 || paperHeightMm <= 0)
+        {
+            return 0;
+        }
+
+        var directX = frameWidth / paperWidthMm;
+        var directY = frameHeight / paperHeightMm;
+        var swappedX = frameWidth / paperHeightMm;
+        var swappedY = frameHeight / paperWidthMm;
+        var directError = RelativeScaleDifference(directX, directY);
+        var swappedError = RelativeScaleDifference(swappedX, swappedY);
+        var scale = directError <= swappedError
+            ? (directX + directY) / 2d
+            : (swappedX + swappedY) / 2d;
+        return double.IsNaN(scale) || double.IsInfinity(scale) || scale <= 0 ? 0 : scale;
     }
 
     private static bool ShouldPreferDetectedLongPaper(string libraryPaperName, TitleBlockDefinition definition, PaperDetection detected)

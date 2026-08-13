@@ -636,6 +636,18 @@ private static bool IsEntityVisible(Entity entity)
 - `RestoreDialog(this)` — CAD 取点结束后恢复原窗口并置顶
 - 所有回到 CAD 取点的流程（框选字段、框选打印范围、生成目录等）统一使用
 
+### 10.7 任意纸张（识别不到标准纸张时按用户比例换算）
+
+> 图框外框尺寸识别不到 A4~A0 及其加长纸张时（如 40000×30000 图框），
+> 要求用户输入绘图比例，按 `图面尺寸 / 比例 = 纸张mm` 生成任意纸张（40000×30000 ÷ 100 = 400×300mm），
+> 避免打印出超大尺寸的图。
+
+**录入/编辑**：[`ArbitraryPaperPicker.cs`](src/Common/ArbitraryPaperPicker.cs) 的 `DetectCandidatesOrPrompt` 在候选为空时弹出 [`CustomScaleForm`](src/Common/Pages/CustomScaleForm.cs)（带提示文案、支持小数比例 `143`/`1:143`），用户确认后生成 `PaperName="自定义"`（`PaperSizeDetector.CustomPaperName`）+ `RequiresCustomPaper=true` 的候选；取消则沿用原 `GuessScale` 兜底。录入（`AddTitleBlockCommands`）、编辑（`EditTitleBlockCommands`）、对话框内重新框选打印范围（`FieldBoxSelectDialog.SelectPrintArea`）三处统一接入；`FieldBoxSelectDialog` 纸张行另有"任意纸张…"按钮可主动指定。
+
+**扫描**：`TitleBlockScanner.ApplyFixedPaper` 对"自定义"条目始终固定使用库中纸张尺寸（不被自动识别的加长图覆盖），并按当前图框外框实际边长重算比例（`InferFrameScale`，同向/宽高互换取误差小者，块缩放时仍正确），置 `RequiresCustomPaper=true`。
+
+**打印**：走既有任意纸链路——`CustomPaperBatchPreparer` 注册 PMP 纸张 → `RequireExactPaperSize`/`UseExactWindowScale` → `PlotterService.SetExactWindowScale` 按窗口与纸张物理尺寸精确等比打印，无需额外代码。
+
 ---
 
 ## 11. 快捷键设置（命令别名）
@@ -748,6 +760,8 @@ AutoCAD Core 版本额外使用 `#if ACAD_CORE` 子条件处理 `CadApp.ShowModa
 │   │   ├── BlockFrameGeometry.cs        ← 块定义帧几何: 递归找外框+收集边界实体句柄
 │   │   ├── RectangleGeometry.cs         ← 公共矩形几何函数: Polyline/2d/3d→矩形验证
 │   │   ├── CadWindowFocus.cs            ← CAD 焦点管理: HideForCadInput/RestoreDialog
+│   │   ├── ArbitraryPaperPicker.cs      ← 任意纸张: 识别不到标准纸时弹比例输入框换算
+│   │   ├── ScaleSettingsPicker.cs       ← 比例设置: 图中拾取图框反推自定义比例
 │   │   ├── CommandAliasManager.cs       ← 命令别名管理: PGP 读写+REINIT
 │   │   ├── RasterPlotOrientation.cs     ← 栅格输出 DCS 方向判断
 │   │   ├── CsvExporter.cs              ← CSV 导出 (UTF-8 BOM)
@@ -763,7 +777,7 @@ AutoCAD Core 版本额外使用 `#if ACAD_CORE` 子条件处理 `CadApp.ShowModa
 │   │       ├── TitleBlockLibraryManagerForm.cs ← 图框库管理面板
 │   │       ├── PaperSizeSelectionForm.cs   ← 新增图框时纸张选择对话框
 │   │       ├── SinglePlotPaperSelectionForm.cs ← 单张打印纸张选择对话框
-│   │       ├── CustomScaleForm.cs          ← 非标图纸整数比例选择对话框
+│   │       ├── CustomScaleForm.cs          ← 非标图纸自定义比例对话框 (支持小数, 图框录入/单张打印共用)
 │   │       ├── FieldBoxSelectDialog.cs     ← 新增图框可选字段框选对话框 (日期/版次/阶段/信息1/信息2)
 │   │       ├── DrawingNumberReorderDialog.cs ← 图号重排对话框 (WinForms壳)
 │   │       ├── DrawingNumberReorderControl.xaml + .cs ← 图号重排 WPF 控件

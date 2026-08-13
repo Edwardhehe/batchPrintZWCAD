@@ -2218,7 +2218,8 @@ public sealed class BatchPlotForm : Form
                     var mergePlans = PdfDocumentService.PlanMerges(
                         mergeInputs,
                         _mergedOutputPath,
-                        _settings.MergePdfByPaperSize);
+                        _settings.MergePdfByPaperSize,
+                        _settings.AddSequenceWhenPdfExists);
                     foreach (var mergePlan in mergePlans)
                     {
                         PdfDocumentService.Merge(
@@ -2447,6 +2448,16 @@ public sealed class BatchPlotForm : Form
     private void PrepareCustomPaperRegistrations(IReadOnlyList<PlotJob> jobs, string deviceName)
     {
         var result = CustomPaperBatchPreparer.Prepare(jobs, deviceName);
+#if ZWCAD
+        // 中望的图框库任意纸张仍须精确注册、精确选中实际介质，但不能强制使用
+        // SetCustomPrintScale；该组合在标题栏批打中会生成页幅正确却没有内容的白页。
+        // 这里只恢复标题栏批打原有的 ScaleToFit，矩形批打、单张打印和 AutoCAD 路径不受影响。
+        foreach (var job in jobs.Where(job =>
+                     string.Equals(job.PaperName, PaperSizeDetector.CustomPaperName, StringComparison.OrdinalIgnoreCase)))
+        {
+            job.UseExactWindowScale = false;
+        }
+#endif
         if (result.Registrations.Count == 0)
         {
             return;

@@ -135,7 +135,8 @@ public sealed partial class BatchPlotCommands
                 paperDetectionOptions.PreferredPaperWidthMm = existing.PaperWidthMm;
                 paperDetectionOptions.PreferredPaperHeightMm = existing.PaperHeightMm;
             }
-            var paperOptions = PaperSizeDetector.DetectCandidatesOrFallback(
+            // 识别不到标准纸张时要求用户输入绘图比例，按 图面尺寸/比例 生成任意纸张，避免超大尺寸输出。
+            var paperOptions = ArbitraryPaperPicker.DetectCandidatesOrPrompt(
                     detectedWidth,
                     detectedHeight,
                     paperDetectionOptions)
@@ -366,7 +367,7 @@ public sealed partial class BatchPlotCommands
             ScaleValue = scale,
             ScaleText = FormatEditScale(scale),
             IsLong = definition.PaperName.IndexOf('+') > 0,
-            RequiresCustomPaper = string.Equals(definition.PaperName, "自定义", StringComparison.OrdinalIgnoreCase),
+            RequiresCustomPaper = string.Equals(definition.PaperName, PaperSizeDetector.CustomPaperName, StringComparison.OrdinalIgnoreCase),
             Note = "来自图框信息库的原配置"
         });
     }

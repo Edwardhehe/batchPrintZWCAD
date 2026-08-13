@@ -1288,7 +1288,8 @@ public sealed class RectangleBatchPlotForm : Form
                 var mergePlans = PdfDocumentService.PlanMerges(
                     mergeInputs,
                     mergedOutput,
-                    _settings.MergePdfByPaperSize);
+                    _settings.MergePdfByPaperSize,
+                    _settings.AddSequenceWhenPdfExists);
                 foreach (var mergePlan in mergePlans)
                 {
                     PdfDocumentService.Merge(

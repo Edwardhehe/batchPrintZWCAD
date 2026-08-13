@@ -144,6 +144,15 @@ public static class PdfDocumentService
         string requestedOutputPath,
         bool groupByPaperSize)
     {
+        return PlanMerges(inputs, requestedOutputPath, groupByPaperSize, avoidExistingFiles: false);
+    }
+
+    public static IReadOnlyList<PdfMergePlan> PlanMerges(
+        IReadOnlyList<PdfMergeInput> inputs,
+        string requestedOutputPath,
+        bool groupByPaperSize,
+        bool avoidExistingFiles)
+    {
         if (inputs == null || inputs.Count == 0)
         {
             throw new InvalidOperationException("没有可合并的 PDF 文件。");
@@ -151,7 +160,12 @@ public static class PdfDocumentService
 
         if (!groupByPaperSize)
         {
-            return new[] { new PdfMergePlan(requestedOutputPath, inputs.ToList()) };
+            return new[]
+            {
+                new PdfMergePlan(
+                    ResolveMergeOutputPath(requestedOutputPath, avoidExistingFiles, null),
+                    inputs.ToList())
+            };
         }
 
         // 宽高按短边/长边归一化，因此同一张纸横放和竖放仍属于同一尺寸组。
@@ -161,11 +175,17 @@ public static class PdfDocumentService
             .ToList();
         if (groups.Count == 1)
         {
-            return new[] { new PdfMergePlan(requestedOutputPath, groups[0].ToList()) };
+            return new[]
+            {
+                new PdfMergePlan(
+                    ResolveMergeOutputPath(requestedOutputPath, avoidExistingFiles, null),
+                    groups[0].ToList())
+            };
         }
 
         var plans = new List<PdfMergePlan>();
-        var usedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var usedRequestedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var reservedOutputPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var group in groups)
         {
             var first = group.First();
@@ -173,16 +193,41 @@ public static class PdfDocumentService
             var outputPath = AppendFileNameSuffix(requestedOutputPath, suffix);
             var candidate = outputPath;
             var sequence = 2;
-            while (!usedPaths.Add(Path.GetFullPath(candidate)))
+            while (!usedRequestedPaths.Add(Path.GetFullPath(candidate)))
             {
                 candidate = AppendFileNameSuffix(outputPath, sequence.ToString());
                 sequence++;
             }
 
-            plans.Add(new PdfMergePlan(candidate, group.ToList()));
+            plans.Add(new PdfMergePlan(
+                ResolveMergeOutputPath(candidate, avoidExistingFiles, reservedOutputPaths),
+                group.ToList()));
         }
 
         return plans;
+    }
+
+    private static string ResolveMergeOutputPath(
+        string requestedOutputPath,
+        bool avoidExistingFiles,
+        ISet<string>? reservedPaths)
+    {
+        if (!avoidExistingFiles)
+        {
+            return requestedOutputPath;
+        }
+
+        var fullPath = Path.GetFullPath(requestedOutputPath);
+        var directory = Path.GetDirectoryName(fullPath)
+            ?? throw new InvalidOperationException("合并 PDF 输出路径无效: " + requestedOutputPath);
+        // 与普通 PDF 输出复用同一套序号规则；按纸张分组时 reservedPaths 还会阻止本批计划互相重名。
+        return FileNameSanitizer.MakeUnique(
+            directory,
+            Path.GetFileNameWithoutExtension(fullPath),
+            reservedPaths,
+            avoidExistingFile: true,
+            extension: Path.GetExtension(fullPath),
+            createDirectory: false);
     }
 
     private static string BuildPaperSizeSuffix(PdfMergeInput input, PaperSizeKey size)

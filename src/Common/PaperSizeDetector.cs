@@ -97,6 +97,13 @@ public static class PaperSizeDetector
     /// <summary>内置支持的比例列表（只读）；用户自定义比例见 <see cref="AppSettings.CustomScales"/>。</summary>
     public static IReadOnlyList<double> BuiltInScales => CommonScales;
 
+    /// <summary>
+    /// 任意纸张的库记录名称约定：外框识别不到 A4~A0 及其加长纸张时，
+    /// 按用户输入的绘图比例换算出的纸张（图面尺寸 / 比例 = 纸张毫米尺寸）。
+    /// 扫描打印时固定使用库中宽高，并按当前图框外框重新计算比例。
+    /// </summary>
+    public const string CustomPaperName = "自定义";
+
     private static readonly int[] IntegerScales = { 1, 2, 4, 5, 8, 10, 20, 25, 50, 100, 200, 500, 1000 };
 
     /// <summary>

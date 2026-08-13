@@ -163,7 +163,7 @@ public sealed partial class BatchPlotCommands
                         PaperWidthMm = paperW,
                         PaperHeightMm = paperH,
                         ScaleValue = scale,
-                        ScaleText = $"1:{scale}",
+                        ScaleText = PaperSizeDetector.ToScaleText(scale),
                         Note = $"自定义纸张 {paperW:0.##} x {paperH:0.##} mm"
                     }
                 };

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Linq;
 using System.Windows.Forms;
 #if AUTOCAD
 using Autodesk.AutoCAD.EditorInput;
@@ -344,12 +345,14 @@ public sealed class FieldBoxSelectDialog : Form
             UpdatePrintAreaStatus();
 
             // 打印范围变化后重新识别纸张，与原独立纸张界面使用最终外框检测的行为一致。
+            // 识别不到标准纸张时要求用户输入绘图比例（对话框内嵌套弹窗，owner 传 this 保证置顶）。
             var detectedWidth = Math.Abs(second.Value.X - first.Value.X);
             var detectedHeight = Math.Abs(second.Value.Y - first.Value.Y);
-            ApplyPaperOptions(PaperSizeDetector.DetectCandidatesOrFallback(
+            ApplyPaperOptions(ArbitraryPaperPicker.DetectCandidatesOrPrompt(
                 detectedWidth,
                 detectedHeight,
-                _paperDetectionOptions));
+                _paperDetectionOptions,
+                this));
         }
         finally
         {
@@ -545,7 +548,7 @@ public sealed class FieldBoxSelectDialog : Form
         return panel;
     }
 
-    /// <summary>纸张行只显示候选下拉框；纸张物理尺寸和比例由所选候选完整携带。</summary>
+    /// <summary>纸张行：候选下拉框 + "任意纸张…"按钮，允许用户主动指定任意纸张与比例。</summary>
     private Control MakePaperRow()
     {
         _paperName.Dock = DockStyle.Fill;
@@ -555,16 +558,71 @@ public sealed class FieldBoxSelectDialog : Form
         var panel = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 1,
+            ColumnCount = 2,
             RowCount = 1,
             Margin = Padding.Empty,
             Padding = Padding.Empty
         };
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(110)));
 
         panel.Controls.Add(_paperName, 0, 0);
+        var arbitraryButton = UiLayout.CreateButton("任意纸张…", 100);
+        arbitraryButton.Dock = DockStyle.Right;
+        arbitraryButton.Click += (_, _) => PickArbitraryPaper();
+        panel.Controls.Add(arbitraryButton, 1, 0);
 
         return panel;
+    }
+
+    /// <summary>
+    /// 主动指定任意纸张：按当前打印范围宽高弹出比例输入框，
+    /// 生成的"自定义"候选加入下拉并选中（同尺寸项去重替换）。
+    /// </summary>
+    private void PickArbitraryPaper()
+    {
+        var width = Math.Abs(_printAreaCorners.Corner2.X - _printAreaCorners.Corner1.X);
+        var height = Math.Abs(_printAreaCorners.Corner2.Y - _printAreaCorners.Corner1.Y);
+        if (width <= 1e-6 || height <= 1e-6)
+        {
+            return;
+        }
+
+        var guessedScale = PaperSizeDetector.GuessScale(width, height);
+        using var scaleForm = new CustomScaleForm(width, height, guessedScale, ArbitraryPaperPicker.HintText);
+        if (scaleForm.ShowDialog(this) != DialogResult.OK)
+        {
+            return;
+        }
+
+        var scale = scaleForm.SelectedScale;
+        var arbitrary = new PaperDetection
+        {
+            PaperName = PaperSizeDetector.CustomPaperName,
+            PaperWidthMm = width / scale,
+            PaperHeightMm = height / scale,
+            ScaleValue = scale,
+            ScaleText = PaperSizeDetector.ToScaleText(scale),
+            RequiresCustomPaper = true,
+            Note = $"任意纸张：按用户输入比例 {PaperSizeDetector.ToScaleText(scale)} 换算，输出纸张 {width / scale:0.##} x {height / scale:0.##} mm"
+        };
+
+        // 同尺寸"自定义"项去重替换，避免重复添加。
+        var options = _paperOptions.ToList();
+        var existingIndex = options.FindIndex(x =>
+            string.Equals(x.PaperName, PaperSizeDetector.CustomPaperName, StringComparison.OrdinalIgnoreCase)
+            && Math.Abs(x.PaperWidthMm - arbitrary.PaperWidthMm) <= 0.01d
+            && Math.Abs(x.PaperHeightMm - arbitrary.PaperHeightMm) <= 0.01d);
+        if (existingIndex >= 0)
+        {
+            options[existingIndex] = arbitrary;
+        }
+        else
+        {
+            options.Add(arbitrary);
+        }
+
+        ApplyPaperOptions(options, arbitrary.PaperName, arbitrary.PaperWidthMm, arbitrary.PaperHeightMm);
     }
 
     private void ApplyPaperOptions(
