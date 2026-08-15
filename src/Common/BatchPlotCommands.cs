@@ -660,6 +660,11 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
 
     private static void AddBlockLog(string message)
     {
+        if (!BatchPlotLogger.IsEnabled)
+        {
+            return;
+        }
+
         try
         {
             var logDirectory = Path.Combine(TitleBlockLibraryStore.DefaultDirectory, "Logs");

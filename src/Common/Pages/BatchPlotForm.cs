@@ -1696,11 +1696,14 @@ public sealed class BatchPlotForm : Form
             _lastLogPath = BatchPlotLogger.SaveRunLog(_logLines);
             RefreshStatus();
 
+            var logText = string.IsNullOrWhiteSpace(_lastLogPath)
+                ? ""
+                : $"\n日志:\n{_lastLogPath}";
             var failedText = failed == 0
                 ? ""
                 : "\n\n失败项:\n" + string.Join("\n", results.Where(x => x.Error != null).Take(20).Select(x => $"{x.Job.DrawingNumber}_{x.Job.Title}: {x.Error!.Message}"));
             MessageBox.Show(
-                $"拆图完成: 成功 {success} 张，失败 {failed} 张。\n日志:\n{_lastLogPath}{failedText}",
+                $"拆图完成: 成功 {success} 张，失败 {failed} 张。{logText}{failedText}",
                 "批量拆图",
                 MessageBoxButtons.OK,
                 failed == 0 ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
@@ -1850,6 +1853,7 @@ public sealed class BatchPlotForm : Form
         _settings.MergePdfByPaperSize = updated.MergePdfByPaperSize;
         _settings.OpenOutputDirectoryAfterBatchPrint = updated.OpenOutputDirectoryAfterBatchPrint;
         _settings.OpenMergedPdfAfterMerge = updated.OpenMergedPdfAfterMerge;
+        _settings.GeneratePrintLog = updated.GeneratePrintLog;
         _settings.PdfFileNamePattern = updated.PdfFileNamePattern;
         _settings.PdfFileNameSeparator = updated.PdfFileNameSeparator;
         _settings.PdfFileNameFields = updated.PdfFileNameFields.ToList();
@@ -2174,7 +2178,9 @@ public sealed class BatchPlotForm : Form
                 {
                     completed++;
                     _statusLabel.Text = $"打印中... {completed} / {selected.Count}";
-                    AppendLog("INFO", $"开始打印 {job.DrawingNumber}_{job.Title} -> {job.OutputPath}");
+                    AppendLog(
+                        "INFO",
+                        $"开始打印 {job.DrawingNumber}_{job.Title}；源文件={job.SourceFile}；布局={job.SpaceName}；输出={job.OutputPath}");
                     System.Windows.Forms.Application.DoEvents();
                 },
                 _printCts.Token);
@@ -2241,14 +2247,15 @@ public sealed class BatchPlotForm : Form
                 }
             }
 
-            _lastLogPath = BatchPlotLogger.SaveRunLog(_logLines);
+            var printLogPath = SavePrintLogIfEnabled();
+            var printLogText = string.IsNullOrWhiteSpace(printLogPath) ? "" : $"\n日志: {printLogPath}";
             _statusLabel.Text = $"完成，共 {printed} 张";
             var mergedFilesText = string.Join("\n", mergedOutputPaths);
             var summary = mergePdf
                 ? mergedSuccessfully
-                    ? $"打印并合并完成: 共 {printed} 张，生成 {mergedOutputPaths.Count} 个 PDF。\n合并文件:\n{mergedFilesText}\n日志: {_lastLogPath}"
-                    : $"打印完成，但 PDF 合并未全部完成。\n成功打印 {printed} 张，失败 {failed.Count} 项，已生成 {mergedOutputPaths.Count} 个合并 PDF。\n日志: {_lastLogPath}"
-                : $"打印完成: 成功 {printed} 张，失败 {failed.Count} 张。\n日志: {_lastLogPath}";
+                    ? $"打印并合并完成: 共 {printed} 张，生成 {mergedOutputPaths.Count} 个 PDF。\n合并文件:\n{mergedFilesText}{printLogText}"
+                    : $"打印完成，但 PDF 合并未全部完成。\n成功打印 {printed} 张，失败 {failed.Count} 项，已生成 {mergedOutputPaths.Count} 个合并 PDF。{printLogText}"
+                : $"打印完成: 成功 {printed} 张，失败 {failed.Count} 张。{printLogText}";
             if (failed.Count > 0)
             {
                 summary += "\n\n失败项:\n" + string.Join("\n", failed);
@@ -2269,13 +2276,17 @@ public sealed class BatchPlotForm : Form
         {
             _statusLabel.Text = $"已停止（已完成 {completed} / {selected.Count}）";
             AppendLog("INFO", $"用户取消打印，已完成 {completed} / {selected.Count}");
-            _lastLogPath = BatchPlotLogger.SaveRunLog(_logLines);
-            MessageBox.Show($"打印已停止。\n已完成 {completed} / {selected.Count} 张。\n日志: {_lastLogPath}", "批量打印", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            var printLogPath = SavePrintLogIfEnabled();
+            var printLogText = string.IsNullOrWhiteSpace(printLogPath) ? "" : $"\n日志: {printLogPath}";
+            MessageBox.Show($"打印已停止。\n已完成 {completed} / {selected.Count} 张。{printLogText}", "批量打印", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
         catch (Exception ex)
         {
             _statusLabel.Text = "打印失败";
-            MessageBox.Show("打印失败: " + ex.Message, "批量打印", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            AppendLog("ERROR", ex.ToString());
+            var printLogPath = SavePrintLogIfEnabled();
+            var printLogText = string.IsNullOrWhiteSpace(printLogPath) ? "" : $"\n日志: {printLogPath}";
+            MessageBox.Show("打印失败: " + ex.Message + printLogText, "批量打印", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
         finally
         {
@@ -2666,7 +2677,28 @@ public sealed class BatchPlotForm : Form
 
     private void AppendLog(string level, string message)
     {
+        if (!_settings.GeneratePrintLog)
+        {
+            return;
+        }
+
         _logLines.Add(BatchPlotLogger.Format(level, message));
+    }
+
+    /// <summary>
+    /// 打印日志由常规设置显式控制。关闭时既不创建目录/文件，也清空旧路径，
+    /// 避免第二次打印的完成提示误显示上一次日志。
+    /// </summary>
+    private string SavePrintLogIfEnabled()
+    {
+        _lastLogPath = "";
+        if (!_settings.GeneratePrintLog)
+        {
+            return "";
+        }
+
+        _lastLogPath = BatchPlotLogger.SaveRunLog(_logLines);
+        return _lastLogPath;
     }
 
     private void RefreshStatus()

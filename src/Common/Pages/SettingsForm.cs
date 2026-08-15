@@ -36,6 +36,7 @@ public sealed class SettingsForm : Form
     private readonly CheckBox _mergePdfByPaperSize = new();
     private readonly CheckBox _openOutputDirectoryAfterBatchPrint = new();
     private readonly CheckBox _openMergedPdfAfterMerge = new();
+    private readonly CheckBox _generatePrintLog = new();
     private readonly ComboBox _directoryColorIndex = new();
     private readonly NumericUpDown _directoryTextHeight = new();
     private readonly NumericUpDown _directoryTextWidthFactor = new();
@@ -197,9 +198,18 @@ public sealed class SettingsForm : Form
             _hideFrameBoundaryWhenPlotting,
             "勾选后，正式打印期间把识别到的图框外边框临时移到“LA-临时不打印层”；打印完成、失败或取消后立即恢复。");
 
-        var plotTable = CreateSettingsTable(2);
+        _generatePrintLog.Text = "生成打印日志";
+        _generatePrintLog.AutoSize = true;
+        _generatePrintLog.Dock = DockStyle.Fill;
+        var printLogTip = new ToolTip();
+        printLogTip.SetToolTip(
+            _generatePrintLog,
+            "插件日志总开关。勾选后允许生成打印、拆图、扫描警告和图框录入诊断日志；默认关闭。日志目录：" + BatchPlotLogger.LogDirectory);
+
+        var plotTable = CreateSettingsTable(3);
         UiLayout.AddRow(plotTable, 0, "", _openExternalDwgForPlot);
         UiLayout.AddRow(plotTable, 1, "", _hideFrameBoundaryWhenPlotting);
+        UiLayout.AddRow(plotTable, 2, "", _generatePrintLog);
 
         var outputTable = CreateSettingsTable(1);
         UiLayout.AddRow(outputTable, 0, "", _addSequenceWhenPdfExists);
@@ -1258,6 +1268,7 @@ public sealed class SettingsForm : Form
         _mergePdfByPaperSize.Checked = settings.MergePdfByPaperSize;
         _openOutputDirectoryAfterBatchPrint.Checked = settings.OpenOutputDirectoryAfterBatchPrint;
         _openMergedPdfAfterMerge.Checked = settings.OpenMergedPdfAfterMerge;
+        _generatePrintLog.Checked = settings.GeneratePrintLog;
         _fileNamePattern.Text = settings.PdfFileNamePattern;
         _fileNameSequenceStart.Value = Math.Max(
             _fileNameSequenceStart.Minimum,
@@ -1313,6 +1324,7 @@ public sealed class SettingsForm : Form
         current.MergePdfByPaperSize = _mergePdfByPaperSize.Checked;
         current.OpenOutputDirectoryAfterBatchPrint = _openOutputDirectoryAfterBatchPrint.Checked;
         current.OpenMergedPdfAfterMerge = _openMergedPdfAfterMerge.Checked;
+        current.GeneratePrintLog = _generatePrintLog.Checked;
         if (string.IsNullOrWhiteSpace(_fileNamePattern.Text))
         {
             MessageBox.Show("请输入文件命名规则。", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);

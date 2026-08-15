@@ -994,7 +994,7 @@ public static class TitleBlockScanner
 
     private static void LogScanWarnings(string sourceName, IReadOnlyCollection<string> warnings)
     {
-        if (warnings.Count == 0)
+        if (warnings.Count == 0 || !BatchPlotLogger.IsEnabled)
         {
             return;
         }

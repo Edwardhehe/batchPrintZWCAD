@@ -5,8 +5,8 @@ using System.Linq;
 namespace ZwcadBatchPlot;
 
 /// <summary>
-/// 图纸空间排序工具 — 用并查集 + 矩形边沿重叠判断实现行列分组，
-/// 图号重排和矩形框批量打印共用同一算法，保证排序结果一致。
+/// 图纸空间排序工具 — 用锚点带状分组 + 矩形边沿重叠判断实现行列排序，
+/// 图框块和矩形框批量打印共用同一算法，保证排序结果一致。
 /// </summary>
 public static class SpatialSorter
 {
@@ -19,7 +19,8 @@ public static class SpatialSorter
         var result = new List<PlotJob>(jobs.Count);
         var layoutGroups = jobs
             .Select((job, index) => new { Job = job, Index = index })
-            .GroupBy(item => item.Job.SpaceName ?? "", StringComparer.Ordinal)
+            // CAD 布局名不区分大小写；防止外部 DWG/旧任务中的名称大小写差异把同一布局拆开。
+            .GroupBy(item => item.Job.SpaceName ?? "", StringComparer.OrdinalIgnoreCase)
             .OrderBy(group => group.Min(item => item.Job.LayoutTabOrder))
             // 兼容旧任务：没有 TabOrder 时，保持扫描/传入列表中的布局先后。
             .ThenBy(group => group.Min(item => item.Index))
@@ -45,69 +46,86 @@ public static class SpatialSorter
             return jobs.ToList();
         }
 
-        // ── 并查集分组：矩形边沿重叠 ≥ 较小边长的 30% → 同一行/列 ──
-        // 相比旧版中心点+中位数间隙法，此方法对不同大小的图框（如 A0 和 A3 同行）也能正确分组。
-        var parent = Enumerable.Range(0, jobs.Count).ToArray();
-        int Find(int x) => parent[x] == x ? x : parent[x] = Find(parent[x]);
-        void Union(int a, int b) { parent[Find(a)] = Find(b); }
+        var remaining = jobs
+            .Select((job, index) => new SortItem(job, index))
+            .ToList();
+        var result = new List<PlotJob>(jobs.Count);
 
-        for (var i = 0; i < jobs.Count; i++)
+        // 每次从阅读方向最前端选一个锚点，只把与“锚点本身”重叠的图框收入当前行/列。
+        // 禁止使用并查集的传递闭包：较高的大图框可能同时碰到上下两行，A~B、B~C 的
+        // 传递关系会把本来分开的 A、C 错并为一行，正是混合 A1/A3 图框顺序跳动的根因。
+        while (remaining.Count > 0)
         {
-            for (var j = i + 1; j < jobs.Count; j++)
-            {
-                var ri = jobs[i];
-                var rj = jobs[j];
-                if (horizontalFirst)
-                {
-                    // 列分组：X 区间重叠
-                    var overlapX = Math.Min(MaxX(ri), MaxX(rj)) - Math.Max(MinX(ri), MinX(rj));
-                    var minW = Math.Min(MaxX(ri) - MinX(ri), MaxX(rj) - MinX(rj));
-                    if (overlapX >= minW * 0.3) Union(i, j);
-                }
-                else
-                {
-                    // 行分组：Y 区间重叠
-                    var overlapY = Math.Min(MaxY(ri), MaxY(rj)) - Math.Max(MinY(ri), MinY(rj));
-                    var minH = Math.Min(MaxY(ri) - MinY(ri), MaxY(rj) - MinY(rj));
-                    if (overlapY >= minH * 0.3) Union(i, j);
-                }
-            }
-        }
-
-        // ── 按分组整理 ──
-        var groupMap = new Dictionary<int, List<PlotJob>>();
-        for (var i = 0; i < jobs.Count; i++)
-        {
-            var root = Find(i);
-            if (!groupMap.TryGetValue(root, out var list))
-            {
-                list = new List<PlotJob>();
-                groupMap[root] = list;
-            }
-            list.Add(jobs[i]);
-        }
-
-        var groups = groupMap.Values.ToList();
-
-        // ── 组内排序 ──
-        foreach (var group in groups)
-        {
+            SortItem anchor;
+            List<SortItem> band;
             if (horizontalFirst)
-                group.Sort((a, b) => CenterY(b).CompareTo(CenterY(a))); // 列内 Y 降序（从上到下）
+            {
+                // 从左到右选列；同列内从上到下。
+                anchor = remaining
+                    .OrderBy(item => MinX(item.Job))
+                    .ThenByDescending(item => MaxY(item.Job))
+                    .ThenBy(item => item.OriginalIndex)
+                    .First();
+                band = remaining
+                    .Where(item => SharesBandWithAnchor(anchor.Job, item.Job, horizontalFirst: true))
+                    .OrderByDescending(item => CenterY(item.Job))
+                    .ThenBy(item => CenterX(item.Job))
+                    .ThenBy(item => item.OriginalIndex)
+                    .ToList();
+            }
             else
-                group.Sort((a, b) => CenterX(a).CompareTo(CenterX(b))); // 行内 X 升序（从左到右）
+            {
+                // 从上到下选行；同行内从左到右。
+                anchor = remaining
+                    .OrderByDescending(item => MaxY(item.Job))
+                    .ThenBy(item => MinX(item.Job))
+                    .ThenBy(item => item.OriginalIndex)
+                    .First();
+                band = remaining
+                    .Where(item => SharesBandWithAnchor(anchor.Job, item.Job, horizontalFirst: false))
+                    .OrderBy(item => CenterX(item.Job))
+                    .ThenByDescending(item => CenterY(item.Job))
+                    .ThenBy(item => item.OriginalIndex)
+                    .ToList();
+            }
+
+            result.AddRange(band.Select(item => item.Job));
+            var selectedIndices = new HashSet<int>(band.Select(item => item.OriginalIndex));
+            remaining.RemoveAll(item => selectedIndices.Contains(item.OriginalIndex));
         }
 
-        // ── 组间排序 ──
-        if (horizontalFirst)
-            groups = groups.OrderBy(g => g.Average(r => CenterX(r))).ToList();  // 列按 X 升序
-        else
-            groups = groups.OrderByDescending(g => g.Average(r => CenterY(r))).ToList(); // 行按 Y 降序
-
-        // ── 展平 ──
-        var result = new List<PlotJob>();
-        foreach (var group in groups) result.AddRange(group);
         return result;
+    }
+
+    private static bool SharesBandWithAnchor(PlotJob anchor, PlotJob candidate, bool horizontalFirst)
+    {
+        if (ReferenceEquals(anchor, candidate))
+        {
+            return true;
+        }
+
+        if (horizontalFirst)
+        {
+            var overlap = Math.Min(MaxX(anchor), MaxX(candidate)) - Math.Max(MinX(anchor), MinX(candidate));
+            var smallerWidth = Math.Min(MaxX(anchor) - MinX(anchor), MaxX(candidate) - MinX(candidate));
+            return smallerWidth > 1e-6 && overlap >= smallerWidth * 0.3d;
+        }
+
+        var verticalOverlap = Math.Min(MaxY(anchor), MaxY(candidate)) - Math.Max(MinY(anchor), MinY(candidate));
+        var smallerHeight = Math.Min(MaxY(anchor) - MinY(anchor), MaxY(candidate) - MinY(candidate));
+        return smallerHeight > 1e-6 && verticalOverlap >= smallerHeight * 0.3d;
+    }
+
+    private sealed class SortItem
+    {
+        public SortItem(PlotJob job, int originalIndex)
+        {
+            Job = job;
+            OriginalIndex = originalIndex;
+        }
+
+        public PlotJob Job { get; }
+        public int OriginalIndex { get; }
     }
 
     // UCS 任务必须在 UCS 坐标内排序；若退回 WCS 包围盒，旋转后行列会因包围盒重叠而错组。

@@ -1208,6 +1208,33 @@ public sealed class RectangleBatchPlotForm : Form
         var mergePdf = IsPdfOutput && _mergePdf.Checked;
         var mergedOutputPaths = new List<string>();
         var completed = 0;
+        var printLogLines = new List<string>();
+
+        // 常规设置中的“生成打印日志”是全局日志总开关；关闭时只保留界面状态和错误提示，
+        // 不在内存累计日志，也不触发日志目录或文件创建。
+        void AppendPrintLog(string level, string message)
+        {
+            if (_settings.GeneratePrintLog)
+            {
+                printLogLines.Add(BatchPlotLogger.Format(level, message));
+            }
+        }
+
+        string SavePrintLog()
+        {
+            return _settings.GeneratePrintLog
+                ? BatchPlotLogger.SaveRunLog(printLogLines)
+                : "";
+        }
+
+        static string BuildLogText(string path)
+        {
+            return string.IsNullOrWhiteSpace(path) ? "" : $"\n日志: {path}";
+        }
+
+        AppendPrintLog(
+            "INFO",
+            $"开始矩形框批量打印；共={selected.Count}；格式={SelectedOutputFormat}；设备={device}；打印样式={SelectedStyle()}");
         try
         {
             // 切换按钮为"停止"状态
@@ -1236,13 +1263,29 @@ public sealed class RectangleBatchPlotForm : Form
             CustomPaperBatchPreparer.Prepare(selected, device);
             var results = PlotterService.PlotMany(
                 selected, device, SelectedStyle(), _document, _settings,
-                beforeJob: _ =>
+                beforeJob: job =>
                 {
                     completed++;
                     _status.Text = $"打印中... {completed} / {selected.Count}";
+                    var finalOutput = originalPaths.TryGetValue(job, out var path) ? path : job.OutputPath;
+                    AppendPrintLog(
+                        "INFO",
+                        $"开始打印 {completed}/{selected.Count}；源文件={job.SourceFile}；布局={job.SpaceName}；输出={finalOutput}");
                     System.Windows.Forms.Application.DoEvents();
                 },
                 cancellationToken: _printCts.Token);
+
+            foreach (var result in results)
+            {
+                var finalOutput = originalPaths.TryGetValue(result.Job, out var path)
+                    ? path
+                    : result.Job.OutputPath;
+                AppendPrintLog(
+                    result.Succeeded ? "INFO" : "ERROR",
+                    result.Succeeded
+                        ? $"打印成功；布局={result.Job.SpaceName}；输出={finalOutput}"
+                        : $"打印失败；布局={result.Job.SpaceName}；输出={finalOutput}；错误={result.Error}");
+            }
 
             var failures = results.Where(result => !result.Succeeded).ToList();
             if (failures.Count > 0)
@@ -1274,6 +1317,7 @@ public sealed class RectangleBatchPlotForm : Form
                         mergePlan.OutputPath,
                         _settings.UseFileNameAsPdfBookmark);
                     mergedOutputPaths.Add(mergePlan.OutputPath);
+                    AppendPrintLog("INFO", $"合并 PDF 成功；输出={mergePlan.OutputPath}");
                 }
             }
 
@@ -1286,10 +1330,13 @@ public sealed class RectangleBatchPlotForm : Form
                 RevealOutput(null, directory);
             }
             _status.Text = $"完成，共 {selected.Count} 张";
+            AppendPrintLog("INFO", $"矩形框批量打印完成；成功={selected.Count}；失败=0");
+            var printLogPath = SavePrintLog();
+            var printLogText = BuildLogText(printLogPath);
             MessageBox.Show(
                 mergePdf
-                    ? $"打印并合并完成，共 {selected.Count} 张，生成 {mergedOutputPaths.Count} 个 PDF。\n{string.Join("\n", mergedOutputPaths)}"
-                    : $"打印完成，共 {selected.Count} 张。\n{directory}",
+                    ? $"打印并合并完成，共 {selected.Count} 张，生成 {mergedOutputPaths.Count} 个 PDF。\n{string.Join("\n", mergedOutputPaths)}{printLogText}"
+                    : $"打印完成，共 {selected.Count} 张。\n{directory}{printLogText}",
                 Text,
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information);
@@ -1297,12 +1344,16 @@ public sealed class RectangleBatchPlotForm : Form
         catch (OperationCanceledException)
         {
             _status.Text = $"已停止（已完成 {completed} / {selected.Count}）";
-            MessageBox.Show($"打印已停止。\n已完成 {completed} / {selected.Count} 张。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+            AppendPrintLog("INFO", $"用户取消打印；已开始={completed}/{selected.Count}");
+            var printLogPath = SavePrintLog();
+            MessageBox.Show($"打印已停止。\n已完成 {completed} / {selected.Count} 张。{BuildLogText(printLogPath)}", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
         catch (Exception ex)
         {
             _status.Text = "打印失败";
-            MessageBox.Show("矩形框批量打印失败: " + ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
+            AppendPrintLog("ERROR", "矩形框批量打印失败: " + ex);
+            var printLogPath = SavePrintLog();
+            MessageBox.Show("矩形框批量打印失败: " + ex.Message + BuildLogText(printLogPath), Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
         finally
         {
@@ -1789,6 +1840,7 @@ public sealed class RectangleBatchPlotForm : Form
             _settings.PaperMatchToleranceMm = updated.PaperMatchToleranceMm;
             _settings.RecognizeFourLineRectangleFrames = updated.RecognizeFourLineRectangleFrames;
             _settings.HideFrameBoundaryWhenPlotting = updated.HideFrameBoundaryWhenPlotting;
+            _settings.GeneratePrintLog = updated.GeneratePrintLog;
             _settings.LongPaperSnapToleranceMm = updated.LongPaperSnapToleranceMm;
             _settings.LongPaperNameFormat = updated.LongPaperNameFormat;
             _settings.SortOrderHorizontalFirst = updated.SortOrderHorizontalFirst;
