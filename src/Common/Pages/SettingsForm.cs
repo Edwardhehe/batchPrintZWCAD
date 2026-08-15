@@ -59,6 +59,9 @@ public sealed class SettingsForm : Form
     // 比例设置
     private readonly ListBox _scaleList = new();
     private readonly TextBox _scaleInput = new();
+    private readonly Label _scaleListSummary = new();
+    private readonly Label _scaleSelectionHint = new();
+    private Button _removeScaleButton = null!;
 
     public string? RequestedDirectoryColumnKey { get; private set; }
     public bool RequestPickDirectoryRowHeight { get; private set; }
@@ -112,8 +115,21 @@ public sealed class SettingsForm : Form
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleLeft,
             ForeColor = Color.DimGray,
-            Text = "图纸目录会写入当前 CAD 当前空间；目录列与批量打印实际识别出的图框字段保持一致。"
+            AutoEllipsis = true
         };
+        void UpdateFooterHint()
+        {
+            hint.Text = _tabs.SelectedIndex switch
+            {
+                0 => "常规设置会同时影响图框块、矩形框和单张打印中的对应功能。",
+                1 => "文件名预览会随规则即时更新；保存后应用于后续打印和拆图任务。",
+                2 => "图纸目录会写入当前 CAD 当前空间；目录列与批量打印实际识别出的图框字段保持一致。",
+                3 => "图框块录入后自动支持任意比例；比例列表只控制矩形框批量打印的识别范围。",
+                _ => ""
+            };
+        }
+        _tabs.SelectedIndexChanged += (_, _) => UpdateFooterHint();
+        UpdateFooterHint();
 
         var buttons = new FlowLayoutPanel
         {
@@ -287,96 +303,211 @@ public sealed class SettingsForm : Form
     {
         var page = new TabPage("比例设置")
         {
-            Padding = new Padding(UiLayout.Scale(10))
+            Padding = new Padding(UiLayout.Scale(10)),
+            BackColor = SystemColors.Control
         };
         var root = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 3,
+            RowCount = 2,
             Margin = Padding.Empty,
             Padding = Padding.Empty
         };
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(66)));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(64)));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(64)));
+
+        // 页面顶部直接说明两种批打模式的边界，避免用户为了图框块任意比例反复维护列表。
+        var scopePanel = new Panel
+        {
+            Dock = DockStyle.Fill,
+            BackColor = Color.FromArgb(239, 247, 255),
+            Padding = new Padding(UiLayout.Scale(12), UiLayout.Scale(7), UiLayout.Scale(12), UiLayout.Scale(7)),
+            Margin = Padding.Empty
+        };
+        var scopeText = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 2,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty
+        };
+        scopeText.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(24)));
+        scopeText.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        scopeText.Controls.Add(new Label
+        {
+            Text = "比例识别作用范围",
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Font = new System.Drawing.Font(UiLayout.DefaultFont, FontStyle.Bold),
+            ForeColor = Color.FromArgb(28, 78, 121),
+            Margin = Padding.Empty
+        }, 0, 0);
+        scopeText.Controls.Add(new Label
+        {
+            Text = "图框块：按录入纸张短边自动识别任意比例    ·    矩形框：仅识别下方内置及自定义比例",
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleLeft,
+            ForeColor = Color.FromArgb(55, 76, 94),
+            AutoEllipsis = true,
+            Margin = Padding.Empty
+        }, 0, 1);
+        scopePanel.Controls.Add(scopeText);
+        root.Controls.Add(scopePanel, 0, 0);
+
+        var content = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 1,
+            Margin = Padding.Empty,
+            Padding = new Padding(0, UiLayout.Scale(8), 0, 0)
+        };
+        content.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 56));
+        content.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 44));
+        content.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
         _scaleList.Dock = DockStyle.Fill;
         _scaleList.SelectionMode = SelectionMode.MultiExtended;
         _scaleList.IntegralHeight = false;
+        _scaleList.HorizontalScrollbar = true;
+        _scaleList.Margin = Padding.Empty;
+        _scaleList.SelectedIndexChanged += (_, _) => UpdateScaleListState();
         var listGroup = new GroupBox
         {
-            Text = "支持的比例（内置比例不可删除）",
+            Text = "矩形框可识别比例",
             Dock = DockStyle.Fill,
-            Padding = new Padding(UiLayout.Scale(6))
+            Padding = new Padding(UiLayout.Scale(8)),
+            Margin = new Padding(0, 0, UiLayout.Scale(5), 0)
         };
-        listGroup.Controls.Add(_scaleList);
-        root.Controls.Add(listGroup, 0, 0);
-
-        var addTable = new TableLayoutPanel
+        var listLayout = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 3,
+            ColumnCount = 1,
             RowCount = 2,
             Margin = Padding.Empty,
-            Padding = new Padding(0, UiLayout.Scale(6), 0, 0)
+            Padding = Padding.Empty
         };
-        addTable.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(180)));
-        addTable.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(96)));
-        addTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        addTable.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(30)));
-        addTable.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        _scaleInput.Dock = DockStyle.Fill;
-        addTable.Controls.Add(_scaleInput, 0, 0);
-        var addButton = UiLayout.CreateButton("添加", 82);
-        addButton.Dock = DockStyle.Left;
-        addButton.Click += (_, _) => AddCustomScale();
-        addTable.Controls.Add(addButton, 1, 0);
-        addTable.Controls.Add(new Label
-        {
-            Dock = DockStyle.Fill,
-            TextAlign = ContentAlignment.MiddleLeft,
-            ForeColor = Color.DimGray,
-            Text = "输入 143 表示 1:143；输入 0.25 表示 4:1；也支持 1:143 写法"
-        }, 2, 0);
-        var addHint = new Label
-        {
-            Dock = DockStyle.Fill,
-            TextAlign = ContentAlignment.MiddleLeft,
-            ForeColor = Color.DimGray,
-            Text = "添加后的比例随“保存”持久化，矩形框和图框块识别都会使用。"
-        };
-        addTable.Controls.Add(addHint, 0, 1);
-        addTable.SetColumnSpan(addHint, 3);
-        root.Controls.Add(addTable, 0, 1);
+        listLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        listLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(30)));
+        listLayout.Controls.Add(_scaleList, 0, 0);
+        _scaleListSummary.Dock = DockStyle.Fill;
+        _scaleListSummary.TextAlign = ContentAlignment.MiddleLeft;
+        _scaleListSummary.ForeColor = Color.DimGray;
+        _scaleListSummary.Margin = Padding.Empty;
+        listLayout.Controls.Add(_scaleListSummary, 0, 1);
+        listGroup.Controls.Add(listLayout);
+        content.Controls.Add(listGroup, 0, 0);
 
-        var pickTable = new TableLayoutPanel
+        var actionsGroup = new GroupBox
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 3,
+            Text = "自定义比例",
+            Padding = new Padding(UiLayout.Scale(10), UiLayout.Scale(8), UiLayout.Scale(10), UiLayout.Scale(8)),
+            Margin = new Padding(UiLayout.Scale(5), 0, 0, 0)
+        };
+        var actions = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 8,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty
+        };
+        actions.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(24)));
+        actions.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(34)));
+        actions.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(54)));
+        actions.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(30)));
+        actions.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(34)));
+        actions.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(34)));
+        actions.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(44)));
+        actions.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        actions.Controls.Add(new Label
+        {
+            Dock = DockStyle.Fill,
+            Text = "手动输入",
+            TextAlign = ContentAlignment.MiddleLeft,
+            Font = new System.Drawing.Font(UiLayout.DefaultFont, FontStyle.Bold),
+            Margin = Padding.Empty
+        }, 0, 0);
+
+        var inputRow = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
             RowCount = 1,
             Margin = Padding.Empty,
-            Padding = new Padding(0, UiLayout.Scale(6), 0, 0)
+            Padding = Padding.Empty
         };
-        pickTable.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(110)));
-        pickTable.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(110)));
-        pickTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        var pickButton = UiLayout.CreateButton("图中拾取…", 96);
-        pickButton.Dock = DockStyle.Left;
+        inputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        inputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(82)));
+        _scaleInput.Dock = DockStyle.Fill;
+        _scaleInput.Margin = new Padding(0, UiLayout.Scale(2), UiLayout.Scale(6), UiLayout.Scale(2));
+        _scaleInput.KeyDown += (_, e) =>
+        {
+            if (e.KeyCode != Keys.Enter)
+            {
+                return;
+            }
+
+            AddCustomScale();
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+        };
+        var addButton = UiLayout.CreateButton("添加", 72);
+        addButton.Dock = DockStyle.Fill;
+        addButton.Margin = new Padding(0, UiLayout.Scale(2), 0, UiLayout.Scale(2));
+        addButton.Click += (_, _) => AddCustomScale();
+        inputRow.Controls.Add(_scaleInput, 0, 0);
+        inputRow.Controls.Add(addButton, 1, 0);
+        actions.Controls.Add(inputRow, 0, 1);
+        actions.Controls.Add(new Label
+        {
+            Dock = DockStyle.Fill,
+            Text = "示例：143 = 1:143\r\n0.25 = 4:1，也支持直接输入 1:143 或 4:1",
+            TextAlign = ContentAlignment.MiddleLeft,
+            ForeColor = Color.DimGray,
+            Margin = Padding.Empty
+        }, 0, 2);
+        actions.Controls.Add(new Label
+        {
+            Dock = DockStyle.Fill,
+            Text = "快捷操作",
+            TextAlign = ContentAlignment.BottomLeft,
+            Font = new System.Drawing.Font(UiLayout.DefaultFont, FontStyle.Bold),
+            Margin = Padding.Empty
+        }, 0, 3);
+
+        var pickButton = UiLayout.CreateButton("从图中拾取比例…", 150);
+        pickButton.Dock = DockStyle.Fill;
+        pickButton.Margin = new Padding(0, UiLayout.Scale(2), 0, UiLayout.Scale(2));
         pickButton.Click += (_, _) => RequestScaleFromCad();
-        pickTable.Controls.Add(pickButton, 0, 0);
-        var removeButton = UiLayout.CreateButton("删除所选", 96);
-        removeButton.Dock = DockStyle.Left;
-        removeButton.Click += (_, _) => RemoveSelectedCustomScales();
-        pickTable.Controls.Add(removeButton, 1, 0);
-        pickTable.Controls.Add(new Label
+        actions.Controls.Add(pickButton, 0, 4);
+
+        _removeScaleButton = UiLayout.CreateButton("删除选中的自定义比例", 170);
+        _removeScaleButton.Dock = DockStyle.Fill;
+        _removeScaleButton.Margin = new Padding(0, UiLayout.Scale(2), 0, UiLayout.Scale(2));
+        _removeScaleButton.Click += (_, _) => RemoveSelectedCustomScales();
+        actions.Controls.Add(_removeScaleButton, 0, 5);
+
+        _scaleSelectionHint.Dock = DockStyle.Fill;
+        _scaleSelectionHint.TextAlign = ContentAlignment.MiddleLeft;
+        _scaleSelectionHint.ForeColor = Color.DimGray;
+        _scaleSelectionHint.AutoEllipsis = true;
+        _scaleSelectionHint.Margin = Padding.Empty;
+        actions.Controls.Add(_scaleSelectionHint, 0, 6);
+        actions.Controls.Add(new Label
         {
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleLeft,
             ForeColor = Color.DimGray,
-            Text = "图中拾取：在图中框选一个图框并选择 A0~A4 图幅，按短边自动计算比例"
-        }, 2, 0);
-        root.Controls.Add(pickTable, 0, 2);
+            Text = "从图中拾取时，框选图框并选择 A0~A4 图幅，程序按短边计算比例。新增和删除操作将在点击“保存”后生效。",
+            Margin = Padding.Empty
+        }, 0, 7);
+        actionsGroup.Controls.Add(actions);
+        content.Controls.Add(actionsGroup, 1, 0);
+        root.Controls.Add(content, 0, 1);
 
         page.Controls.Add(root);
         return page;
@@ -412,6 +543,34 @@ public sealed class SettingsForm : Form
         {
             _scaleList.Items.Add(new ScaleListItem(scale, true));
         }
+
+        UpdateScaleListState();
+    }
+
+    /// <summary>同步比例数量、选中提示和删除按钮状态，避免用户点击后才知道内置比例不可删除。</summary>
+    private void UpdateScaleListState()
+    {
+        var items = _scaleList.Items.Cast<ScaleListItem>().ToList();
+        var selected = _scaleList.SelectedItems.Cast<ScaleListItem>().ToList();
+        var builtInCount = items.Count(item => !item.IsCustom);
+        var customCount = items.Count - builtInCount;
+        _scaleListSummary.Text = $"内置 {builtInCount} 个 · 自定义 {customCount} 个（Ctrl/Shift 可多选）";
+
+        var canDelete = selected.Count > 0 && selected.All(item => item.IsCustom);
+        if (_removeScaleButton != null)
+        {
+            _removeScaleButton.Enabled = canDelete;
+        }
+
+        _scaleSelectionHint.Text = selected.Count switch
+        {
+            0 => "请选择自定义比例后删除；内置比例始终保留。",
+            _ when canDelete => $"已选择 {selected.Count} 个自定义比例，可以删除。",
+            _ => "当前选择包含内置比例，内置比例不可删除。"
+        };
+        _scaleSelectionHint.ForeColor = selected.Count > 0 && !canDelete
+            ? Color.FromArgb(174, 100, 25)
+            : Color.DimGray;
     }
 
     private List<double> ReadCustomScalesFromList()
@@ -459,6 +618,7 @@ public sealed class SettingsForm : Form
         var added = new ScaleListItem(scale, true);
         _scaleList.Items.Insert(insertIndex, added);
         _scaleList.SelectedItem = added;
+        UpdateScaleListState();
         _scaleInput.Clear();
         _scaleInput.Focus();
     }
@@ -485,6 +645,7 @@ public sealed class SettingsForm : Form
         {
             _scaleList.Items.Remove(item);
         }
+        UpdateScaleListState();
     }
 
     private void RequestScaleFromCad()

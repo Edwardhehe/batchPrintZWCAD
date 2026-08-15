@@ -312,10 +312,20 @@ public static class TitleBlockScanner
                     detectionOptions.PreferredPaperWidthMm = definition.PaperWidthMm;
                     detectionOptions.PreferredPaperHeightMm = definition.PaperHeightMm;
                 }
-                var detectedPaper = PaperSizeDetector.Detect(
+                // 图框块的比例由当前外框短边与图框库录入纸张短边直接反推，不再受比例列表限制。
+                // 比例列表仍只服务矩形框批打及旧库缺失纸张尺寸时的兼容回退。
+                var hasArbitraryScalePaper = PaperSizeDetector.TryDetectTitleBlockAtArbitraryScale(
                     width,
                     height,
-                    detectionOptions);
+                    definition.PaperName,
+                    definition.PaperWidthMm,
+                    definition.PaperHeightMm,
+                    effectivePaperToleranceMm,
+                    storedSettings.LongPaperSnapToleranceMm,
+                    out var arbitraryScalePaper);
+                var detectedPaper = hasArbitraryScalePaper
+                    ? arbitraryScalePaper
+                    : PaperSizeDetector.Detect(width, height, detectionOptions);
                 var paper = ApplyFixedPaper(definition, detectedPaper, width, height);
                 string title;
                 string number;
@@ -883,8 +893,8 @@ public static class TitleBlockScanner
     }
 
     /// <summary>
-    /// 按当前图框外框实际边长与库纸张尺寸反推比例；同向和宽高互换两种解释取误差小者，
-    /// 与 <see cref="InferRecordedPaperScale"/> 同理，但输入为扫描时的当前外框而非录入外框。
+    /// 按当前图框外框短边与库纸张短边反推任意比例。短边决定图幅和比例，长边只负责标准/加长判断；
+    /// 不能再平均两个方向，否则加长图会把长边变化错误混入比例。
     /// </summary>
     private static double InferFrameScale(double frameWidth, double frameHeight, double paperWidthMm, double paperHeightMm)
     {
@@ -893,15 +903,8 @@ public static class TitleBlockScanner
             return 0;
         }
 
-        var directX = frameWidth / paperWidthMm;
-        var directY = frameHeight / paperHeightMm;
-        var swappedX = frameWidth / paperHeightMm;
-        var swappedY = frameHeight / paperWidthMm;
-        var directError = RelativeScaleDifference(directX, directY);
-        var swappedError = RelativeScaleDifference(swappedX, swappedY);
-        var scale = directError <= swappedError
-            ? (directX + directY) / 2d
-            : (swappedX + swappedY) / 2d;
+        var scale = Math.Min(Math.Abs(frameWidth), Math.Abs(frameHeight))
+                    / Math.Min(Math.Abs(paperWidthMm), Math.Abs(paperHeightMm));
         return double.IsNaN(scale) || double.IsInfinity(scale) || scale <= 0 ? 0 : scale;
     }
 
@@ -951,8 +954,8 @@ public static class TitleBlockScanner
     }
 
     /// <summary>
-    /// 图框库没有单独保存比例字段；可拉伸模板可由录入外框尺寸和录入纸张尺寸稳定反推比例。
-    /// 同时比较同向和宽高互换两种解释，以兼容横向/纵向图框。
+    /// 图框库没有单独保存比例字段；可拉伸模板只按录入外框短边和纸张短边反推比例，
+    /// 长边变化属于加长图，不允许参与比例平均。
     /// </summary>
     private static double InferRecordedPaperScale(TitleBlockDefinition definition)
     {
@@ -965,23 +968,9 @@ public static class TitleBlockScanner
 
         var frameWidth = Math.Abs(definition.PrintRegion.MaxX - definition.PrintRegion.MinX);
         var frameHeight = Math.Abs(definition.PrintRegion.MaxY - definition.PrintRegion.MinY);
-        var directX = frameWidth / definition.PaperWidthMm;
-        var directY = frameHeight / definition.PaperHeightMm;
-        var swappedX = frameWidth / definition.PaperHeightMm;
-        var swappedY = frameHeight / definition.PaperWidthMm;
-
-        var directError = RelativeScaleDifference(directX, directY);
-        var swappedError = RelativeScaleDifference(swappedX, swappedY);
-        var scale = directError <= swappedError
-            ? (directX + directY) / 2d
-            : (swappedX + swappedY) / 2d;
+        var scale = Math.Min(frameWidth, frameHeight)
+                    / Math.Min(Math.Abs(definition.PaperWidthMm), Math.Abs(definition.PaperHeightMm));
         return double.IsNaN(scale) || double.IsInfinity(scale) || scale <= 0 ? 0 : scale;
-    }
-
-    private static double RelativeScaleDifference(double left, double right)
-    {
-        var denominator = Math.Max(Math.Max(Math.Abs(left), Math.Abs(right)), 1e-9d);
-        return Math.Abs(left - right) / denominator;
     }
 
     private enum RegionCoordinateMode

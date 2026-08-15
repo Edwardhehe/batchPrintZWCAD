@@ -291,6 +291,123 @@ public static class PaperSizeDetector
     }
 
     /// <summary>
+    /// 图框块批打专用的任意比例识别。比例只由“当前图框短边 / 录入纸张短边”反推，
+    /// 不经过内置或用户比例列表，因此同时支持 1:143、10:1、2.1:1 等任意放大与缩小比例。
+    /// 取得比例后再还原当前物理长边：标准长度按录入基础图幅输出，加长长度继续执行
+    /// 1/8 模数吸附，不能吸附时保留实测长边并要求注册任意纸张。
+    /// </summary>
+    public static bool TryDetectTitleBlockAtArbitraryScale(
+        double frameWidth,
+        double frameHeight,
+        string recordedPaperName,
+        double recordedPaperWidthMm,
+        double recordedPaperHeightMm,
+        double paperMatchToleranceMm,
+        double? longPaperSnapToleranceMm,
+        out PaperDetection detected)
+    {
+        detected = new PaperDetection();
+        var actualWidth = Math.Abs(frameWidth);
+        var actualHeight = Math.Abs(frameHeight);
+        var paperWidth = Math.Abs(recordedPaperWidthMm);
+        var paperHeight = Math.Abs(recordedPaperHeightMm);
+        if (actualWidth <= 1e-9d
+            || actualHeight <= 1e-9d
+            || paperWidth <= 1e-9d
+            || paperHeight <= 1e-9d)
+        {
+            return false;
+        }
+
+        var actualShort = Math.Min(actualWidth, actualHeight);
+        var actualLong = Math.Max(actualWidth, actualHeight);
+        var recordedShort = Math.Min(paperWidth, paperHeight);
+        var scale = actualShort / recordedShort;
+        if (double.IsNaN(scale) || double.IsInfinity(scale) || scale <= 0d)
+        {
+            return false;
+        }
+
+        var name = string.IsNullOrWhiteSpace(recordedPaperName)
+            ? CustomPaperName
+            : recordedPaperName.Trim();
+        var scaleText = ToScaleText(scale);
+
+        // 真正的任意纸张没有 A0~A4 基础短边，仍固定使用录入宽高；这里只把比例改为
+        // 短边反推，避免非标准长边的细小误差把 2.1:1 平均成另一个比例。
+        if (string.Equals(name, CustomPaperName, StringComparison.OrdinalIgnoreCase))
+        {
+            detected = new PaperDetection
+            {
+                PaperName = name,
+                ScaleValue = scale,
+                ScaleText = scaleText,
+                PaperWidthMm = recordedPaperWidthMm,
+                PaperHeightMm = recordedPaperHeightMm,
+                RequiresCustomPaper = true,
+                Note = $"任意纸张沿用图框库录入尺寸 {paperWidth:0.##} x {paperHeight:0.##} mm；按短边识别比例 {scaleText}"
+            };
+            return true;
+        }
+
+        var toleranceMm = Math.Max(0d, paperMatchToleranceMm);
+        var standard = ResolveRecordedTitleBlockPaper(name, recordedShort, toleranceMm);
+        if (standard == null)
+        {
+            // 兼容旧图框库中的非标准命名：只要录入宽高完整就仍可打印，纸张按录入尺寸注册。
+            detected = new PaperDetection
+            {
+                PaperName = name,
+                ScaleValue = scale,
+                ScaleText = scaleText,
+                IsLong = name.IndexOf('+') > 0,
+                PaperWidthMm = recordedPaperWidthMm,
+                PaperHeightMm = recordedPaperHeightMm,
+                RequiresCustomPaper = true,
+                Note = $"图框库纸张未对应 A0~A4，沿用录入尺寸 {paperWidth:0.##} x {paperHeight:0.##} mm；按短边识别比例 {scaleText}"
+            };
+            return true;
+        }
+
+        var restoredLongMm = actualLong / scale;
+        var landscape = actualWidth >= actualHeight;
+        if (restoredLongMm <= standard.LongSide + toleranceMm)
+        {
+            detected = new PaperDetection
+            {
+                PaperName = standard.Name,
+                ScaleValue = scale,
+                ScaleText = scaleText,
+                PaperWidthMm = landscape ? standard.LongSide : standard.ShortSide,
+                PaperHeightMm = landscape ? standard.ShortSide : standard.LongSide,
+                Note = $"{standard.Name} 标准图幅，按录入短边 {recordedShort:0.###}mm 识别任意比例 {scaleText}，还原长边 {restoredLongMm:0.###}mm"
+            };
+            return true;
+        }
+
+        var snappedLongMm = SnapLongSide(restoredLongMm, standard.LongSide);
+        var snapErrorMm = Math.Abs(restoredLongMm - snappedLongMm);
+        var snapToleranceMm = Math.Max(0d, longPaperSnapToleranceMm ?? toleranceMm);
+        var canSnap = snapErrorMm <= snapToleranceMm;
+        var outputLongMm = canSnap ? snappedLongMm : restoredLongMm;
+        var candidate = new PaperCandidate
+        {
+            Paper = standard,
+            Scale = scale,
+            Score = RelativeError(restoredLongMm, outputLongMm),
+            IsLong = true,
+            RequiresCustomPaper = !canSnap,
+            PaperWidthMm = landscape ? outputLongMm : standard.ShortSide,
+            PaperHeightMm = landscape ? standard.ShortSide : outputLongMm,
+            Reason = canSnap
+                ? $"按录入短边 {recordedShort:0.###}mm 识别任意比例 {scaleText}，长边吸附 1/8 模数 {snappedLongMm:0.###}mm（误差 {snapErrorMm:0.###}mm，吸附容差 {snapToleranceMm:0.###}mm）"
+                : $"按录入短边 {recordedShort:0.###}mm 识别任意比例 {scaleText}，长边按实测 {restoredLongMm:0.######}mm 动态生成"
+        };
+        detected = ToDetection(candidate);
+        return true;
+    }
+
+    /// <summary>
     /// 创建矩形框批打专用识别参数。短边匹配用纸张匹配容差，长边 1/8 模数吸附用专用吸附容差；
     /// 模型空间优先按 1:100 解释，布局空间优先按 1:1 解释，同时把另一常用比例排在其余比例之前。
     /// </summary>
@@ -653,6 +770,26 @@ public static class PaperSizeDetector
                 candidate.Paper.Name,
                 options.PreferredPaperBaseName,
                 StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// 录入尺寸的短边是图幅身份的最终依据；名称只在旧库尺寸存在轻微异常、无法按容差命中时兜底。
+    /// 这样图框名称或加长后缀陈旧时，也不会把 A2 短边误当成 A3。
+    /// </summary>
+    private static StandardPaper? ResolveRecordedTitleBlockPaper(string paperName, double recordedShortMm, double toleranceMm)
+    {
+        var nearest = Standards
+            .OrderBy(paper => Math.Abs(paper.ShortSide - recordedShortMm))
+            .First();
+        if (Math.Abs(nearest.ShortSide - recordedShortMm) <= Math.Max(0.05d, toleranceMm))
+        {
+            return nearest;
+        }
+
+        var plusIndex = paperName.IndexOf('+');
+        var baseName = plusIndex > 0 ? paperName.Substring(0, plusIndex) : paperName;
+        return Standards.FirstOrDefault(paper =>
+            string.Equals(paper.Name, baseName, StringComparison.OrdinalIgnoreCase));
     }
 
     private static int GetScalePreferenceRank(double scale, DetectionOptions options)
