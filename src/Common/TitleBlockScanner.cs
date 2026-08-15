@@ -22,7 +22,15 @@ public static class TitleBlockScanner
         var sourceName = string.IsNullOrWhiteSpace(doc.Database.Filename)
             ? doc.Name
             : doc.Database.Filename;
-        return Scan(doc.Database, library, sourceName, null, TitleBlockScanScope.AllSpaces, GetCurrentSpaceName(doc.Database));
+        return Scan(
+            doc.Database,
+            library,
+            sourceName,
+            null,
+            TitleBlockScanScope.AllSpaces,
+            GetCurrentSpaceName(doc.Database),
+            null,
+            CadCoordinateSystem.CreateModelContext(doc.Editor, doc.Database.TileMode));
     }
 
     public static List<PlotJob> Scan(Document doc, TitleBlockLibrary library, TitleBlockScanScope scope, double? paperMatchToleranceMm = null)
@@ -30,7 +38,15 @@ public static class TitleBlockScanner
         var sourceName = string.IsNullOrWhiteSpace(doc.Database.Filename)
             ? doc.Name
             : doc.Database.Filename;
-        return Scan(doc.Database, library, sourceName, null, scope, GetCurrentSpaceName(doc.Database), paperMatchToleranceMm);
+        return Scan(
+            doc.Database,
+            library,
+            sourceName,
+            null,
+            scope,
+            GetCurrentSpaceName(doc.Database),
+            paperMatchToleranceMm,
+            CadCoordinateSystem.CreateModelContext(doc.Editor, doc.Database.TileMode));
     }
 
     public static List<PlotJob> Scan(Document doc, TitleBlockLibrary library, Extents3d? scanWindow, double? paperMatchToleranceMm = null)
@@ -38,7 +54,41 @@ public static class TitleBlockScanner
         var sourceName = string.IsNullOrWhiteSpace(doc.Database.Filename)
             ? doc.Name
             : doc.Database.Filename;
-        return Scan(doc.Database, library, sourceName, scanWindow, TitleBlockScanScope.CurrentSpace, GetCurrentSpaceName(doc.Database), paperMatchToleranceMm);
+        return Scan(
+            doc.Database,
+            library,
+            sourceName,
+            scanWindow,
+            TitleBlockScanScope.CurrentSpace,
+            GetCurrentSpaceName(doc.Database),
+            paperMatchToleranceMm,
+            CadCoordinateSystem.CreateModelContext(doc.Editor, doc.Database.TileMode));
+    }
+
+    /// <summary>
+    /// 按用户框选的 UCS 矩形扫描当前空间。筛选和任务坐标使用同一个上下文，
+    /// 禁止把旋转矩形提前压成 WCS 包围盒。
+    /// </summary>
+    public static List<PlotJob> Scan(
+        Document doc,
+        TitleBlockLibrary library,
+        CadSelectionWindow scanWindow,
+        double? paperMatchToleranceMm = null)
+    {
+        var sourceName = string.IsNullOrWhiteSpace(doc.Database.Filename)
+            ? doc.Name
+            : doc.Database.Filename;
+        return Scan(
+                doc.Database,
+                library,
+                sourceName,
+                null,
+                TitleBlockScanScope.CurrentSpace,
+                GetCurrentSpaceName(doc.Database),
+                paperMatchToleranceMm,
+                scanWindow)
+            .Where(job => scanWindow.IntersectsWorldPoints(CadSelectionWindow.GetJobWorldCorners(job)))
+            .ToList();
     }
 
     public static List<PlotJob> Scan(Database db, TitleBlockLibrary library, string sourceName)
@@ -58,7 +108,8 @@ public static class TitleBlockScanner
         Extents3d? scanWindow,
         TitleBlockScanScope scope,
         string? currentSpaceName = null,
-        double? paperMatchToleranceMm = null)
+        double? paperMatchToleranceMm = null,
+        CadSelectionWindow? modelCoordinateContext = null)
     {
         var jobs = new List<PlotJob>();
         var warnings = new List<string>();
@@ -229,8 +280,15 @@ public static class TitleBlockScanner
                 // 计算打印区域的 4 个实际 WCS 角点（含 BlockTransform 的缩放和旋转）
                 // 不取包围盒，和矩形框扫描的 CornerPoints 同理：4 角 × WCS→DCS 只取一次包围盒
                 var wcsCorners = ComputeWcsCorners(coordinateMode, referenceFrame, effectiveBlockTransform);
-                var width = CornerDistance(wcsCorners, 0, 1);
-                var height = CornerDistance(wcsCorners, 1, 2);
+                var coordinateBounds = layout.ModelType && modelCoordinateContext != null
+                    ? modelCoordinateContext.TransformWorldPointsToBounds(wcsCorners)
+                    : null;
+                var width = coordinateBounds != null && !modelCoordinateContext!.IsWorldCoordinateSystem
+                    ? coordinateBounds.MaxX - coordinateBounds.MinX
+                    : CornerDistance(wcsCorners, 0, 1);
+                var height = coordinateBounds != null && !modelCoordinateContext!.IsWorldCoordinateSystem
+                    ? coordinateBounds.MaxY - coordinateBounds.MinY
+                    : CornerDistance(wcsCorners, 1, 2);
 
                 var detectionOptions = PaperSizeDetector.CreateTitleBlockBatchOptions(effectivePaperToleranceMm, !layout.ModelType, storedSettings.LongPaperSnapToleranceMm, storedSettings.CustomScales);
                 if (IsGenericDynamicPaperName(definition.PaperName))
@@ -331,11 +389,12 @@ public static class TitleBlockScanner
                     out _,
                     out var frameBoundaryHandles);
 
-                jobs.Add(new PlotJob
+                var job = new PlotJob
                 {
                     SourceFile = sourceName,
                     SpaceName = spaceName,
                     IsPaperSpace = !layout.ModelType,
+                    LayoutTabOrder = layout.TabOrder,
                     BlockName = effectiveBlockName,
                     BlockHandle = blockRef.Handle.ToString(),
                     FrameBoundaryHandles = frameBoundaryHandles,
@@ -368,7 +427,13 @@ public static class TitleBlockScanner
                     MaxX = extents.MaxPoint.X,
                     MaxY = extents.MaxPoint.Y,
                     CornerPoints = wcsCorners
-                });
+                };
+                if (layout.ModelType && modelCoordinateContext != null && coordinateBounds != null)
+                {
+                    modelCoordinateContext.ApplyToJob(job, coordinateBounds);
+                }
+
+                jobs.Add(job);
             }
         }
 

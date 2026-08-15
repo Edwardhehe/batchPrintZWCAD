@@ -148,7 +148,7 @@ public sealed class CustomScaleForm : Form
         if (shortSideMm < PaperShortSideMinMm || shortSideMm > PaperShortSideMaxMm)
         {
             var confirm = MessageBox.Show(
-                $"按 1:{PaperSizeDetector.ToScaleText(scale)} 换算的纸张为 {paperWidthMm:0.##} x {paperHeightMm:0.##} mm，"
+                $"按 {PaperSizeDetector.ToScaleText(scale)} 换算的纸张为 {paperWidthMm:0.##} x {paperHeightMm:0.##} mm，"
                 + "超出常规 A4~A0 图纸范围（短边 100~900mm），打印可能出现超大或过小页面。是否仍要使用该比例？",
                 Text,
                 MessageBoxButtons.YesNo,

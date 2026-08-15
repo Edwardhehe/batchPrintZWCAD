@@ -18,6 +18,12 @@ public static class PaperSizeDetector
         public double LongPaperShortSideTolerance { get; set; } = DefaultLongPaperShortSideTolerance;
         /// <summary>任意加长图短边的绝对匹配容差（毫米）；设置后优先于相对容差。</summary>
         public double? LongPaperShortSideToleranceMm { get; set; }
+        /// <summary>
+        /// 标准 A0~A4 宽高的绝对匹配容差（毫米）。图框块批打设置此值后，
+        /// 标准纸张只按“常规 → 纸张匹配容差(mm)”判断，不再使用固定 4% 相对误差。
+        /// null 保留其他调用入口原有的相对误差规则。
+        /// </summary>
+        public double? StandardPaperToleranceMm { get; set; }
         /// <summary>加长图长边吸附到最近 1/8 模数的容差（毫米）；null 表示不吸附，按实测生成动态纸。</summary>
         public double? LongPaperSnapToleranceMm { get; set; }
         /// <summary>长边只要求超过标准长边，按实测尺寸返回，不再吸附到 1/8 模数。</summary>
@@ -276,7 +282,8 @@ public static class PaperSizeDetector
         return new DetectionOptions
         {
             AllowArbitraryLongSide = true,
-            LongPaperShortSideToleranceMm = Math.Max(0.05d, paperMatchToleranceMm),
+            StandardPaperToleranceMm = Math.Max(0d, paperMatchToleranceMm),
+            LongPaperShortSideToleranceMm = Math.Max(0d, paperMatchToleranceMm),
             LongPaperSnapToleranceMm = longPaperSnapToleranceMm,
             PreferredScaleValue = isPaperSpace ? 1d : 100d,
             ExtraScales = customScales
@@ -435,8 +442,20 @@ public static class PaperSizeDetector
 
         var widthError = RelativeError(widthMm, standardWidth);
         var heightError = RelativeError(heightMm, standardHeight);
-        if (widthError <= StandardPaperTolerance && heightError <= StandardPaperTolerance)
+        var widthErrorMm = Math.Abs(widthMm - standardWidth);
+        var heightErrorMm = Math.Abs(heightMm - standardHeight);
+        var matchesStandardPaper = options.StandardPaperToleranceMm.HasValue
+            ? widthErrorMm <= options.StandardPaperToleranceMm.Value
+              && heightErrorMm <= options.StandardPaperToleranceMm.Value
+            : widthError <= StandardPaperTolerance
+              && heightError <= StandardPaperTolerance;
+        if (matchesStandardPaper)
         {
+            // 图框块批打只显示常规设置中的毫米容差，诊断信息也必须反映实际采用的规则，
+            // 避免用户看到已取消的 4% 判断仍误以为它参与了识别。
+            var reason = options.StandardPaperToleranceMm.HasValue
+                ? $"按常用比例匹配，宽误差 {widthErrorMm:0.###}mm，高误差 {heightErrorMm:0.###}mm，容差 {options.StandardPaperToleranceMm.Value:0.###}mm，CAD尺寸 {actualWidth:0.##} x {actualHeight:0.##}"
+                : $"按常用比例匹配，宽误差 {widthError:P1}，高误差 {heightError:P1}，CAD尺寸 {actualWidth:0.##} x {actualHeight:0.##}";
             candidates.Add(new PaperCandidate
             {
                 Paper = paper,
@@ -445,7 +464,7 @@ public static class PaperSizeDetector
                 IsLong = false,
                 PaperWidthMm = standardWidth,
                 PaperHeightMm = standardHeight,
-                Reason = $"按常用比例匹配，宽误差 {widthError:P1}，高误差 {heightError:P1}，CAD尺寸 {actualWidth:0.##} x {actualHeight:0.##}"
+                Reason = reason
             });
         }
 

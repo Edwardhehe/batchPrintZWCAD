@@ -117,11 +117,22 @@ public sealed class TemporarySequenceOverlay : IDisposable
 
             var owner = (BlockTableRecord)tr.GetObject(ownerId, OpenMode.ForWrite);
 
-            // 红框按 UCS 角度旋转后绘制到 WCS，保证用户在 UCS 视图中看是正的
-            var cosA = Math.Cos(ucsAngle);
-            var sinA = Math.Sin(ucsAngle);
+            // UCS 任务使用扫描时保存的基轴和局部边界；不能拿当前会话 UCS 或 WCS 包围盒代替。
+            var jobAngle = ucsAngle;
             var cx = (minX + maxX) / 2d;
             var cy = (minY + maxY) / 2d;
+            if (job.UsesUserCoordinateSystem)
+            {
+                var localCenter = new Point3d(cx, cy, 0)
+                    .TransformBy(CadSelectionWindow.GetJobUcsToWorld(job));
+                cx = localCenter.X;
+                cy = localCenter.Y;
+                jobAngle = Math.Atan2(job.UcsXAxisY, job.UcsXAxisX);
+            }
+
+            // 红框按任务自己的坐标轴旋转后绘制到 WCS，保证范围与实际打印窗口一致。
+            var cosA = Math.Cos(jobAngle);
+            var sinA = Math.Sin(jobAngle);
             var hw = (maxX - minX) / 2d + padding;
             var hh = (maxY - minY) / 2d + padding;
 
@@ -148,10 +159,10 @@ public sealed class TemporarySequenceOverlay : IDisposable
             };
             group.FrameId = AddEntity(tr, owner, frame);
 
-            var center = new Point3d((minX + maxX) / 2d, (minY + maxY) / 2d, 0);
+            var center = new Point3d(cx, cy, 0);
             // 默认临时标注显示打印顺序；图号重排预览时可临时显示预计写入的新图号。
             var labelText = labelProvider?.Invoke(job, i) ?? (i + 1).ToString();
-            AddBoldLabel(tr, owner, layerId, textStyleId, color, center, labelText, textHeight, ucsAngle, group.LabelIds);
+            AddBoldLabel(tr, owner, layerId, textStyleId, color, center, labelText, textHeight, jobAngle, group.LabelIds);
             _entityGroups[job] = group;
         }
 
@@ -422,6 +433,15 @@ public sealed class TemporarySequenceOverlay : IDisposable
 
     private static bool TryGetBounds(PlotJob job, Matrix3d dcsToWcs, out double minX, out double minY, out double maxX, out double maxY)
     {
+        if (job.UsesUserCoordinateSystem)
+        {
+            minX = Math.Min(job.UcsMinX, job.UcsMaxX);
+            minY = Math.Min(job.UcsMinY, job.UcsMaxY);
+            maxX = Math.Max(job.UcsMinX, job.UcsMaxX);
+            maxY = Math.Max(job.UcsMinY, job.UcsMaxY);
+            return maxX - minX > 1e-6 && maxY - minY > 1e-6;
+        }
+
         minX = Math.Min(job.MinX, job.MaxX);
         minY = Math.Min(job.MinY, job.MaxY);
         maxX = Math.Max(job.MinX, job.MaxX);

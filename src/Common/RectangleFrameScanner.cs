@@ -177,6 +177,31 @@ public static class RectangleFrameScanner
         double? paperMatchToleranceMm = null,
         bool? recognizeFourLineRectangles = null)
     {
+        return ScanWindow(
+            document,
+            new CadSelectionWindow
+            {
+                Bounds = LocalRectangle.FromPoints(
+                    scanWindow.MinPoint.X,
+                    scanWindow.MinPoint.Y,
+                    scanWindow.MaxPoint.X,
+                    scanWindow.MaxPoint.Y),
+                UcsToWorld = Matrix3d.Identity,
+                WorldToUcs = Matrix3d.Identity
+            },
+            paperMatchToleranceMm,
+            recognizeFourLineRectangles);
+    }
+
+    /// <summary>
+    /// 按用户当前 UCS 中的矩形窗口扫描。Bounds 保持 UCS 原始宽高，WCS 只用于数据库实体读取。
+    /// </summary>
+    public static List<Result> ScanWindow(
+        Document document,
+        CadSelectionWindow scanWindow,
+        double? paperMatchToleranceMm = null,
+        bool? recognizeFourLineRectangles = null)
+    {
         LayerScannableCache.Clear();
         BlockDefinitionCache.Clear();
         var storedSettings = AppSettingsStore.Load();
@@ -217,6 +242,8 @@ public static class RectangleFrameScanner
         var rectangles = CollectRectanglesFromSpace(tr, owner, recognizeFourLines);
         var ownerId = owner.ObjectId;
         var layoutName = layout.LayoutName;
+        var layoutTabOrder = layout.TabOrder;
+        var isPaperSpace = !layout.ModelType;
         tr.Commit();
 
         return FilterAndPackageRectangles(
@@ -226,7 +253,8 @@ public static class RectangleFrameScanner
             ownerId,
             sourceFile,
             layoutName,
-            !layout.ModelType,
+            isPaperSpace,
+            layoutTabOrder,
             effectivePaperToleranceMm,
             storedSettings.LongPaperSnapToleranceMm,
             storedSettings.CustomScales);
@@ -288,16 +316,19 @@ public static class RectangleFrameScanner
 
         // 第二阶段：对每个空间独立过滤打包（FilterEmptyRectangles 内会开自己的事务）
         var allResults = new List<Result>();
-        foreach (var (rectangles, ownerId, layoutName, isPaperSpace, _) in spaceData)
+        foreach (var (rectangles, ownerId, layoutName, isPaperSpace, tabOrder) in spaceData)
         {
             var results = FilterAndPackageRectangles(
                 document,
                 rectangles,
-                null,
+                isPaperSpace
+                    ? null
+                    : CadCoordinateSystem.CreateModelContext(document.Editor, true),
                 ownerId,
                 sourceFile,
                 layoutName,
                 isPaperSpace,
+                tabOrder,
                 effectivePaperToleranceMm,
                 storedSettings.LongPaperSnapToleranceMm,
                 storedSettings.CustomScales);
@@ -356,26 +387,22 @@ public static class RectangleFrameScanner
     private static List<Result> FilterAndPackageRectangles(
         Document document,
         List<LocalRectangle> rectangles,
-        Extents3d? scanWindow,
+        CadSelectionWindow? coordinateContext,
         ObjectId ownerId,
         string sourceFile,
         string layoutName,
         bool isPaperSpace,
+        int layoutTabOrder,
         double paperMatchToleranceMm,
         double longPaperSnapToleranceMm,
         IReadOnlyList<double>? customScales = null)
     {
         // 3a. 窗口裁剪（可选）
         List<LocalRectangle> inWindow;
-        if (scanWindow.HasValue)
+        if (coordinateContext != null && coordinateContext.Bounds.HasArea())
         {
-            var window = LocalRectangle.FromPoints(
-                scanWindow.Value.MinPoint.X,
-                scanWindow.Value.MinPoint.Y,
-                scanWindow.Value.MaxPoint.X,
-                scanWindow.Value.MaxPoint.Y);
             inWindow = rectangles
-                .Where(r => Intersects(r, window))
+                .Where(rectangle => coordinateContext.IntersectsWorldPoints(GetWorldPoints(rectangle)))
                 .ToList();
         }
         else
@@ -387,10 +414,20 @@ public static class RectangleFrameScanner
         var stem = Path.GetFileNameWithoutExtension(sourceFile);
         var paperMatched = new List<LocalRectangle>();
         var paperOptionsByRect = new Dictionary<LocalRectangle, IReadOnlyList<PaperDetection>>();
+        var coordinateBoundsByRect = new Dictionary<LocalRectangle, LocalRectangle>();
         foreach (var rectangle in inWindow)
         {
-            var width = rectangle.ActualWidth > 0 ? rectangle.ActualWidth : rectangle.MaxX - rectangle.MinX;
-            var height = rectangle.ActualHeight > 0 ? rectangle.ActualHeight : rectangle.MaxY - rectangle.MinY;
+            var coordinateBounds = !isPaperSpace
+                                   && coordinateContext != null
+                                   && !coordinateContext.IsWorldCoordinateSystem
+                ? coordinateContext.TransformWorldPointsToBounds(GetWorldPoints(rectangle))
+                : null;
+            var width = coordinateBounds != null
+                ? coordinateBounds.MaxX - coordinateBounds.MinX
+                : rectangle.ActualWidth > 0 ? rectangle.ActualWidth : rectangle.MaxX - rectangle.MinX;
+            var height = coordinateBounds != null
+                ? coordinateBounds.MaxY - coordinateBounds.MinY
+                : rectangle.ActualHeight > 0 ? rectangle.ActualHeight : rectangle.MaxY - rectangle.MinY;
             // 短边按设置中的毫米容差匹配常用比例；长边先吸附 1/8 模数，超出同一容差才转任意动态纸张。
             var detectionOptions = PaperSizeDetector.CreateRectangleBatchOptions(paperMatchToleranceMm, isPaperSpace, longPaperSnapToleranceMm, customScales);
             var options = PaperSizeDetector.DetectCandidates(width, height, detectionOptions);
@@ -401,6 +438,10 @@ public static class RectangleFrameScanner
 
             paperMatched.Add(rectangle);
             paperOptionsByRect[rectangle] = options;
+            if (coordinateBounds != null)
+            {
+                coordinateBoundsByRect[rectangle] = coordinateBounds;
+            }
         }
 
         // 3c. 去重去嵌套
@@ -415,10 +456,15 @@ public static class RectangleFrameScanner
         {
             var options = paperOptionsByRect[rectangle];
             var paper = options.First();
-            var width = rectangle.ActualWidth > 0 ? rectangle.ActualWidth : rectangle.MaxX - rectangle.MinX;
-            var height = rectangle.ActualHeight > 0 ? rectangle.ActualHeight : rectangle.MaxY - rectangle.MinY;
+            coordinateBoundsByRect.TryGetValue(rectangle, out var coordinateBounds);
+            var width = coordinateBounds != null
+                ? coordinateBounds.MaxX - coordinateBounds.MinX
+                : rectangle.ActualWidth > 0 ? rectangle.ActualWidth : rectangle.MaxX - rectangle.MinX;
+            var height = coordinateBounds != null
+                ? coordinateBounds.MaxY - coordinateBounds.MinY
+                : rectangle.ActualHeight > 0 ? rectangle.ActualHeight : rectangle.MaxY - rectangle.MinY;
             var index = results.Count;
-            results.Add(new Result
+            var result = new Result
             {
                 CornerPoints = rectangle.CornerPoints,
                 PaperOptions = options,
@@ -428,6 +474,7 @@ public static class RectangleFrameScanner
                     SourceFile = sourceFile,
                     SpaceName = layoutName,
                     IsPaperSpace = isPaperSpace,
+                    LayoutTabOrder = layoutTabOrder,
                     DrawingNumber = (index + 1).ToString("D2"),
                     Title = stem,
                     PaperName = paper.PaperName,
@@ -451,10 +498,32 @@ public static class RectangleFrameScanner
                         ? null
                         : (string[])rectangle.BoundaryEntityHandles.Clone()
                 }
-            });
+            };
+            if (!isPaperSpace && coordinateContext != null && coordinateBounds != null)
+            {
+                coordinateContext.ApplyToJob(result.Job, coordinateBounds);
+            }
+
+            results.Add(result);
         }
 
         return results;
+    }
+
+    private static Point3d[] GetWorldPoints(LocalRectangle rectangle)
+    {
+        if (rectangle.CornerPoints is { Length: >= 8 } points)
+        {
+            return new[]
+            {
+                new Point3d(points[0], points[1], 0),
+                new Point3d(points[2], points[3], 0),
+                new Point3d(points[4], points[5], 0),
+                new Point3d(points[6], points[7], 0)
+            };
+        }
+
+        return CadSelectionWindow.GetCorners(rectangle);
     }
 
     // ═══════════════════════════════════════════════════════════════

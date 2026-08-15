@@ -58,7 +58,7 @@ public sealed class RectangleBatchPlotForm : Form
     private readonly Label _status = new();
     private CancellationTokenSource? _printCts;
     private Button? _printButton;
-    private Extents3d? _scanWindow;
+    private CadSelectionWindow? _scanWindow;
     private TitleBlockScanScope? _lastScanScope;
     private bool _updating;
     private bool _updatingPrintSelection;
@@ -201,7 +201,8 @@ public sealed class RectangleBatchPlotForm : Form
         _marginInput.Enabled = _leaveMargin.Checked;
         // 与同一行的保存路径下拉框使用相同上边距，保证高 DPI 下两个输入框顶边对齐。
         _marginInput.Margin = new Padding(0, UiLayout.Scale(3), 0, 0);
-        _leaveMargin.CheckedChanged += (_, _) => _marginInput.Enabled = _leaveMargin.Checked;
+        _leaveMargin.CheckedChanged += (_, _) =>
+            _marginInput.Enabled = SupportsLeaveMargin && _leaveMargin.Checked;
         _leaveMargin.Text = "留白";
         var marginPanel = new FlowLayoutPanel
         {
@@ -457,11 +458,11 @@ public sealed class RectangleBatchPlotForm : Form
                     _settings.PaperMatchToleranceMm,
                     _settings.RecognizeFourLineRectangleFrames);
             }
-            else if (_scanWindow.HasValue)
+            else if (_scanWindow != null)
             {
                 results = RectangleFrameScanner.ScanWindow(
                     _document,
-                    _scanWindow.Value,
+                    _scanWindow,
                     _settings.PaperMatchToleranceMm,
                     _settings.RecognizeFourLineRectangleFrames);
             }
@@ -539,21 +540,12 @@ public sealed class RectangleBatchPlotForm : Form
                 return;
             }
 
-            var ucsToWcs = editor.CurrentUserCoordinateSystem;
-            var ucsX1 = first.Value.X;
-            var ucsY1 = first.Value.Y;
-            var ucsX2 = second.Value.X;
-            var ucsY2 = second.Value.Y;
-            var wcsCorners = new[]
-            {
-                new Point3d(ucsX1, ucsY1, 0).TransformBy(ucsToWcs),
-                new Point3d(ucsX2, ucsY1, 0).TransformBy(ucsToWcs),
-                new Point3d(ucsX1, ucsY2, 0).TransformBy(ucsToWcs),
-                new Point3d(ucsX2, ucsY2, 0).TransformBy(ucsToWcs)
-            };
-            var window = new Extents3d(
-                new Point3d(wcsCorners.Min(p => p.X), wcsCorners.Min(p => p.Y), 0),
-                new Point3d(wcsCorners.Max(p => p.X), wcsCorners.Max(p => p.Y), 0));
+            // 保留原始 UCS 矩形；只把实体几何保留为 WCS，禁止在这里提前取 WCS 包围盒。
+            var window = CadCoordinateSystem.CreateSelectionWindow(
+                editor,
+                first.Value,
+                second.Value,
+                _document.Database.TileMode);
 
             var results = RectangleFrameScanner.ScanWindow(
                 _document,
@@ -589,6 +581,13 @@ public sealed class RectangleBatchPlotForm : Form
             foreach (var result in results)
             {
                 var job = result.Job;
+                if (job.UsesUserCoordinateSystem)
+                {
+                    // UCS 模型任务必须等打印阶段对齐视图后再生成 DCS 窗口。
+                    job.IsDcsWindow = false;
+                    continue;
+                }
+
                 if (result.CornerPoints != null)
                 {
                     // PlotJob 是打印与 DWG 拆图的共同载体。Min/Max 转为 DCS 前，必须保留 WCS 四角点。
@@ -632,40 +631,18 @@ public sealed class RectangleBatchPlotForm : Form
         _viewSortColumnIndex = -1;
         var horizontalFirst = _settings.SortOrderHorizontalFirst;
 
-        // 多布局按 TabOrder 分组（Scanner 已按 TabOrder 排序），组内空间排序，组间保持布局顺序
-        var layoutOrder = _rows
-            .Select(r => r.Job.SpaceName)
-            .Distinct()
-            .ToList();
         var allRows = _rows.ToList();
-        var sortedRows = new List<Row>(allRows.Count);
-        foreach (var spaceName in layoutOrder)
-        {
-            var group = allRows
-                .Where(r => string.Equals(r.Job.SpaceName, spaceName, StringComparison.Ordinal))
-                .ToList();
-            sortedRows.AddRange(SortSpatially(group, horizontalFirst));
-        }
+        var jobToRow = allRows.ToDictionary(row => row.Job, row => row);
+        var sortedRows = SpatialSorter.SortByLayout(
+                allRows.Select(row => row.Job).ToList(),
+                horizontalFirst)
+            .Select(job => jobToRow[job])
+            .ToList();
 
         ReplaceBindingListContents(_rows, sortedRows);
         RefreshDisplayRows();
         RefreshFileNames();
         UpdateVisuals();
-    }
-
-    /// <summary>空间排序，与图号重排共用 SpatialSorter 统一算法。</summary>
-    private static List<Row> SortSpatially(IReadOnlyList<Row> rows, bool horizontalFirst)
-    {
-        if (rows.Count <= 1)
-        {
-            return rows.ToList();
-        }
-
-        // Row → PlotJob 映射
-        var jobToRow = rows.ToDictionary(r => r.Job, r => r);
-        var jobs = rows.Select(r => r.Job).ToList();
-        var sortedJobs = SpatialSorter.Sort(jobs, horizontalFirst);
-        return sortedJobs.Select(j => jobToRow[j]).ToList();
     }
 
     private void RefreshDisplayRows()
@@ -1129,7 +1106,7 @@ public sealed class RectangleBatchPlotForm : Form
             try
             {
                 SaveCurrentPlotOptions();
-                row.Job.LeavePaperMargin = _leaveMargin.Checked;
+                row.Job.LeavePaperMargin = SupportsLeaveMargin && _leaveMargin.Checked;
                 row.Job.PaperMarginMm = BatchPlotForm.ReadMarginValue(_marginInput);
                 // 预览当前行时同时准备已勾选图纸的全部任意尺寸；当前行未勾选也不能漏掉。
                 var previewJobs = _rows
@@ -1427,7 +1404,8 @@ public sealed class RectangleBatchPlotForm : Form
 
     private void ApplyLeaveMarginSelection(IEnumerable<PlotJob> jobs)
     {
-        var leaveMargin = _leaveMargin.Checked;
+        // PNG/JPG 使用像素介质，留白的毫米纸张/缩放语义不成立，作业层必须强制关闭。
+        var leaveMargin = SupportsLeaveMargin && _leaveMargin.Checked;
         var marginMm = BatchPlotForm.ReadMarginValue(_marginInput);
         foreach (var job in jobs)
         {
@@ -1661,8 +1639,9 @@ public sealed class RectangleBatchPlotForm : Form
         var plotOutput = !IsDwgOutput;
         _style.Enabled = plotOutput;
         _styleSettingsButton.Enabled = plotOutput && _style.SelectedIndex >= 0;
-        _leaveMargin.Enabled = plotOutput;
-        _marginInput.Enabled = plotOutput && _leaveMargin.Checked;
+        // 禁用但保留勾选状态，切回 PDF/DWF 后恢复用户原选择；实际作业另有强制关闭保护。
+        _leaveMargin.Enabled = SupportsLeaveMargin;
+        _marginInput.Enabled = SupportsLeaveMargin && _leaveMargin.Checked;
         _mergePdf.Enabled = IsPdfOutput;
         RefreshFileNames();
         SaveCurrentPlotOptions();
@@ -1687,8 +1666,10 @@ public sealed class RectangleBatchPlotForm : Form
     private string SelectedOutputExtension => "." + SelectedOutputFormat.ToLowerInvariant();
     private bool IsPdfOutput => string.Equals(SelectedOutputFormat, "PDF", StringComparison.OrdinalIgnoreCase);
     private bool IsDwgOutput => string.Equals(SelectedOutputFormat, "DWG", StringComparison.OrdinalIgnoreCase);
+    private bool IsPngOutput => string.Equals(SelectedOutputFormat, "PNG", StringComparison.OrdinalIgnoreCase);
     private bool IsJpgOutput => string.Equals(SelectedOutputFormat, "JPG", StringComparison.OrdinalIgnoreCase);
     private bool IsDwfOutput => string.Equals(SelectedOutputFormat, "DWF", StringComparison.OrdinalIgnoreCase);
+    private bool SupportsLeaveMargin => !IsDwgOutput && !IsPngOutput && !IsJpgOutput;
     private string? AutomaticOutputSubfolder => _savePathModeCombo.SelectedIndex == 1
         ? FileNameSanitizer.Clean(SelectedOutputFormat)
         : null;

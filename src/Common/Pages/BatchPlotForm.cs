@@ -274,7 +274,7 @@ public sealed class BatchPlotForm : Form
         _marginInput.Margin = new Padding(0, UiLayout.Scale(4), 0, 0);
         _leaveMarginCheckBox.CheckedChanged += (_, _) =>
         {
-            _marginInput.Enabled = _leaveMarginCheckBox.Checked;
+            _marginInput.Enabled = SupportsLeaveMargin && _leaveMarginCheckBox.Checked;
             // 留白开关切换时立即更新所有作业状态，清除扩大纸张模式留下的精确纸张标记。
             ApplyLeaveMarginSelection(_jobs);
         };
@@ -688,24 +688,13 @@ public sealed class BatchPlotForm : Form
                 return;
             }
 
-            // 用户框选的是 UCS 坐标 → 四个角点转到 WCS 后取一次包围盒
-            var ucsToWcs = editor.CurrentUserCoordinateSystem;
-            var ucsX1 = first.Value.X;
-            var ucsY1 = first.Value.Y;
-            var ucsX2 = second.Value.X;
-            var ucsY2 = second.Value.Y;
-
-            var wcsCorners = new[]
-            {
-                new Point3d(ucsX1, ucsY1, 0).TransformBy(ucsToWcs),
-                new Point3d(ucsX2, ucsY1, 0).TransformBy(ucsToWcs),
-                new Point3d(ucsX1, ucsY2, 0).TransformBy(ucsToWcs),
-                new Point3d(ucsX2, ucsY2, 0).TransformBy(ucsToWcs)
-            };
-
-            var window = new Extents3d(
-                new Point3d(wcsCorners.Min(p => p.X), wcsCorners.Min(p => p.Y), 0),
-                new Point3d(wcsCorners.Max(p => p.X), wcsCorners.Max(p => p.Y), 0));
+            // 保留用户框选时的 UCS 矩形和基轴。旋转 UCS 不能先压成 WCS 包围盒，
+            // 否则扫描/打印阶段再次取 DCS 包围盒时范围会被放大。
+            var window = CadCoordinateSystem.CreateSelectionWindow(
+                editor,
+                first.Value,
+                second.Value,
+                _currentDocument.Database.TileMode);
 
             _jobs.Clear();
             _selectedDwgFiles.Clear();
@@ -741,6 +730,15 @@ public sealed class BatchPlotForm : Form
             var wcsToDcs = BatchPlotCommands.BuildWcsToDcsMatrix(_currentDocument.Editor);
             foreach (var job in jobs)
             {
+                if (job.UsesUserCoordinateSystem)
+                {
+                    // UCS 任务保留 WCS 边界和 UCS 元数据；打印阶段先把视图对齐到该 UCS，
+                    // 再由真实四角一次性生成 DCS 窗口。
+                    job.IsDcsWindow = false;
+                    job.IsManualWindow = true;
+                    continue;
+                }
+
                 // 和图框块扫描一样的四点法：4 个 WCS 角点 × WCS→DCS → 取一次包围盒
                 // 优先用 CornerPoints（图框库参考框的实际 WCS 角点，避免包围盒二次放大）
                 // 兜底用 Min/Max（老版图框库数据或无 PrintRegion 的块）
@@ -935,7 +933,9 @@ public sealed class BatchPlotForm : Form
         menu.Opening += (_, e) =>
         {
             var enabled = _grid.CurrentRow?.DataBoundItem is PlotJob;
-            moveToFirst.Enabled = enabled;
+            // 纯位置模式不允许任何手工优先级介入，菜单直接禁用，避免点击后看似成功但顺序不变。
+            moveToFirst.Enabled = enabled
+                                  && _settings.TitleBlockBatchSortMode != TitleBlockSortMode.Spatial;
             markNotPrint.Enabled = enabled;
             delete.Enabled = enabled;
             e.Cancel = !enabled;
@@ -976,6 +976,11 @@ public sealed class BatchPlotForm : Form
 
     private void MoveCurrentJobToFirst()
     {
+        if (_settings.TitleBlockBatchSortMode == TitleBlockSortMode.Spatial)
+        {
+            return;
+        }
+
         if (_grid.CurrentRow?.DataBoundItem is not PlotJob job)
         {
             return;
@@ -1384,7 +1389,7 @@ public sealed class BatchPlotForm : Form
     {
         if (_settings.TitleBlockBatchSortMode == TitleBlockSortMode.Spatial)
         {
-            // 位置模式不得把图号、图名作为任何级别的排序键；人工“移到第一个”优先级仍保留。
+            // 位置模式与矩形批打完全一致：不夹带图号、图名或“移到第一个”的手工优先级。
             return SortSpatialGroups(jobs);
         }
 
@@ -1431,35 +1436,23 @@ public sealed class BatchPlotForm : Form
     }
 
     /// <summary>
-    /// 按“源 DWG → 布局 → 图中位置”排序。源文件沿用加入清单的顺序，布局沿用扫描顺序，
-    /// 从而避免把两个不同图形中相同坐标的图框错误地交叉排列。
+    /// 按“源 DWG → 布局 → 图中位置”排序。源文件沿用加入清单的顺序，布局严格按 CAD TabOrder，
+    /// 从而避免把两个不同图形中相同坐标的图框错误地交叉排列。布局内部与矩形批打直接
+    /// 共用 SpatialSorter.Sort；位置模式不得再用“移到第一个”优先级切割空间分组。
     /// </summary>
     private List<PlotJob> SortSpatialGroups(IReadOnlyList<PlotJob> jobs)
     {
         var result = new List<PlotJob>(jobs.Count);
-        foreach (var priorityGroup in jobs
-            .GroupBy(job => job.SortPriority)
-            .OrderByDescending(group => group.Key))
+        var sourceGroups = jobs
+            .GroupBy(job => GetSourceGroupKey(job.SourceFile), StringComparer.OrdinalIgnoreCase)
+            .OrderBy(group => GetSourceGroupOrder(group.Key))
+            .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var sourceGroup in sourceGroups)
         {
-            var sourceGroups = priorityGroup
-                .GroupBy(job => GetSourceGroupKey(job.SourceFile), StringComparer.OrdinalIgnoreCase)
-                .OrderBy(group => GetSourceGroupOrder(group.Key))
-                .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase);
-
-            foreach (var sourceGroup in sourceGroups)
-            {
-                // MatchIndex 保留扫描器识别到布局的先后，仅作为跨布局的稳定顺序；
-                // 图号重排另行读取真实 TabOrder，不依赖这里的扫描次序。
-                var spaceGroups = sourceGroup
-                    .GroupBy(job => job.SpaceName ?? "", StringComparer.Ordinal)
-                    .OrderBy(group => group.Min(job => job.MatchIndex))
-                    .ThenBy(group => group.Key, StringComparer.Ordinal);
-
-                foreach (var spaceGroup in spaceGroups)
-                {
-                    result.AddRange(SpatialSorter.Sort(spaceGroup.ToList(), _settings.SortOrderHorizontalFirst));
-                }
-            }
+            result.AddRange(SpatialSorter.SortByLayout(
+                sourceGroup.ToList(),
+                _settings.SortOrderHorizontalFirst));
         }
 
         return result;
@@ -1989,6 +1982,13 @@ public sealed class BatchPlotForm : Form
         "JPG",
         StringComparison.OrdinalIgnoreCase);
 
+    private bool IsPngOutput => string.Equals(
+        _outputFormatCombo.SelectedItem?.ToString(),
+        "PNG",
+        StringComparison.OrdinalIgnoreCase);
+
+    private bool SupportsLeaveMargin => !IsDwgOutput && !IsPngOutput && !IsJpgOutput;
+
     private bool IsDwfOutput => string.Equals(
         _outputFormatCombo.SelectedItem?.ToString(),
         "DWF",
@@ -2103,7 +2103,9 @@ public sealed class BatchPlotForm : Form
         }
         _styleSettingsButton.Enabled = plotOutput && _styleCombo.SelectedIndex >= 0;
         _mergePdfCheckBox.Enabled = IsPdfOutput;
-        _marginInput.Enabled = plotOutput && _leaveMarginCheckBox.Checked;
+        // PNG/JPG 使用像素介质，不支持毫米纸张扩展或按毫米缩放留白；保留勾选状态供切回 PDF/DWF。
+        _leaveMarginCheckBox.Enabled = SupportsLeaveMargin;
+        _marginInput.Enabled = SupportsLeaveMargin && _leaveMarginCheckBox.Checked;
 
         var outputNameColumn = _grid.Columns
             .Cast<DataGridViewColumn>()
@@ -2362,7 +2364,8 @@ public sealed class BatchPlotForm : Form
 
     private void ApplyLeaveMarginSelection(IEnumerable<PlotJob> jobs)
     {
-        var leaveMargin = _leaveMarginCheckBox.Checked;
+        // 即使用户切换格式前曾勾选留白，PNG/JPG 作业也必须强制关闭，不能只依赖控件禁用状态。
+        var leaveMargin = SupportsLeaveMargin && _leaveMarginCheckBox.Checked;
         var marginMm = ReadMarginValue(_marginInput);
         foreach (var job in jobs)
         {
@@ -2408,7 +2411,7 @@ public sealed class BatchPlotForm : Form
             return;
         }
 
-        job.LeavePaperMargin = _leaveMarginCheckBox.Checked;
+        job.LeavePaperMargin = SupportsLeaveMargin && _leaveMarginCheckBox.Checked;
         job.PaperMarginMm = ReadMarginValue(_marginInput);
         var wasVisible = Visible;
         var selectedRows = _grid.SelectedRows.Cast<DataGridViewRow>().ToList();

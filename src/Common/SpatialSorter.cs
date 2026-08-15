@@ -10,6 +10,31 @@ namespace ZwcadBatchPlot;
 /// </summary>
 public static class SpatialSorter
 {
+    /// <summary>
+    /// 按 CAD 布局 TabOrder 分组后做纯位置排序。布局之间不比较坐标，布局内部调用统一的
+    /// <see cref="Sort"/> 行列算法；图框块与矩形框批打共同使用，保证多布局顺序也一致。
+    /// </summary>
+    public static List<PlotJob> SortByLayout(IReadOnlyList<PlotJob> jobs, bool horizontalFirst)
+    {
+        var result = new List<PlotJob>(jobs.Count);
+        var layoutGroups = jobs
+            .Select((job, index) => new { Job = job, Index = index })
+            .GroupBy(item => item.Job.SpaceName ?? "", StringComparer.Ordinal)
+            .OrderBy(group => group.Min(item => item.Job.LayoutTabOrder))
+            // 兼容旧任务：没有 TabOrder 时，保持扫描/传入列表中的布局先后。
+            .ThenBy(group => group.Min(item => item.Index))
+            .ThenBy(group => group.Key, StringComparer.Ordinal);
+
+        foreach (var layoutGroup in layoutGroups)
+        {
+            result.AddRange(Sort(
+                layoutGroup.Select(item => item.Job).ToList(),
+                horizontalFirst));
+        }
+
+        return result;
+    }
+
     /// <summary>按空间位置排序，支持"从上到下、从左到右"和"从左到右、从上到下"两种方向。</summary>
     /// <param name="jobs">待排序的图纸任务列表</param>
     /// <param name="horizontalFirst">true=从左到右、从上到下；false=从上到下、从左到右</param>
@@ -35,15 +60,15 @@ public static class SpatialSorter
                 if (horizontalFirst)
                 {
                     // 列分组：X 区间重叠
-                    var overlapX = Math.Min(ri.MaxX, rj.MaxX) - Math.Max(ri.MinX, rj.MinX);
-                    var minW = Math.Min(ri.MaxX - ri.MinX, rj.MaxX - rj.MinX);
+                    var overlapX = Math.Min(MaxX(ri), MaxX(rj)) - Math.Max(MinX(ri), MinX(rj));
+                    var minW = Math.Min(MaxX(ri) - MinX(ri), MaxX(rj) - MinX(rj));
                     if (overlapX >= minW * 0.3) Union(i, j);
                 }
                 else
                 {
                     // 行分组：Y 区间重叠
-                    var overlapY = Math.Min(ri.MaxY, rj.MaxY) - Math.Max(ri.MinY, rj.MinY);
-                    var minH = Math.Min(ri.MaxY - ri.MinY, rj.MaxY - rj.MinY);
+                    var overlapY = Math.Min(MaxY(ri), MaxY(rj)) - Math.Max(MinY(ri), MinY(rj));
+                    var minH = Math.Min(MaxY(ri) - MinY(ri), MaxY(rj) - MinY(rj));
                     if (overlapY >= minH * 0.3) Union(i, j);
                 }
             }
@@ -85,6 +110,11 @@ public static class SpatialSorter
         return result;
     }
 
-    private static double CenterX(PlotJob job) => (job.MinX + job.MaxX) / 2d;
-    private static double CenterY(PlotJob job) => (job.MinY + job.MaxY) / 2d;
+    // UCS 任务必须在 UCS 坐标内排序；若退回 WCS 包围盒，旋转后行列会因包围盒重叠而错组。
+    private static double MinX(PlotJob job) => job.UsesUserCoordinateSystem ? job.UcsMinX : job.MinX;
+    private static double MinY(PlotJob job) => job.UsesUserCoordinateSystem ? job.UcsMinY : job.MinY;
+    private static double MaxX(PlotJob job) => job.UsesUserCoordinateSystem ? job.UcsMaxX : job.MaxX;
+    private static double MaxY(PlotJob job) => job.UsesUserCoordinateSystem ? job.UcsMaxY : job.MaxY;
+    private static double CenterX(PlotJob job) => (MinX(job) + MaxX(job)) / 2d;
+    private static double CenterY(PlotJob job) => (MinY(job) + MaxY(job)) / 2d;
 }

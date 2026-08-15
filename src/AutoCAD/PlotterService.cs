@@ -1305,8 +1305,8 @@ public static class PlotterService
 
     private static void PrepareEditorViewForPlot(Document doc, PlotJob job)
     {
-        // 图纸空间无视图概念，跳过
-        // IsDcsWindow：DCS 基于用户原始旋转视图计算，重置视图会破坏坐标系一致性
+        // 图纸空间无视图概念，跳过；已生成 DCS 的任务必须保留生成时视图。
+        // UCS 任务则依赖下方恢复扫描时的 UCS 方向后再计算最终 DCS 窗口。
         if (job.IsPaperSpace || job.IsDcsWindow)
         {
             return;
@@ -1314,19 +1314,33 @@ public static class PlotterService
 
         try
         {
-            var minX = Math.Min(job.MinX, job.MaxX);
-            var minY = Math.Min(job.MinY, job.MaxY);
-            var maxX = Math.Max(job.MinX, job.MaxX);
-            var maxY = Math.Max(job.MinY, job.MaxY);
-            var width = Math.Max(maxX - minX, 1);
-            var height = Math.Max(maxY - minY, 1);
-            var centerX = (minX + maxX) / 2d;
-            var centerY = (minY + maxY) / 2d;
+            var corners = CadSelectionWindow.GetJobWorldCorners(job);
+            var center = new Point3d(
+                corners.Average(point => point.X),
+                corners.Average(point => point.Y),
+                corners.Average(point => point.Z));
+            var width = job.UsesUserCoordinateSystem
+                ? Math.Max(Math.Abs(job.UcsMaxX - job.UcsMinX), 1)
+                : Math.Max(Math.Abs(job.MaxX - job.MinX), 1);
+            var height = job.UsesUserCoordinateSystem
+                ? Math.Max(Math.Abs(job.UcsMaxY - job.UcsMinY), 1)
+                : Math.Max(Math.Abs(job.MaxY - job.MinY), 1);
 
             using var view = doc.Editor.GetCurrentView();
-            view.ViewDirection = Vector3d.ZAxis;
-            view.ViewTwist = 0;
-            view.Target = new Point3d(centerX, centerY, 0);
+            if (job.UsesUserCoordinateSystem)
+            {
+                var xAxis = new Vector3d(job.UcsXAxisX, job.UcsXAxisY, job.UcsXAxisZ).GetNormal();
+                var yAxis = new Vector3d(job.UcsYAxisX, job.UcsYAxisY, job.UcsYAxisZ).GetNormal();
+                view.ViewDirection = xAxis.CrossProduct(yAxis).GetNormal();
+                view.ViewTwist = -Math.Atan2(xAxis.Y, xAxis.X);
+            }
+            else
+            {
+                view.ViewDirection = Vector3d.ZAxis;
+                view.ViewTwist = 0;
+            }
+
+            view.Target = center;
             view.CenterPoint = Point2d.Origin;
             view.Width = width * 1.05;
             view.Height = height * 1.05;
@@ -1365,13 +1379,10 @@ public static class PlotterService
             {
                 var view = plotDocument.Editor.GetCurrentView();
                 var worldToDisplay = GetWorldToDisplayMatrix(view);
-                var points = new[]
-                {
-                    new Point3d(job.MinX, job.MinY, 0).TransformBy(worldToDisplay),
-                    new Point3d(job.MinX, job.MaxY, 0).TransformBy(worldToDisplay),
-                    new Point3d(job.MaxX, job.MinY, 0).TransformBy(worldToDisplay),
-                    new Point3d(job.MaxX, job.MaxY, 0).TransformBy(worldToDisplay)
-                };
+                // 使用真实四角；旋转 UCS 下的 WCS 包围盒四角会把窗口再次放大。
+                var points = CadSelectionWindow.GetJobWorldCorners(job)
+                    .Select(point => point.TransformBy(worldToDisplay))
+                    .ToArray();
 
                 return new Extents2d(
                     points.Min(p => p.X),

@@ -90,6 +90,11 @@ public sealed class PlotJob
     public long SortPriority { get; set; }
     public string SpaceName { get; set; } = "";
     public bool IsPaperSpace { get; set; }
+    /// <summary>
+    /// CAD 布局选项卡顺序。位置排序必须先按此值排列布局，再在布局内部比较图框坐标；
+    /// 不能用块表遍历顺序或首个图框的识别序号代替。
+    /// </summary>
+    public int LayoutTabOrder { get; set; } = int.MaxValue;
     public string BlockName { get; set; } = "";
     public string BlockHandle { get; set; } = "";
     public int MatchIndex { get; set; }
@@ -118,6 +123,24 @@ public sealed class PlotJob
     public double MinY { get; set; }
     public double MaxX { get; set; }
     public double MaxY { get; set; }
+    /// <summary>
+    /// 模型空间任务是否必须按扫描时的 UCS 解释。为 true 时，Min/Max 仍保留 WCS 包围盒，
+    /// 打印、预览和空间排序改用下列 UCS 边界，避免旋转 UCS 被轴对齐包围盒放大。
+    /// </summary>
+    public bool UsesUserCoordinateSystem { get; set; }
+    public double UcsMinX { get; set; }
+    public double UcsMinY { get; set; }
+    public double UcsMaxX { get; set; }
+    public double UcsMaxY { get; set; }
+    public double UcsOriginX { get; set; }
+    public double UcsOriginY { get; set; }
+    public double UcsOriginZ { get; set; }
+    public double UcsXAxisX { get; set; } = 1d;
+    public double UcsXAxisY { get; set; }
+    public double UcsXAxisZ { get; set; }
+    public double UcsYAxisX { get; set; }
+    public double UcsYAxisY { get; set; } = 1d;
+    public double UcsYAxisZ { get; set; }
     public string OutputPath { get; set; } = "";
     /// <summary>是否按纸张短边预留边距，打印时居中等比例缩小。</summary>
     public bool LeavePaperMargin { get; set; }
