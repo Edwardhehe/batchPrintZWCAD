@@ -82,7 +82,7 @@ public sealed class RectangleBatchPlotForm : Form
 
     private void InitializeComponents()
     {
-        Text = "LA矩形框批量打印 V1.15.1";
+        Text = "LA矩形框批量打印 V1.15.2";
         FormBorderStyle = System.Windows.Forms.FormBorderStyle.Sizable;
         ClientSize = new Size(UiLayout.Scale(900), UiLayout.Scale(520));
         MinimumSize = new Size(UiLayout.Scale(720), UiLayout.Scale(460));
@@ -1841,6 +1841,7 @@ public sealed class RectangleBatchPlotForm : Form
             _settings.RecognizeFourLineRectangleFrames = updated.RecognizeFourLineRectangleFrames;
             _settings.HideFrameBoundaryWhenPlotting = updated.HideFrameBoundaryWhenPlotting;
             _settings.GeneratePrintLog = updated.GeneratePrintLog;
+            _settings.ConvertTextToGeometryWhenPlotting = updated.ConvertTextToGeometryWhenPlotting;
             _settings.LongPaperSnapToleranceMm = updated.LongPaperSnapToleranceMm;
             _settings.LongPaperNameFormat = updated.LongPaperNameFormat;
             _settings.SortOrderHorizontalFirst = updated.SortOrderHorizontalFirst;

@@ -81,6 +81,10 @@ public sealed class AppSettings
     /// 插件是否允许生成日志文件。默认关闭；统一控制打印、拆图、扫描警告和图框录入诊断日志。
     /// </summary>
     public bool GeneratePrintLog { get; set; }
+    /// <summary>
+    /// 使用插件自有 PDF/DWF 绘图仪时，是否把 TrueType 文字按图形轮廓输出。默认关闭，且不修改 DWG 文字实体。
+    /// </summary>
+    public bool ConvertTextToGeometryWhenPlotting { get; set; }
     public bool AddFileNameSequence { get; set; }
     public bool LeavePaperMargin { get; set; }
     public double PaperMarginMm { get; set; } = 1;

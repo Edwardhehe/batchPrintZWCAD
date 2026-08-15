@@ -203,6 +203,66 @@ public static class AcadPlotterInstaller
         }
     }
 
+    /// <summary>
+    /// 切换插件自有 PDF/DWF 绘图仪的 TrueType 输出方式。只修改当前 CAD 配置目录中的
+    /// LA_pdf/LA_dwf，不触碰用户自建 PC5；PNG/JPG 本身是像素输出，无需处理。
+    /// </summary>
+    public static PlotTextGeometryModeResult ApplyTextGeometryMode(string deviceName, bool convertToGeometry)
+    {
+        var result = new PlotTextGeometryModeResult();
+        var fileName = Path.GetFileName(deviceName ?? "");
+        if (string.Equals(fileName, PreferredPngPlotter, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(fileName, PreferredJpgPlotter, StringComparison.OrdinalIgnoreCase))
+        {
+            result.Success = true;
+            result.Message = "PNG/JPG 已按像素输出，无需转换文字。";
+            return result;
+        }
+
+        if (!string.Equals(fileName, PreferredPdfPlotter, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(fileName, PreferredDwfPlotter, StringComparison.OrdinalIgnoreCase))
+        {
+            result.Success = !convertToGeometry;
+            result.Message = convertToGeometry
+                ? "文字转图形仅支持插件自有 LA_pdf/LA_dwf 绘图仪。"
+                : "当前绘图仪不需要恢复插件文字输出设置。";
+            return result;
+        }
+
+        try
+        {
+            var plottersDirectory = GetAutoCadPlotterDirectory();
+            var pc5Path = Path.Combine(plottersDirectory, fileName);
+            if (string.IsNullOrWhiteSpace(plottersDirectory) || !IsUsableFile(pc5Path))
+            {
+                result.Message = "未找到插件绘图仪配置：" + pc5Path;
+                return result;
+            }
+
+            var encoding = System.Text.Encoding.GetEncoding(936);
+            var original = File.ReadAllText(pc5Path, encoding);
+            var updated = PlotTextGeometryFileUpdater.UpdateZwcadPc5(
+                original,
+                convertToGeometry,
+                out var changed);
+            if (changed)
+            {
+                File.WriteAllText(pc5Path, updated, encoding);
+                result.Changed = true;
+                RefreshPlotterDevices();
+            }
+
+            result.Success = true;
+            result.Message = convertToGeometry ? "TrueType 文字将按图形输出。" : "TrueType 文字将按文字输出。";
+            return result;
+        }
+        catch (Exception ex)
+        {
+            result.Message = "切换文字输出模式失败：" + ex.Message;
+            return result;
+        }
+    }
+
     public static string InstallDwfPlotter()
     {
         try

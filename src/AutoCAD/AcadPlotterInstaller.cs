@@ -311,6 +311,120 @@ public static class AcadPlotterInstaller
     }
 
     /// <summary>
+    /// 切换插件自有 PDF/DWF 绘图仪的 TrueType 输出方式。PIA2/PIA3 均同时维护
+    /// truetype_as_text；PIA3 额外维护 All_As_Geometry，且只允许写当前 Plotters 目录内的 LA 文件。
+    /// </summary>
+    public static PlotTextGeometryModeResult ApplyTextGeometryMode(string deviceName, bool convertToGeometry)
+    {
+        var result = new PlotTextGeometryModeResult();
+        var fileName = Path.GetFileName(deviceName ?? "");
+        if (string.Equals(fileName, PreferredPngPlotter, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(fileName, PreferredJpgPlotter, StringComparison.OrdinalIgnoreCase))
+        {
+            result.Success = true;
+            result.Message = "PNG/JPG 已按像素输出，无需转换文字。";
+            return result;
+        }
+
+        if (!string.Equals(fileName, PreferredPdfPlotter, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(fileName, PreferredDwfPlotter, StringComparison.OrdinalIgnoreCase))
+        {
+            result.Success = !convertToGeometry;
+            result.Message = convertToGeometry
+                ? "文字转图形仅支持插件自有 LA_pdf/LA_dwf 绘图仪。"
+                : "当前绘图仪不需要恢复插件文字输出设置。";
+            return result;
+        }
+
+        try
+        {
+            var plottersDirectory = GetAutoCadPlotterDirectory();
+            var pc3Path = ResolveActivePlotterPath(fileName);
+            if (!IsValidPlotterFile(pc3Path)
+                || !IsPathInsideDirectory(pc3Path, plottersDirectory)
+                || !string.Equals(Path.GetFileName(pc3Path), fileName, StringComparison.OrdinalIgnoreCase))
+            {
+                result.Message = "拒绝修改非插件目录或无效的绘图仪配置：" + pc3Path;
+                return result;
+            }
+
+            var attachedPmp = ReadAttachedPmpPath(pc3Path);
+            result.Changed = ApplyTextGeometryToPiaFile(pc3Path, convertToGeometry, updateAllAsGeometry: true);
+            if (IsValidPlotterFile(attachedPmp)
+                && IsPathInsideDirectory(attachedPmp, plottersDirectory)
+                && Path.GetFileNameWithoutExtension(attachedPmp).StartsWith("LA_", StringComparison.OrdinalIgnoreCase))
+            {
+                result.Changed |= ApplyTextGeometryToPiaFile(attachedPmp, convertToGeometry, updateAllAsGeometry: false);
+            }
+
+            if (result.Changed)
+            {
+                PlotConfigManager.RefreshList(RefreshCode.RefreshPC3DevicesList);
+            }
+
+            result.Success = true;
+            result.Message = convertToGeometry ? "TrueType 文字将按图形输出。" : "TrueType 文字将按文字输出。";
+            return result;
+        }
+        catch (Exception ex)
+        {
+            result.Message = "切换文字输出模式失败：" + ex.Message;
+            return result;
+        }
+    }
+
+    private static bool ApplyTextGeometryToPiaFile(
+        string path,
+        bool convertToGeometry,
+        bool updateAllAsGeometry)
+    {
+        var raw = File.ReadAllText(path);
+        if (PlotTextGeometryFileUpdater.TryUpdatePia3(
+                raw,
+                convertToGeometry,
+                updateAllAsGeometry,
+                out var updatedPia3,
+                out var changed))
+        {
+            if (changed)
+            {
+                File.WriteAllText(path, updatedPia3);
+            }
+            return changed;
+        }
+
+        var config = new PlotterConfiguration(path);
+        var pia2Changed = config.TruetypeAsText == convertToGeometry;
+        if (pia2Changed)
+        {
+            config.TruetypeAsText = !convertToGeometry;
+        }
+
+        if (updateAllAsGeometry)
+        {
+            try
+            {
+                var currentAllAsGeometry = config.GetCustomValue<bool>("All_As_Geometry");
+                if (currentAllAsGeometry != convertToGeometry)
+                {
+                    config.SetCustomValue("All_As_Geometry", convertToGeometry);
+                    pia2Changed = true;
+                }
+            }
+            catch
+            {
+                // 部分旧 PIA2 没有该自定义节点；truetype_as_text 仍是驱动的主控制字段。
+            }
+        }
+
+        if (pia2Changed)
+        {
+            config.Saves(path);
+        }
+        return pia2Changed;
+    }
+
+    /// <summary>
     /// 读取 PC3 当前关联的 PMP。介质缓存必须跟踪实际加载 PC3 的 PMP，
     /// 不能用推测目录的时间戳代替，否则同名 PC3 会让缓存长期保存错误介质目录。
     /// </summary>

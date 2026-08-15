@@ -47,6 +47,7 @@ public static class PlotterService
         var results = new List<PlotJobResult>();
         var oldActive = CadApp.DocumentManager.MdiActiveDocument;
 
+        EnsureTextGeometryMode(deviceName, settings.ConvertTextToGeometryWhenPlotting);
         try
         {
             foreach (var group in jobs.GroupBy(job => GetPlotGroupKey(job, currentDocument, settings)))
@@ -95,6 +96,7 @@ public static class PlotterService
 
     public static void Plot(PlotJob job, string deviceName, string styleSheet, Document currentDocument, AppSettings settings)
     {
+        EnsureTextGeometryMode(deviceName, settings.ConvertTextToGeometryWhenPlotting);
         if (IsCurrentDocumentJob(job, currentDocument))
         {
             using (currentDocument.LockDocument())
@@ -122,6 +124,8 @@ public static class PlotterService
 
     public static void Preview(PlotJob job, string deviceName, string styleSheet, Document currentDocument)
     {
+        var settings = AppSettingsStore.Load();
+        EnsureTextGeometryMode(deviceName, settings.ConvertTextToGeometryWhenPlotting);
         var oldActive = CadApp.DocumentManager.MdiActiveDocument;
         var doc = IsCurrentDocumentJob(job, currentDocument) ? currentDocument : FindOpenDocument(job.SourceFile);
         var shouldClose = doc == null;
@@ -161,6 +165,16 @@ public static class PlotterService
 
         var file = string.IsNullOrWhiteSpace(job.SourceFile) ? "" : Path.GetFullPath(job.SourceFile);
         return settings.OpenExternalDwgForPlot ? file : "__DB__:" + file;
+    }
+
+    private static void EnsureTextGeometryMode(string deviceName, bool convertToGeometry)
+    {
+        WaitForPlotIdle();
+        var result = AcadPlotterInstaller.ApplyTextGeometryMode(deviceName, convertToGeometry);
+        if (!result.Success)
+        {
+            throw new InvalidOperationException(result.Message);
+        }
     }
 
     private static void PlotCurrentDocumentGroup(

@@ -78,9 +78,9 @@ public sealed class BatchPlotForm : Form
     private void InitializeComponents()
     {
 #if AUTOCAD
-        Text = "LA图框块批量打印 V1.15.1";
+        Text = "LA图框块批量打印 V1.15.2";
 #else
-        Text = "LA图框块批量打印 V1.15.1";
+        Text = "LA图框块批量打印 V1.15.2";
 #endif
         FormBorderStyle = System.Windows.Forms.FormBorderStyle.Sizable;
         ClientSize = new Size(UiLayout.Scale(900), UiLayout.Scale(520));
@@ -1854,6 +1854,7 @@ public sealed class BatchPlotForm : Form
         _settings.OpenOutputDirectoryAfterBatchPrint = updated.OpenOutputDirectoryAfterBatchPrint;
         _settings.OpenMergedPdfAfterMerge = updated.OpenMergedPdfAfterMerge;
         _settings.GeneratePrintLog = updated.GeneratePrintLog;
+        _settings.ConvertTextToGeometryWhenPlotting = updated.ConvertTextToGeometryWhenPlotting;
         _settings.PdfFileNamePattern = updated.PdfFileNamePattern;
         _settings.PdfFileNameSeparator = updated.PdfFileNameSeparator;
         _settings.PdfFileNameFields = updated.PdfFileNameFields.ToList();

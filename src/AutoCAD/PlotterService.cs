@@ -89,6 +89,7 @@ public static class PlotterService
         var results = new List<PlotJobResult>();
         var oldActive = CadApp.DocumentManager.MdiActiveDocument;
 
+        EnsureTextGeometryMode(deviceName, settings.ConvertTextToGeometryWhenPlotting);
         using var variables = PlotSystemVariables.Apply();
         try
         {
@@ -146,6 +147,8 @@ public static class PlotterService
 
     public static void Preview(PlotJob job, string deviceName, string styleSheet, Document currentDocument)
     {
+        var settings = AppSettingsStore.Load();
+        EnsureTextGeometryMode(deviceName, settings.ConvertTextToGeometryWhenPlotting);
         var oldActive = CadApp.DocumentManager.MdiActiveDocument;
         var doc = IsCurrentDocumentJob(job, currentDocument) ? currentDocument : FindOpenDocument(job.SourceFile);
         var shouldClose = doc == null;
@@ -186,6 +189,22 @@ public static class PlotterService
 
         var file = string.IsNullOrWhiteSpace(job.SourceFile) ? "" : Path.GetFullPath(job.SourceFile);
         return settings.OpenExternalDwgForPlot ? file : "__DB__:" + file;
+    }
+
+    private static void EnsureTextGeometryMode(string deviceName, bool convertToGeometry)
+    {
+        WaitForPlotIdle();
+        var result = AcadPlotterInstaller.ApplyTextGeometryMode(deviceName, convertToGeometry);
+        if (!result.Success)
+        {
+            throw new InvalidOperationException(result.Message);
+        }
+
+        if (result.Changed)
+        {
+            // PC3/PMP 内容改变后，纸张目录缓存也必须失效；否则宿主仍可能沿用旧设备快照。
+            InvalidateMediaCatalog(deviceName);
+        }
     }
 
     private static void PlotOpenedDocumentJobs(

@@ -629,12 +629,19 @@ public static class RectangleFrameScanner
             return;
         }
 
+        // 用户在 CAD 中看不到的实体不能成为打印边界。这里必须在所有类型分支之前统一拦截，
+        // 不仅覆盖闭合 Polyline/Polyline2d/Polyline3d，也覆盖隐藏的父块参照；否则父块不可见时，
+        // 递归进入块定义仍可能把内部矩形识别成图框。图框允许位于 Defpoints 等不打印图层，
+        // 因此这里只检查实体自身 Visible 以及图层开启/未冻结，不检查 IsPlottable。
+        if (!IsEntityVisible(entity) || !IsFrameBoundaryLayerScannable(tr, entity))
+        {
+            return;
+        }
+
         // ── 分支 0：Line → 收集线段（仅块内部，最多 3 层）──
         if (segments != null
             && depth <= 3
-            && entity is Line line
-            && IsEntityVisible(entity)
-            && IsFrameBoundaryLayerScannable(tr, entity))
+            && entity is Line line)
         {
             var segment = new LineSegment
             {
@@ -652,8 +659,6 @@ public static class RectangleFrameScanner
         if (segments != null
             && depth <= 3
             && entity is Polyline plSegment
-            && IsEntityVisible(entity)
-            && IsFrameBoundaryLayerScannable(tr, entity)
             && TryGetStraightOpenPolylineSegment(plSegment, transform, out var polylineSegment))
         {
             polylineSegment.EntityHandle = plSegment.Handle.ToString();
@@ -664,8 +669,6 @@ public static class RectangleFrameScanner
         if (segments != null
             && depth <= 3
             && entity is Polyline2d pl2dSegment
-            && IsEntityVisible(entity)
-            && IsFrameBoundaryLayerScannable(tr, entity)
             && TryGetStraightOpenPolyline2dSegment(
                 tr,
                 pl2dSegment,

@@ -37,6 +37,7 @@ public sealed class SettingsForm : Form
     private readonly CheckBox _openOutputDirectoryAfterBatchPrint = new();
     private readonly CheckBox _openMergedPdfAfterMerge = new();
     private readonly CheckBox _generatePrintLog = new();
+    private readonly CheckBox _convertTextToGeometryWhenPlotting = new();
     private readonly ComboBox _directoryColorIndex = new();
     private readonly NumericUpDown _directoryTextHeight = new();
     private readonly NumericUpDown _directoryTextWidthFactor = new();
@@ -206,10 +207,19 @@ public sealed class SettingsForm : Form
             _generatePrintLog,
             "插件日志总开关。勾选后允许生成打印、拆图、扫描警告和图框录入诊断日志；默认关闭。日志目录：" + BatchPlotLogger.LogDirectory);
 
-        var plotTable = CreateSettingsTable(3);
+        _convertTextToGeometryWhenPlotting.Text = "文字自动转图形打印";
+        _convertTextToGeometryWhenPlotting.AutoSize = true;
+        _convertTextToGeometryWhenPlotting.Dock = DockStyle.Fill;
+        var textGeometryTip = new ToolTip();
+        textGeometryTip.SetToolTip(
+            _convertTextToGeometryWhenPlotting,
+            "勾选后，PDF/DWF 输出会把 TrueType 文字转换为图形轮廓，避免接收方缺少字体；不会炸开或修改原 DWG 文字。PNG/JPG 本身已是图像输出。默认关闭。");
+
+        var plotTable = CreateSettingsTable(4);
         UiLayout.AddRow(plotTable, 0, "", _openExternalDwgForPlot);
         UiLayout.AddRow(plotTable, 1, "", _hideFrameBoundaryWhenPlotting);
         UiLayout.AddRow(plotTable, 2, "", _generatePrintLog);
+        UiLayout.AddRow(plotTable, 3, "", _convertTextToGeometryWhenPlotting);
 
         var outputTable = CreateSettingsTable(1);
         UiLayout.AddRow(outputTable, 0, "", _addSequenceWhenPdfExists);
@@ -1269,6 +1279,7 @@ public sealed class SettingsForm : Form
         _openOutputDirectoryAfterBatchPrint.Checked = settings.OpenOutputDirectoryAfterBatchPrint;
         _openMergedPdfAfterMerge.Checked = settings.OpenMergedPdfAfterMerge;
         _generatePrintLog.Checked = settings.GeneratePrintLog;
+        _convertTextToGeometryWhenPlotting.Checked = settings.ConvertTextToGeometryWhenPlotting;
         _fileNamePattern.Text = settings.PdfFileNamePattern;
         _fileNameSequenceStart.Value = Math.Max(
             _fileNameSequenceStart.Minimum,
@@ -1325,6 +1336,7 @@ public sealed class SettingsForm : Form
         current.OpenOutputDirectoryAfterBatchPrint = _openOutputDirectoryAfterBatchPrint.Checked;
         current.OpenMergedPdfAfterMerge = _openMergedPdfAfterMerge.Checked;
         current.GeneratePrintLog = _generatePrintLog.Checked;
+        current.ConvertTextToGeometryWhenPlotting = _convertTextToGeometryWhenPlotting.Checked;
         if (string.IsNullOrWhiteSpace(_fileNamePattern.Text))
         {
             MessageBox.Show("请输入文件命名规则。", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
