@@ -467,7 +467,6 @@ public static class CadTextUpdater
                 tr,
                 blockRef.BlockTableRecord,
                 out var liveFrame,
-                out _,
                 out _))
         {
             return liveFrame;

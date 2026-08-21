@@ -148,8 +148,7 @@ public sealed partial class BatchPlotCommands
                     doc.Database,
                     frameDefinitionId,
                     out referenceFrame,
-                    out var frameSource,
-                    out _))
+                    out var frameSource))
             {
                 printExtents = TransformRegion(referenceFrame, blockTransform);
                 AddBlockLog(frameSource == BlockFrameSource.ClosedRectangle
@@ -392,7 +391,6 @@ public sealed partial class BatchPlotCommands
                         tr,
                         nested.BlockTableRecord,
                         out var nestedFrame,
-                        out _,
                         out _))
                 {
                     frameArea = RectangleGeometry.GetActualArea(

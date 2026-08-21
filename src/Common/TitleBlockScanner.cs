@@ -391,14 +391,7 @@ public static class TitleBlockScanner
                     boundaryNote += "；图框库坐标模式: 块内坐标";
                 }
 
-                // 与图框录入共用同一套最大闭合矩形/线包围盒规则，同时把真实源实体句柄交给打印阶段临时移层。
-                BlockFrameGeometry.TryGetFrame(
-                    tr,
-                    frameDefinitionId,
-                    out _,
-                    out _,
-                    out var frameBoundaryHandles);
-
+                // 与图框录入共用同一套最大闭合矩形/线包围盒规则，保证打印范围一致。
                 var job = new PlotJob
                 {
                     SourceFile = sourceName,
@@ -407,7 +400,6 @@ public static class TitleBlockScanner
                     LayoutTabOrder = layout.TabOrder,
                     BlockName = effectiveBlockName,
                     BlockHandle = blockRef.Handle.ToString(),
-                    FrameBoundaryHandles = frameBoundaryHandles,
                     MatchIndex = matchIndex++,
                     DrawingNumber = number,
                     Title = title,
@@ -678,7 +670,6 @@ public static class TitleBlockScanner
                     tr,
                     frameDefinitionId,
                     out var liveFrame,
-                    out _,
                     out _))
             {
                 return liveFrame;

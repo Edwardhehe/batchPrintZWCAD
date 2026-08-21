@@ -255,7 +255,6 @@ public sealed partial class BatchPlotCommands
                 database,
                 match.FrameDefinitionId,
                 out var liveFrame,
-                out _,
                 out _))
         {
             return liveFrame;
@@ -272,7 +271,6 @@ public sealed partial class BatchPlotCommands
                 database,
                 match.FrameDefinitionId,
                 out var detectedFrame,
-                out _,
                 out _))
         {
             return detectedFrame;

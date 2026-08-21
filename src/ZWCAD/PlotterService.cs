@@ -380,9 +380,6 @@ public static class PlotterService
         job.PaperSizeText = refreshed.PaperSizeText;
         job.PaperWidthMm = refreshed.PaperWidthMm;
         job.PaperHeightMm = refreshed.PaperHeightMm;
-        job.FrameBoundaryHandles = refreshed.FrameBoundaryHandles == null
-            ? null
-            : (string[])refreshed.FrameBoundaryHandles.Clone();
     }
 
     private static Document? FindOpenDocument(string file)

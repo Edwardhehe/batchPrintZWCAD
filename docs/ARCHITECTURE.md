@@ -627,7 +627,6 @@ private static bool IsEntityVisible(Entity entity)
 [`BlockFrameGeometry.cs`](src/Common/BlockFrameGeometry.cs) 是图框录入和扫描共享的"找外框"逻辑：
 - 递归遍历块定义，每层先用 `RectangleGeometry` 找闭合矩形
 - 找不到矩形时回退到可见线类图素（Line/Polyline/Polyline2d/Polyline3d）合并包围盒
-- 同时返回构成外框的实体句柄，供打印阶段临时移层使用（`TemporaryFramePlotLayer`）
 
 ### 10.6 界面焦点管理（CadWindowFocus）
 
@@ -756,8 +755,8 @@ AutoCAD Core 版本额外使用 `#if ACAD_CORE` 子条件处理 `CadApp.ShowModa
 │   │   ├── DwgSplitService.cs          ← DWG 拆分 (模型空间WBLOCK / 布局空间复制)
 │   │   ├── DirectoryTableGenerator.cs  ← 图纸目录表生成: 在CAD中绘制表格 + 框选单元格尺寸
 │   │   ├── TemporarySequenceOverlay.cs ← 打印序号标注: 红框+数字，增量更新
-│   │   ├── TemporaryFramePlotLayer.cs   ← 打印时临时隐藏图框外边框线（事务不提交自动回滚）
-│   │   ├── BlockFrameGeometry.cs        ← 块定义帧几何: 递归找外框+收集边界实体句柄
+│   │   ├── PlotWindowInset.cs           ← 不打印外边框: 按纸面 1mm 内退打印窗口
+│   │   ├── BlockFrameGeometry.cs        ← 块定义帧几何: 递归找外框
 │   │   ├── RectangleGeometry.cs         ← 公共矩形几何函数: Polyline/2d/3d→矩形验证
 │   │   ├── CadWindowFocus.cs            ← CAD 焦点管理: HideForCadInput/RestoreDialog
 │   │   ├── ArbitraryPaperPicker.cs      ← 任意纸张: 识别不到标准纸时弹比例输入框换算
@@ -915,9 +914,6 @@ public sealed class PlotJob
 
     // 输出文件名（表格显示用，不受合并 PDF 临时路径覆盖）
     public string DisplayOutputFileName { get; set; }
-
-    // 图框外边框实体句柄（打印时临时移层用）
-    public string[]? FrameBoundaryHandles { get; set; }
 }
 ```
 
@@ -982,8 +978,8 @@ public sealed class AppSettings
     // 命令快捷键
     public Dictionary<string, string> CommandAliases { get; set; } = new();
 
-    // 图框外边框不打印
-    public bool HideFrameBoundaryForPlot { get; set; } = true;
+    // 图框外边框不打印（正式打印时四边各内退 1mm 纸面）
+    public bool HideFrameBoundaryWhenPlotting { get; set; } = false;
 
     // 目录表格
     public double DirectoryIndexWidth { get; set; } = 900;

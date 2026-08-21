@@ -47,7 +47,6 @@ public static class RectangleFrameScanner
     {
         public Point3d Start;
         public Point3d End;
-        public string EntityHandle;
     }
 
     /// <summary>四叉树中的端点记录；同一线段的两个端点分别插入。</summary>
@@ -493,10 +492,7 @@ public static class RectangleFrameScanner
                     // 打印窗口后续会转换为 DCS；DWG 拆图仍需保留原始 WCS 四角点。
                     CornerPoints = rectangle.CornerPoints == null
                         ? null
-                        : (double[])rectangle.CornerPoints.Clone(),
-                    FrameBoundaryHandles = rectangle.BoundaryEntityHandles == null
-                        ? null
-                        : (string[])rectangle.BoundaryEntityHandles.Clone()
+                        : (double[])rectangle.CornerPoints.Clone()
                 }
             };
             if (!isPaperSpace && coordinateContext != null && coordinateBounds != null)
@@ -646,8 +642,7 @@ public static class RectangleFrameScanner
             var segment = new LineSegment
             {
                 Start = line.StartPoint.TransformBy(transform),
-                End = line.EndPoint.TransformBy(transform),
-                EntityHandle = line.Handle.ToString()
+                End = line.EndPoint.TransformBy(transform)
             };
             if (segment.Start.DistanceTo(segment.End) > 1e-6)
             {
@@ -661,7 +656,6 @@ public static class RectangleFrameScanner
             && entity is Polyline plSegment
             && TryGetStraightOpenPolylineSegment(plSegment, transform, out var polylineSegment))
         {
-            polylineSegment.EntityHandle = plSegment.Handle.ToString();
             segments.Add(polylineSegment);
         }
 
@@ -675,7 +669,6 @@ public static class RectangleFrameScanner
                 transform,
                 out var legacyPolylineSegment))
         {
-            legacyPolylineSegment.EntityHandle = pl2dSegment.Handle.ToString();
             segments.Add(legacyPolylineSegment);
         }
 
@@ -690,7 +683,6 @@ public static class RectangleFrameScanner
                 requireClosed: true,
                 out var rectangle))
         {
-            rectangle.BoundaryEntityHandles = new[] { polyline.Handle.ToString() };
             // 先全部收集，不去重——不同实例的同一定义各自独立，去重放在后续 FilterRectangles
             rectangles.Add(rectangle);
         }
@@ -707,7 +699,6 @@ public static class RectangleFrameScanner
                 requireClosed: false,
                 out var rectangle2d))
         {
-            rectangle2d.BoundaryEntityHandles = new[] { polyline2d.Handle.ToString() };
             rectangles.Add(rectangle2d);
         }
 
@@ -722,7 +713,6 @@ public static class RectangleFrameScanner
                 requireClosed: false,
                 out var rectangle3d))
         {
-            rectangle3d.BoundaryEntityHandles = new[] { polyline3d.Handle.ToString() };
             rectangles.Add(rectangle3d);
         }
 
@@ -1101,11 +1091,6 @@ public static class RectangleFrameScanner
                             continue;
                         }
 
-                        rectangle.BoundaryEntityHandles = ids
-                            .Select(index => segments[index].EntityHandle)
-                            .Where(handle => !string.IsNullOrWhiteSpace(handle))
-                            .Distinct(StringComparer.OrdinalIgnoreCase)
-                            .ToArray();
                         rectangles.Add(rectangle);
                     }
                 }

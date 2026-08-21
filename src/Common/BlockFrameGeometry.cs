@@ -20,25 +20,18 @@ internal enum BlockFrameSource
 
 /// <summary>
 /// 块定义内图框外边界的公共识别器。图框录入和正式扫描必须使用同一套“最大闭合矩形优先、
-/// 可见线类包围盒回退”规则，避免打印范围与临时隐藏的实体不是同一个边框。
+/// 可见线类包围盒回退”规则，保证打印范围与录入时识别的边框一致。
 /// </summary>
 internal static class BlockFrameGeometry
 {
-    private sealed class LineCandidate
-    {
-        public Extents3d Extents { get; set; }
-        public string Handle { get; set; } = "";
-    }
-
     internal static bool TryGetFrame(
         Database database,
         ObjectId rootDefinitionId,
         out LocalRectangle frame,
-        out BlockFrameSource source,
-        out string[] boundaryHandles)
+        out BlockFrameSource source)
     {
         using var tr = database.TransactionManager.StartTransaction();
-        var result = TryGetFrame(tr, rootDefinitionId, out frame, out source, out boundaryHandles);
+        var result = TryGetFrame(tr, rootDefinitionId, out frame, out source);
         tr.Commit();
         return result;
     }
@@ -47,25 +40,23 @@ internal static class BlockFrameGeometry
         Transaction tr,
         ObjectId rootDefinitionId,
         out LocalRectangle frame,
-        out BlockFrameSource source,
-        out string[] boundaryHandles)
+        out BlockFrameSource source)
     {
         frame = new LocalRectangle();
         source = BlockFrameSource.None;
-        boundaryHandles = Array.Empty<string>();
         if (rootDefinitionId.IsNull)
         {
             return false;
         }
 
         var rectangles = new List<LocalRectangle>();
-        var lineCandidates = new List<LineCandidate>();
+        var lineExtents = new List<Extents3d>();
         Collect(
             tr,
             rootDefinitionId,
             Matrix3d.Identity,
             rectangles,
-            lineCandidates,
+            lineExtents,
             new HashSet<ObjectId>(),
             depth: 0);
 
@@ -73,21 +64,18 @@ internal static class BlockFrameGeometry
         {
             frame = rectangles.OrderByDescending(RectangleGeometry.GetActualArea).First();
             source = BlockFrameSource.ClosedRectangle;
-            boundaryHandles = frame.BoundaryEntityHandles ?? Array.Empty<string>();
-            // 句柄只通过独立输出参数交给本次扫描任务，不能写进持久化的图框库坐标对象。
-            frame.BoundaryEntityHandles = null;
             return frame.HasArea();
         }
 
-        if (lineCandidates.Count == 0)
+        if (lineExtents.Count == 0)
         {
             return false;
         }
 
-        var merged = lineCandidates[0].Extents;
-        for (var index = 1; index < lineCandidates.Count; index++)
+        var merged = lineExtents[0];
+        for (var index = 1; index < lineExtents.Count; index++)
         {
-            merged.AddExtents(lineCandidates[index].Extents);
+            merged.AddExtents(lineExtents[index]);
         }
 
         if (!HasValidExtents(merged))
@@ -97,18 +85,6 @@ internal static class BlockFrameGeometry
 
         frame = CreateRectangleFromExtents(merged);
         source = BlockFrameSource.LineExtents;
-
-        // 四条独立 Line 拼框时只隐藏真正落在总包围盒外缘的实体，不能把图签内部表格线一起移层。
-        var span = Math.Max(
-            Math.Abs(merged.MaxPoint.X - merged.MinPoint.X),
-            Math.Abs(merged.MaxPoint.Y - merged.MinPoint.Y));
-        var tolerance = Math.Max(1e-6, span * 1e-6);
-        boundaryHandles = lineCandidates
-            .Where(candidate => TouchesOuterEdge(candidate.Extents, merged, tolerance))
-            .Select(candidate => candidate.Handle)
-            .Where(handle => !string.IsNullOrWhiteSpace(handle))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
         return true;
     }
 
@@ -117,7 +93,7 @@ internal static class BlockFrameGeometry
         ObjectId definitionId,
         Matrix3d definitionToRoot,
         ICollection<LocalRectangle> rectangles,
-        ICollection<LineCandidate> lineCandidates,
+        ICollection<Extents3d> lineExtents,
         ISet<ObjectId> visitedDefinitions,
         int depth)
     {
@@ -153,7 +129,6 @@ internal static class BlockFrameGeometry
 
                     if (isClosedRectangle)
                     {
-                        localRectangle.BoundaryEntityHandles = new[] { entity.Handle.ToString() };
                         rectangles.Add(RectangleGeometry.TransformRectangle(localRectangle, definitionToRoot));
                     }
 
@@ -162,11 +137,7 @@ internal static class BlockFrameGeometry
                         var transformedExtents = TransformExtents(entity.GeometricExtents, definitionToRoot);
                         if (HasValidExtents(transformedExtents))
                         {
-                            lineCandidates.Add(new LineCandidate
-                            {
-                                Extents = transformedExtents,
-                                Handle = entity.Handle.ToString()
-                            });
+                            lineExtents.Add(transformedExtents);
                         }
                     }
                 }
@@ -187,7 +158,7 @@ internal static class BlockFrameGeometry
                         nested.BlockTableRecord,
                         nested.BlockTransform * definitionToRoot,
                         rectangles,
-                        lineCandidates,
+                        lineExtents,
                         visitedDefinitions,
                         depth + 1);
                 }
@@ -201,14 +172,6 @@ internal static class BlockFrameGeometry
         {
             visitedDefinitions.Remove(definitionId);
         }
-    }
-
-    private static bool TouchesOuterEdge(Extents3d candidate, Extents3d merged, double tolerance)
-    {
-        return Math.Abs(candidate.MinPoint.X - merged.MinPoint.X) <= tolerance
-            || Math.Abs(candidate.MaxPoint.X - merged.MaxPoint.X) <= tolerance
-            || Math.Abs(candidate.MinPoint.Y - merged.MinPoint.Y) <= tolerance
-            || Math.Abs(candidate.MaxPoint.Y - merged.MaxPoint.Y) <= tolerance;
     }
 
     private static LocalRectangle CreateRectangleFromExtents(Extents3d extents)

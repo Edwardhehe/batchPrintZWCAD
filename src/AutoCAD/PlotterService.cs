@@ -1275,9 +1275,6 @@ public static class PlotterService
                 job.PaperSizeText = refreshed.PaperSizeText;
                 job.ScaleText = refreshed.ScaleText;
                 job.SizeText = refreshed.SizeText;
-                job.FrameBoundaryHandles = refreshed.FrameBoundaryHandles == null
-                    ? null
-                    : (string[])refreshed.FrameBoundaryHandles.Clone();
             }
         }
         catch (Exception ex)
