@@ -321,20 +321,19 @@ public static class PlotterService
         try
         {
             using var tr = db.TransactionManager.StartTransaction();
-            var frameLayerApplied = settings.HideFrameBoundaryWhenPlotting
-                && TemporaryFramePlotLayer.Apply(tr, db, job);
             var layout = FindLayoutForJob(tr, db, job);
             var window = GetPlotWindow(job, plotDocument);
-            using var plot = CreateValidatedPlot(layout, job, window, deviceName, styleSheet);
+            using var plot = CreateValidatedPlot(
+                layout,
+                job,
+                window,
+                deviceName,
+                styleSheet,
+                settings.HideFrameBoundaryWhenPlotting);
 
             PrepareOutputFile(job.OutputPath);
             RunPlot(plot.Info, documentName, job.OutputPath, job.DrawingNumber);
-
-            // 临时移层与绘图必须处于同一事务。绘图引擎结束后故意不提交，让 CAD 原子回滚实体、图层及锁定状态。
-            if (!frameLayerApplied)
-            {
-                tr.Commit();
-            }
+            tr.Commit();
             WaitForPlotIdle();
             ValidatePlotOutput(job.OutputPath);
         }
@@ -349,17 +348,18 @@ public static class PlotterService
         PlotJob job,
         Extents2d window,
         string deviceName,
-        string styleSheet)
+        string styleSheet,
+        bool hideOuterFrame)
     {
         try
         {
-            return CreateValidatedPlotCore(layout, job, window, deviceName, styleSheet);
+            return CreateValidatedPlotCore(layout, job, window, deviceName, styleSheet, hideOuterFrame);
         }
         catch (CachedMediaCatalogException)
         {
             // PC3/PMP 可能在 CAD 会话中被更新；仅当缓存目录失效时清缓存并完整读取一次。
             InvalidateMediaCatalog(deviceName);
-            return CreateValidatedPlotCore(layout, job, window, deviceName, styleSheet);
+            return CreateValidatedPlotCore(layout, job, window, deviceName, styleSheet, hideOuterFrame);
         }
     }
 
@@ -368,7 +368,8 @@ public static class PlotterService
         PlotJob job,
         Extents2d window,
         string deviceName,
-        string styleSheet)
+        string styleSheet,
+        bool hideOuterFrame)
     {
         var validator = PlotSettingsValidator.Current;
         var media = ChooseMedia(validator, layout, deviceName, job, window, out var usedCachedCatalog);
@@ -382,7 +383,16 @@ public static class PlotterService
             try
             {
                 settings.CopyFrom(layout);
-                ConfigurePlotSettings(validator, settings, deviceName, styleSheet, media, rotation, window, job);
+                ConfigurePlotSettings(
+                    validator,
+                    settings,
+                    deviceName,
+                    styleSheet,
+                    media,
+                    rotation,
+                    window,
+                    job,
+                    hideOuterFrame);
 
                 var info = new PlotInfo
                 {
@@ -402,7 +412,7 @@ public static class PlotterService
                 {
                     // AutoCAD 2024 会在 PlotInfo 校验阶段把部分毫米自定义介质重新匹配为英寸介质。
                     // 必须按最终单位重写比例并重新居中，否则毫米分子会被按英寸解释，内容放大 25.4 倍。
-                    ConfigurePlotScale(validator, settings, window, job, deviceName);
+                    ConfigurePlotScale(validator, settings, window, job, deviceName, hideOuterFrame);
                     ResetAndCenterPlot(validator, settings);
                     new PlotInfoValidator
                     {
@@ -447,7 +457,8 @@ public static class PlotterService
         MediaChoice media,
         PlotRotation rotation,
         Extents2d window,
-        PlotJob job)
+        PlotJob job,
+        bool hideOuterFrame)
     {
         try
         {
@@ -478,7 +489,7 @@ public static class PlotterService
         // 必须先写入 DCS 窗口，再切换打印类型；柱状图 299x212mm 自定义纸已做宿主验证。
         validator.SetPlotWindowArea(settings, window);
         validator.SetPlotType(settings, Autodesk.AutoCAD.DatabaseServices.PlotType.Window);
-        ConfigurePlotScale(validator, settings, window, job, deviceName);
+        ConfigurePlotScale(validator, settings, window, job, deviceName, hideOuterFrame);
         validator.SetPlotRotation(settings, rotation);
         // 初次校验前只按最终旋转居中。部分 90° 自定义介质此时不接受显式 SetPlotOrigin(0,0)。
         // 若校验后单位被改成 Inches，再在上面的二次校验分支统一清零原点并重新居中。
@@ -488,6 +499,12 @@ public static class PlotterService
         {
             validator.SetCurrentStyleSheet(settings, styleSheet);
         }
+
+        // 比例和留白已按原窗口写入；内退只替换打印窗口，避免 ScaleToFit 把裁切后的内容重新铺满纸面。
+        if (hideOuterFrame)
+        {
+            TryApplyHiddenFrameWindow(validator, settings, window, job, deviceName);
+        }
     }
 
     private static void ConfigurePlotScale(
@@ -495,11 +512,12 @@ public static class PlotterService
         PlotSettings settings,
         Extents2d window,
         PlotJob job,
-        string deviceName)
+        string deviceName,
+        bool hideOuterFrame = false)
     {
         if (!job.LeavePaperMargin)
         {
-            if (job.UseExactWindowScale)
+            if (job.UseExactWindowScale || hideOuterFrame)
             {
                 SetExactWindowScale(validator, settings, window, deviceName);
                 return;
@@ -565,6 +583,35 @@ public static class PlotterService
         var scale = Math.Min(paperLong / windowLong, paperShort / windowShort);
         validator.SetUseStandardScale(settings, false);
         validator.SetCustomPrintScale(settings, new CustomScale(ToPlotPaperUnitScale(settings, scale), 1d));
+    }
+
+    /// <summary>
+    /// 在比例已按原窗口写入后，把打印窗口四边各内退 1mm 纸面。
+    /// 选纸、旋转和留白仍使用 <paramref name="originalWindow"/>。
+    /// </summary>
+    private static void TryApplyHiddenFrameWindow(
+        PlotSettingsValidator validator,
+        PlotSettings settings,
+        Extents2d originalWindow,
+        PlotJob job,
+        string deviceName)
+    {
+        var paper = GetPlotPaperSizeMm(settings, deviceName);
+        var millimetersPerDrawingUnit = PlotWindowInset.ResolveMillimetersPerDrawingUnit(
+            originalWindow,
+            paper.X,
+            paper.Y,
+            job);
+        if (!PlotWindowInset.TryInsetByPaperMillimeters(
+                originalWindow,
+                millimetersPerDrawingUnit,
+                PlotWindowInset.PaperInsetMm,
+                out var insetWindow))
+        {
+            return;
+        }
+
+        validator.SetPlotWindowArea(settings, insetWindow);
     }
 
     private static double ToPlotPaperUnitScale(PlotSettings settings, double millimetersPerDrawingUnit)
@@ -1301,19 +1348,17 @@ public static class PlotterService
         {
             using var tr = db.TransactionManager.StartTransaction();
             var settings = AppSettingsStore.Load();
-            var frameLayerApplied = settings.HideFrameBoundaryWhenPlotting
-                && TemporaryFramePlotLayer.Apply(tr, db, job);
             var layout = FindLayoutForJob(tr, db, job);
             var window = GetPlotWindow(job, plotDocument);
-            using var plot = CreateValidatedPlot(layout, job, window, deviceName, styleSheet);
+            using var plot = CreateValidatedPlot(
+                layout,
+                job,
+                window,
+                deviceName,
+                styleSheet,
+                settings.HideFrameBoundaryWhenPlotting);
             RunPreview(plot.Info, documentName);
-
-            // 预览必须和正式输出使用同一套外框可打印状态；应用临时移层后不提交事务，
-            // 预览关闭、失败或取消时均由 CAD 原子回滚，避免修改用户图纸。
-            if (!frameLayerApplied)
-            {
-                tr.Commit();
-            }
+            tr.Commit();
             WaitForPlotIdle();
         }
         finally

@@ -431,8 +431,6 @@ public static class PlotterService
         try
         {
             using var tr = db.TransactionManager.StartTransaction();
-            var frameLayerApplied = settings.HideFrameBoundaryWhenPlotting
-                && TemporaryFramePlotLayer.Apply(tr, db, job);
             var layout = FindLayoutForJob(tr, db, job);
             using var plotSettings = new PlotSettings(layout.ModelType);
             plotSettings.CopyFrom(layout);
@@ -475,9 +473,13 @@ public static class PlotterService
 
             validator.SetPlotWindowArea(plotSettings, plotWindow);
             validator.SetPlotType(plotSettings, ZwSoft.ZwCAD.DatabaseServices.PlotType.Window);
-            ConfigurePlotScale(validator, plotSettings, plotWindow, job);
+            ConfigurePlotScale(validator, plotSettings, plotWindow, job, settings.HideFrameBoundaryWhenPlotting);
             validator.SetPlotCentered(plotSettings, true);
             validator.SetPlotRotation(plotSettings, DetectRotation(media, job, plotWindow, deviceName));
+            if (settings.HideFrameBoundaryWhenPlotting)
+            {
+                TryApplyHiddenFrameWindow(validator, plotSettings, plotWindow, job);
+            }
 
             var plotInfo = new PlotInfo
             {
@@ -492,12 +494,7 @@ public static class PlotterService
 
             PrepareOutputFile(job.OutputPath);
             RunPlot(plotInfo, documentName, job.OutputPath, job.DrawingNumber);
-
-            // 临时移层与绘图处在同一事务；绘图结束后不提交即可原子恢复实体和临时图层。
-            if (!frameLayerApplied)
-            {
-                tr.Commit();
-            }
+            tr.Commit();
             WaitForPlotIdle();
             ValidatePlotOutput(job.OutputPath);
         }
@@ -536,11 +533,12 @@ public static class PlotterService
         PlotSettingsValidator validator,
         PlotSettings plotSettings,
         Extents2d window,
-        PlotJob job)
+        PlotJob job,
+        bool hideOuterFrame = false)
     {
         if (!job.LeavePaperMargin)
         {
-            if (job.UseExactWindowScale)
+            if (job.UseExactWindowScale || hideOuterFrame)
             {
                 SetExactWindowScale(validator, plotSettings, window);
                 return;
@@ -605,6 +603,42 @@ public static class PlotterService
         var scale = Math.Min(paperLong / windowLong, paperShort / windowShort);
         validator.SetUseStandardScale(plotSettings, false);
         validator.SetCustomPrintScale(plotSettings, new CustomScale(scale, 1d));
+    }
+
+    /// <summary>
+    /// 在比例已按原窗口写入后，把打印窗口四边各内退 1mm 纸面。
+    /// 选纸、旋转和留白仍使用 <paramref name="originalWindow"/>。
+    /// </summary>
+    private static void TryApplyHiddenFrameWindow(
+        PlotSettingsValidator validator,
+        PlotSettings plotSettings,
+        Extents2d originalWindow,
+        PlotJob job)
+    {
+        var paper = plotSettings.PlotPaperSize;
+        var paperWidthMm = job.EffectivePaperWidthMm > 0 ? job.EffectivePaperWidthMm : job.PaperWidthMm;
+        var paperHeightMm = job.EffectivePaperHeightMm > 0 ? job.EffectivePaperHeightMm : job.PaperHeightMm;
+        if (paperWidthMm <= 1e-9 || paperHeightMm <= 1e-9)
+        {
+            paperWidthMm = paper.X;
+            paperHeightMm = paper.Y;
+        }
+
+        var millimetersPerDrawingUnit = PlotWindowInset.ResolveMillimetersPerDrawingUnit(
+            originalWindow,
+            paperWidthMm,
+            paperHeightMm,
+            job);
+        if (!PlotWindowInset.TryInsetByPaperMillimeters(
+                originalWindow,
+                millimetersPerDrawingUnit,
+                PlotWindowInset.PaperInsetMm,
+                out var insetWindow))
+        {
+            return;
+        }
+
+        validator.SetPlotWindowArea(plotSettings, insetWindow);
     }
 
     private static Extents2d GetPlotWindow(PlotJob job, Document? plotDocument)
@@ -783,8 +817,6 @@ public static class PlotterService
         {
             using var tr = db.TransactionManager.StartTransaction();
             var singleSettings = AppSettingsStore.Load();
-            var frameLayerApplied = singleSettings.HideFrameBoundaryWhenPlotting
-                && TemporaryFramePlotLayer.Apply(tr, db, job);
             var layout = FindLayoutForJob(tr, db, job);
             using var plotSettings = new PlotSettings(layout.ModelType);
             plotSettings.CopyFrom(layout);
@@ -824,9 +856,13 @@ public static class PlotterService
 
             validator.SetPlotWindowArea(plotSettings, plotWindow);
             validator.SetPlotType(plotSettings, ZwSoft.ZwCAD.DatabaseServices.PlotType.Window);
-            ConfigurePlotScale(validator, plotSettings, plotWindow, job);
+            ConfigurePlotScale(validator, plotSettings, plotWindow, job, singleSettings.HideFrameBoundaryWhenPlotting);
             validator.SetPlotCentered(plotSettings, true);
             validator.SetPlotRotation(plotSettings, DetectRotation(media, job, plotWindow, deviceName));
+            if (singleSettings.HideFrameBoundaryWhenPlotting)
+            {
+                TryApplyHiddenFrameWindow(validator, plotSettings, plotWindow, job);
+            }
 
             var plotInfo = new PlotInfo
             {
@@ -839,13 +875,7 @@ public static class PlotterService
             }.Validate(plotInfo);
 
             RunPreview(plotInfo, documentName);
-
-            // 预览必须和正式输出使用同一套外框可打印状态；应用临时移层后不提交事务，
-            // 预览关闭、失败或取消时均由 CAD 原子回滚，避免修改用户图纸。
-            if (!frameLayerApplied)
-            {
-                tr.Commit();
-            }
+            tr.Commit();
             WaitForPlotIdle();
         }
         finally

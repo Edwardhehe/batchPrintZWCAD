@@ -62,8 +62,8 @@ public sealed class AppSettings
     /// </summary>
     public bool RecognizeFourLineRectangleFrames { get; set; }
     /// <summary>
-    /// 正式批量打印时是否临时把已识别的图框外边框移到不打印层。
-    /// 首次使用默认关闭，由用户明确勾选后才隐藏边框；实体和临时图层状态必须在成功、失败或取消后恢复。
+    /// 正式打印时是否把打印内容四边各裁 1mm 纸面，使图框外边框不再输出。
+    /// 首次使用默认关闭；裁切不改纸张、比例和留白，也不修改 DWG。
     /// </summary>
     public bool HideFrameBoundaryWhenPlotting { get; set; } = false;
     public bool AddSequenceWhenPdfExists { get; set; } = false;

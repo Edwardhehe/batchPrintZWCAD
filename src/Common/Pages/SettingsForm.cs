@@ -213,7 +213,7 @@ public sealed class SettingsForm : Form
         var hideFrameTip = new ToolTip();
         hideFrameTip.SetToolTip(
             _hideFrameBoundaryWhenPlotting,
-            "勾选后，正式打印期间把识别到的图框外边框临时移到“LA-临时不打印层”；打印完成、失败或取消后立即恢复。");
+            "勾选后，正式打印把内容四边各裁 1mm，外框线不再输出；纸张、比例和留白不变。");
 
         _generatePrintLog.Text = "生成打印日志";
         _generatePrintLog.AutoSize = true;

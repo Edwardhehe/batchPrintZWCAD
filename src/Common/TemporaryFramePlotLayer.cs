@@ -13,9 +13,8 @@ using ZwSoft.ZwCAD.DatabaseServices;
 namespace ZwcadBatchPlot;
 
 /// <summary>
-/// 正式打印事务内的图框外边界临时移层逻辑。
-/// 调用方必须让所在事务在绘图引擎结束后回滚而不是提交；这样成功、失败和取消都会由 CAD 事务原子恢复，
-/// 不留下实体图层变化、临时图层或“图纸已修改”状态。
+/// 已停用：原先在正式打印事务内把图框外边界临时移到不打印层。
+/// “不打印图框的外边框”改为按纸面 1mm 内退打印窗口，见 <see cref="PlotWindowInset"/>。
 /// </summary>
 internal static class TemporaryFramePlotLayer
 {
