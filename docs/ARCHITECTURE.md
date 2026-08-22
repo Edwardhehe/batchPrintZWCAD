@@ -52,11 +52,11 @@
 
 | 文件 | 职责 |
 |------|------|
-| [`BatchPlotCommands.cs`](src/Common/BatchPlotCommands.cs) | 命令注册入口、面板生命周期、坐标工具方法、扫描范围对话框、通用工具（`RevealFileInExplorer`、`ShowModalDialog`、`TryGetRegion` 等） |
-| [`AddTitleBlockCommands.cs`](src/Common/AddTitleBlockCommands.cs) | `AddTitleBlockCore()` — 新增图框向导：选择块→框选区域→检测纸张→保存到库 |
-| [`SinglePlotCommands.cs`](src/Common/SinglePlotCommands.cs) | `SinglePlotCore()` — 单张打印：UCS框选→检测/自定义纸张→输出PDF |
-| [`CoordinateUtils.cs`](src/Common/CoordinateUtils.cs) | `TransformPlotWindow()` / `BuildWcsToDcsMatrix()` / `BuildUcsToDcsMatrix()` — UCS↔WCS↔DCS 坐标变换 |
-| [`EditTitleBlockCommands.cs`](src/Common/EditTitleBlockCommands.cs) | `EditTitleBlockFromLibrary()` — 从图框库管理界面编辑已有图框记录（partial class） |
+| [`BatchPlotCommands.cs`](src/Common/Commands/BatchPlotCommands.cs) | 命令注册入口、面板生命周期、坐标工具方法、扫描范围对话框、通用工具（`RevealFileInExplorer`、`ShowModalDialog`、`TryGetRegion` 等） |
+| [`AddTitleBlockCommands.cs`](src/Common/Commands/AddTitleBlockCommands.cs) | `AddTitleBlockCore()` — 新增图框向导：选择块→框选区域→检测纸张→保存到库 |
+| [`SinglePlotCommands.cs`](src/Common/Commands/SinglePlotCommands.cs) | `SinglePlotCore()` — 单张打印：UCS框选→检测/自定义纸张→输出PDF |
+| [`CoordinateUtils.cs`](src/Common/Commands/CoordinateUtils.cs) | `TransformPlotWindow()` / `BuildWcsToDcsMatrix()` / `BuildUcsToDcsMatrix()` — UCS↔WCS↔DCS 坐标变换 |
+| [`EditTitleBlockCommands.cs`](src/Common/Commands/EditTitleBlockCommands.cs) | `EditTitleBlockFromLibrary()` — 从图框库管理界面编辑已有图框记录（partial class） |
 
 所有文件统一在 `namespace ZwcadBatchPlot` 下，通过 `#if AUTOCAD` 条件编译适配双平台。
 
@@ -65,7 +65,7 @@
 ## 3. 流程一：新增图框
 
 **触发**：用户运行 `ZBP_ADD_TITLE_BLOCK`，选择一个动态块或普通块参照。
-**实现**：[`AddTitleBlockCommands.cs`](src/Common/AddTitleBlockCommands.cs)
+**实现**：[`AddTitleBlockCommands.cs`](src/Common/Commands/AddTitleBlockCommands.cs)
 
 ### 3.1 整体流程
 
@@ -141,7 +141,7 @@
 ## 4. 流程二：扫描图框（图框库匹配）
 
 **触发**：用户运行 `ZBP_SHOW_PANEL` 打开批量打印面板 → 自动扫描当前图纸。
-**实现**：[`TitleBlockScanner.cs`](src/Common/TitleBlockScanner.cs)
+**实现**：[`TitleBlockScanner.cs`](src/Common/Services/Scanning/TitleBlockScanner.cs)
 
 ### 4.1 整体流程
 
@@ -200,7 +200,7 @@ TitleBlockScanner.Scan(Document, TitleBlockLibrary)
 ## 5. 流程三：扫描矩形框
 
 **触发**：用户运行 `ZBP_RECTANGLE_BATCH_PLOT`，打开 RectangleBatchPlotForm（先弹窗，后扫描）。
-**实现**：[`RectangleFrameScanner.cs`](src/Common/RectangleFrameScanner.cs)
+**实现**：[`RectangleFrameScanner.cs`](src/Common/Services/Scanning/RectangleFrameScanner.cs)
 
 > 注意：与图框库模式不同，矩形框批打采用"先弹窗后扫描"的 UX 设计。
 > 用户打开面板后，点击"扫描当前图"（选择范围）或"框选扫描"（框选区域）触发扫描，
@@ -259,7 +259,7 @@ RectangleFrameScanner.ScanScope(Document, scope)
 ## 6. 流程四：单张打印
 
 **触发**：用户运行 `ZBP_SINGLE_PLOT`，手动框选图纸外框 → 自动识别纸张 → 直接输出 PDF。
-**实现**：[`SinglePlotCommands.cs`](src/Common/SinglePlotCommands.cs)
+**实现**：[`SinglePlotCommands.cs`](src/Common/Commands/SinglePlotCommands.cs)
 
 ### 6.1 整体流程
 
@@ -367,10 +367,10 @@ SinglePlotCore() 中 candidates.Count == 0
 
 | 步骤 | 代码位置 |
 |------|---------|
-| 比例推测 | `PaperSizeDetector.GuessScale()` — [`PaperSizeDetector.cs`](src/Common/PaperSizeDetector.cs) |
-| 自定义比例对话框 | `CustomScaleForm` — [`Pages/CustomScaleForm.cs`](src/Common/Pages/CustomScaleForm.cs) |
-| PMP 注册（入口） | `PmpCustomPaper.RegisterCustomPaper()` — [`PmpCustomPaper.cs`](src/Common/PmpCustomPaper.cs) |
-| PMP 清理 | `PmpCustomPaper.RemoveCustomPaper()` — [`PmpCustomPaper.cs`](src/Common/PmpCustomPaper.cs) |
+| 比例推测 | `PaperSizeDetector.GuessScale()` — [`PaperSizeDetector.cs`](src/Common/Services/Paper/PaperSizeDetector.cs) |
+| 自定义比例对话框 | `CustomScaleForm` — [`CustomScaleForm.cs`](src/Common/Views/CustomScaleForm.cs) |
+| PMP 注册（入口） | `PmpCustomPaper.RegisterCustomPaper()` — [`PmpCustomPaper.cs`](src/Common/Services/Paper/PmpCustomPaper.cs) |
+| PMP 清理 | `PmpCustomPaper.RemoveCustomPaper()` — [`PmpCustomPaper.cs`](src/Common/Services/Paper/PmpCustomPaper.cs) |
 | PIA 格式策略 | 所有 AutoCAD 版本统一使用随包、已验证的 LA PIA2 模板 |
 | 模板纸张基准 | PDF/DWF 各 85 个毫米规格；PNG/JPG 各 170 个横竖像素介质 |
 | 既有 LA 处理 | 不读取、不转换、不合并，直接用模板覆盖；任意尺寸由本次打印重新注册 |
@@ -512,7 +512,7 @@ ZWCAD 使用系统 PNG/JPG PC5 作为驱动模板，但把 PMP 关联改写为�
 
 ## 8. PDF 合并
 
-**实现**：[`PdfDocumentService.cs`](src/Common/PdfDocumentService.cs)
+**实现**：[`PdfDocumentService.cs`](src/Common/Services/Plotting/PdfDocumentService.cs)
 
 ```
 PdfDocumentService.Merge(pdfFiles, outputPath)
@@ -533,7 +533,7 @@ PdfDocumentService.Merge(pdfFiles, outputPath)
 
 ## 9. UCS 坐标变换
 
-**实现**：[`CoordinateUtils.cs`](src/Common/CoordinateUtils.cs)
+**实现**：[`CoordinateUtils.cs`](src/Common/Commands/CoordinateUtils.cs)
 
 全面支持用户坐标系（UCS）。三个打印功能共用同一套变换链路。
 
@@ -616,7 +616,7 @@ private static bool IsEntityVisible(Entity entity)
 
 ### 10.4 公共矩形几何函数（RectangleGeometry）
 
-矩形框扫描和图框录入共用同一套矩形验证逻辑，已提取到 [`RectangleGeometry.cs`](src/Common/RectangleGeometry.cs)：
+矩形框扫描和图框录入共用同一套矩形验证逻辑，已提取到 [`RectangleGeometry.cs`](src/Common/Geometry/RectangleGeometry.cs)：
 
 - `TryGetRectangle` / `TryGetRectangleFrom2d` / `TryGetRectangleFrom3d` — 从三种多段线类型验证几何矩形
 - `TransformRectangle` — 四角点变换后重算 ActualWidth/ActualHeight 和包围盒
@@ -624,13 +624,13 @@ private static bool IsEntityVisible(Entity entity)
 
 ### 10.5 块定义帧几何（BlockFrameGeometry）
 
-[`BlockFrameGeometry.cs`](src/Common/BlockFrameGeometry.cs) 是图框录入和扫描共享的"找外框"逻辑：
+[`BlockFrameGeometry.cs`](src/Common/Geometry/BlockFrameGeometry.cs) 是图框录入和扫描共享的"找外框"逻辑：
 - 递归遍历块定义，每层先用 `RectangleGeometry` 找闭合矩形
 - 找不到矩形时回退到可见线类图素（Line/Polyline/Polyline2d/Polyline3d）合并包围盒
 
 ### 10.6 界面焦点管理（CadWindowFocus）
 
-[`CadWindowFocus.cs`](src/Common/CadWindowFocus.cs) 统一管理 CAD 内嵌 WinForms 的焦点切换：
+[`CadWindowFocus.cs`](src/Common/Infrastructure/CadWindowFocus.cs) 统一管理 CAD 内嵌 WinForms 的焦点切换：
 - `HideForCadInput(this)` — 隐藏插件窗口并强制把输入焦点交还 CAD 主窗口
 - `RestoreDialog(this)` — CAD 取点结束后恢复原窗口并置顶
 - 所有回到 CAD 取点的流程（框选字段、框选打印范围、生成目录等）统一使用
@@ -641,7 +641,7 @@ private static bool IsEntityVisible(Entity entity)
 > 要求用户输入绘图比例，按 `图面尺寸 / 比例 = 纸张mm` 生成任意纸张（40000×30000 ÷ 100 = 400×300mm），
 > 避免打印出超大尺寸的图。
 
-**录入/编辑**：[`ArbitraryPaperPicker.cs`](src/Common/ArbitraryPaperPicker.cs) 的 `DetectCandidatesOrPrompt` 在候选为空时弹出 [`CustomScaleForm`](src/Common/Pages/CustomScaleForm.cs)（带提示文案、支持小数比例 `143`/`1:143`），用户确认后生成 `PaperName="自定义"`（`PaperSizeDetector.CustomPaperName`）+ `RequiresCustomPaper=true` 的候选；取消则沿用原 `GuessScale` 兜底。录入（`AddTitleBlockCommands`）、编辑（`EditTitleBlockCommands`）、对话框内重新框选打印范围（`FieldBoxSelectDialog.SelectPrintArea`）三处统一接入；`FieldBoxSelectDialog` 纸张行另有"任意纸张…"按钮可主动指定。
+**录入/编辑**：[`ArbitraryPaperPicker.cs`](src/Common/Services/Paper/ArbitraryPaperPicker.cs) 的 `DetectCandidatesOrPrompt` 在候选为空时弹出 [`CustomScaleForm`](src/Common/Views/CustomScaleForm.cs)（带提示文案、支持小数比例 `143`/`1:143`），用户确认后生成 `PaperName="自定义"`（`PaperSizeDetector.CustomPaperName`）+ `RequiresCustomPaper=true` 的候选；取消则沿用原 `GuessScale` 兜底。录入（`AddTitleBlockCommands`）、编辑（`EditTitleBlockCommands`）、对话框内重新框选打印范围（`FieldBoxSelectDialog.SelectPrintArea`）三处统一接入；`FieldBoxSelectDialog` 纸张行另有"任意纸张…"按钮可主动指定。
 
 **扫描**：`TitleBlockScanner.ApplyFixedPaper` 对"自定义"条目始终固定使用库中纸张尺寸（不被自动识别的加长图覆盖），并按当前图框外框实际边长重算比例（`InferFrameScale`，同向/宽高互换取误差小者，块缩放时仍正确），置 `RequiresCustomPaper=true`。
 
@@ -652,7 +652,7 @@ private static bool IsEntityVisible(Entity entity)
 ## 11. 快捷键设置（命令别名）
 
 **触发**：用户运行 `ZBP_SHORTCUT_SETTINGS`，或点击菜单"快捷键设置"。
-**实现**：[`ShortcutSettingsControl`](src/Common/Pages/ShortcutSettingsControl.xaml.cs) + [`CommandAliasManager.cs`](src/Common/CommandAliasManager.cs)
+**实现**：[`ShortcutSettingsControl`](src/Common/Views/ShortcutSettingsControl.xaml.cs) + [`CommandAliasManager.cs`](src/Common/Infrastructure/CommandAliasManager.cs)
 
 **原理**：CAD 的命令别名通过 PGP 程序参数文件（`acad.pgp` / `ZWCAD.pgp`）定义。用户在 WPF 界面为 6 个常用命令设置简化命令（如 `TK` → `ZBP_ADD_TITLE_BLOCK`），保存后写入 PGP 文件末尾的管理块，执行 `REINIT`（勾选 PGP）或重启 CAD 后生效。
 
@@ -735,40 +735,58 @@ AutoCAD Core 版本额外使用 `#if ACAD_CORE` 子条件处理 `CadApp.ShowModa
 ├── global.json                     ← .NET SDK 版本 (9.0.315)
 │
 ├── src/
-│   ├── Common/                     ← 双平台共享代码 (#if AUTOCAD)
-│   │   ├── BatchPlotCommands.cs        ← 命令注册入口 + 面板生命周期 + UI工具 (partial class)
-│   │   ├── AddTitleBlockCommands.cs    ← 新增图框向导 + 动态块可见性 (partial class)
-│   │   ├── SinglePlotCommands.cs       ← 单张打印核心 + 打印机选择 + 自定义纸张 (partial class)
-│   │   ├── CoordinateUtils.cs          ← UCS/DCS 坐标变换矩阵 (partial class)
-│   │   ├── Models.cs                   ← 数据模型: PlotJob, TitleBlockDefinition, LocalRectangle, PaperDetection
-│   │   ├── TitleBlockScanner.cs        ← 图框库扫描器: 扫描→匹配→生成PlotJob
-│   │   ├── RectangleFrameScanner.cs    ← 矩形框扫描器: 递归扫描→XCLIP过滤→空框过滤→TabOrder排序
-│   │   ├── PaperSizeDetector.cs        ← 纸张尺寸检测: A0~A3标准/加长 + GuessScale (非标图纸比例推测)
-│   │   ├── CadTextExtractor.cs         ← 文字提取: 属性/文字/多行文字, XCLIP 过滤, 三级优先级
-│   │   ├── CadTextUpdater.cs           ← 文字回写: 将图号图名写回DWG
-│   │   ├── CadMenuInstaller.cs         ← 菜单栏安装: 复用/创建"LA批量打印"菜单并原地重建菜单项
-│   │   ├── TitleBlockLibraryStore.cs    ← 图框库持久化 (JSON 原子写入)
-│   │   ├── AppSettingsStore.cs         ← 设置持久化 (JSON), 含文件名连接符/字段合法性检查
-│   │   ├── PdfDocumentService.cs       ← PDF 合并 (PdfSharp)
-│   │   ├── PmpCustomPaper.cs           ← PMP 自定义纸张注册/删除 (PIA3 JSON / PIA2 / ZWCAD INI)
-│   │   ├── PmpPiaConverter.cs          ← 历史兼容工具（LA 安装链路不调用）
-│   │   ├── DwgSplitService.cs          ← DWG 拆分 (模型空间WBLOCK / 布局空间复制)
-│   │   ├── DirectoryTableGenerator.cs  ← 图纸目录表生成: 在CAD中绘制表格 + 框选单元格尺寸
-│   │   ├── TemporarySequenceOverlay.cs ← 打印序号标注: 红框+数字，增量更新
-│   │   ├── PlotWindowInset.cs           ← 不打印外边框: 按纸面 1mm 内退打印窗口
-│   │   ├── BlockFrameGeometry.cs        ← 块定义帧几何: 递归找外框
-│   │   ├── RectangleGeometry.cs         ← 公共矩形几何函数: Polyline/2d/3d→矩形验证
-│   │   ├── CadWindowFocus.cs            ← CAD 焦点管理: HideForCadInput/RestoreDialog
-│   │   ├── ArbitraryPaperPicker.cs      ← 任意纸张: 识别不到标准纸时弹比例输入框换算
-│   │   ├── ScaleSettingsPicker.cs       ← 比例设置: 图中拾取图框反推自定义比例
-│   │   ├── CommandAliasManager.cs       ← 命令别名管理: PGP 读写+REINIT
-│   │   ├── RasterPlotOrientation.cs     ← 栅格输出 DCS 方向判断
-│   │   ├── CsvExporter.cs              ← CSV 导出 (UTF-8 BOM)
-│   │   ├── FileNameSanitizer.cs        ← 文件名清洗: 非法字符、路径过长
-│   │   ├── NaturalStringComparer.cs    ← 自然排序: "JZ-02" < "JZ-10"
-│   │   ├── BatchPlotLogger.cs          ← 日志输出
+│   ├── Common/                     ← 双平台共享代码 (#if AUTOCAD)，按 C# 分层目录组织，namespace 仍为 ZwcadBatchPlot
+│   │   ├── Commands/                   ← 命令层：CAD 命令入口（BatchPlotCommands partial class）
+│   │   │   ├── BatchPlotCommands.cs        ← 命令注册入口 + 面板生命周期 + UI工具
+│   │   │   ├── AddTitleBlockCommands.cs    ← 新增图框向导 + 动态块可见性
+│   │   │   ├── SinglePlotCommands.cs       ← 单张打印核心 + 打印机选择 + 自定义纸张
+│   │   │   ├── EditTitleBlockCommands.cs   ← 从图框库编辑已有图框记录
+│   │   │   └── CoordinateUtils.cs          ← UCS/DCS 坐标变换矩阵
+│   │   ├── Models/                     ← 模型层：数据模型与持久化
+│   │   │   ├── Models.cs                   ← PlotJob, TitleBlockDefinition, LocalRectangle, PaperDetection
+│   │   │   ├── AppSettingsStore.cs         ← 设置持久化 (JSON)
+│   │   │   └── TitleBlockLibraryStore.cs    ← 图框库持久化 (JSON 原子写入)
+│   │   ├── Services/                   ← 服务层：业务逻辑
+│   │   │   ├── Scanning/                   ← 扫描与文字提取
+│   │   │   │   ├── TitleBlockScanner.cs        ← 图框库扫描器: 扫描→匹配→生成PlotJob
+│   │   │   │   ├── RectangleFrameScanner.cs    ← 矩形框扫描器: 递归扫描→XCLIP过滤→空框过滤→TabOrder排序
+│   │   │   │   ├── CadTextExtractor.cs         ← 文字提取: 属性/文字/多行文字, XCLIP 过滤, 三级优先级
+│   │   │   │   └── CadTextUpdater.cs           ← 文字回写: 将图号图名写回DWG
+│   │   │   ├── Paper/                      ← 纸张识别与 PMP
+│   │   │   │   ├── PaperSizeDetector.cs        ← 纸张尺寸检测: A0~A3标准/加长 + GuessScale
+│   │   │   │   ├── ArbitraryPaperPicker.cs      ← 任意纸张: 识别不到标准纸时弹比例输入框换算
+│   │   │   │   ├── ScaleSettingsPicker.cs       ← 比例设置: 图中拾取图框反推自定义比例
+│   │   │   │   ├── PmpCustomPaper.cs           ← PMP 自定义纸张注册/删除
+│   │   │   │   ├── PmpPiaConverter.cs          ← 历史兼容工具（LA 安装链路不调用）
+│   │   │   │   ├── CustomPaperBatchPreparer.cs  ← 批量打印一次性注册任意纸张
+│   │   │   │   └── OutputPaperNameResolver.cs   ← 输出用图幅名（不回写实际纸张）
+│   │   │   └── Plotting/                    ← 打印/输出服务
+│   │   │       ├── PdfDocumentService.cs       ← PDF 合并 (PdfSharp)
+│   │   │       ├── DwgSplitService.cs          ← DWG 拆分 (模型空间WBLOCK / 布局空间复制)
+│   │   │       ├── PlotStyleManager.cs          ← CTB 打印样式列表与编辑入口
+│   │   │       ├── PlotTextGeometryFileUpdater.cs ← 绘图仪文字转几何字段
+│   │   │       ├── PlotTextGeometryModeResult.cs  ← 文字输出模式切换结果
+│   │   │       ├── PlotWindowInset.cs           ← 不打印外边框: 按纸面 1mm 内退打印窗口
+│   │   │       └── RasterPlotOrientation.cs     ← 栅格输出 DCS 方向判断
+│   │   ├── Geometry/                   ← 领域几何：坐标、矩形、空间排序
+│   │   │   ├── BlockFrameGeometry.cs        ← 块定义帧几何: 递归找外框
+│   │   │   ├── RectangleGeometry.cs         ← 公共矩形几何函数: Polyline/2d/3d→矩形验证
+│   │   │   ├── CadCoordinateSystem.cs       ← UCS/WCS 选择窗口上下文
+│   │   │   └── SpatialSorter.cs             ← 行列空间排序
+│   │   ├── Infrastructure/             ← 基础设施层：CAD 宿主集成
+│   │   │   ├── CadMenuInstaller.cs         ← 菜单栏安装
+│   │   │   ├── CadWindowFocus.cs            ← CAD 焦点管理: HideForCadInput/RestoreDialog
+│   │   │   ├── CommandAliasManager.cs       ← 命令别名管理: PGP 读写+REINIT
+│   │   │   ├── TemporarySequenceOverlay.cs ← 打印序号标注: 红框+数字
+│   │   │   ├── TransientFrameMarkers.cs    ← 新增图框临时红色标识
+│   │   │   └── DirectoryTableGenerator.cs  ← 图纸目录表生成
+│   │   ├── Utilities/                  ← 横切工具
+│   │   │   ├── CsvExporter.cs              ← CSV 导出 (UTF-8 BOM)
+│   │   │   ├── FileNameSanitizer.cs        ← 文件名清洗
+│   │   │   ├── NaturalStringComparer.cs    ← 自然排序: "JZ-02" < "JZ-10"
+│   │   │   └── BatchPlotLogger.cs          ← 日志输出
 │   │   │
-│   │   └── Pages/                      ← WinForms UI 面板
+│   │   └── Views/                      ← 表现层：WinForms / WPF 界面
 │   │       ├── BatchPlotForm.cs            ← 批量打印主面板 (图框库匹配模式)
 │   │       ├── RectangleBatchPlotForm.cs   ← 批量打印面板 (矩形框扫描模式, TabOrder分组+行列排序)
 │   │       ├── SinglePlotForm.cs           ← 单张打印确认面板（预览/纸张/路径/留边）
@@ -861,7 +879,7 @@ AutoCAD Core 版本额外使用 `#if ACAD_CORE` 子条件处理 `CadApp.ShowModa
 
 ## 附录 A：主要数据模型
 
-### PlotJob（[`Models.cs`](src/Common/Models.cs)）
+### PlotJob（[`Models.cs`](src/Common/Models/Models.cs)）
 
 ```csharp
 public sealed class PlotJob
@@ -917,7 +935,7 @@ public sealed class PlotJob
 }
 ```
 
-### TitleBlockDefinition（[`Models.cs`](src/Common/Models.cs)）
+### TitleBlockDefinition（[`Models.cs`](src/Common/Models/Models.cs)）
 
 ```csharp
 public sealed class TitleBlockDefinition
@@ -943,7 +961,7 @@ public sealed class TitleBlockDefinition
 }
 ```
 
-### AppSettings（[`AppSettingsStore.cs`](src/Common/AppSettingsStore.cs)）
+### AppSettings（[`AppSettingsStore.cs`](src/Common/Models/AppSettingsStore.cs)）
 
 ```csharp
 public sealed class AppSettings
