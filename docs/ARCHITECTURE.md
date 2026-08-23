@@ -869,7 +869,7 @@ AutoCAD Core 版本额外使用 `#if ACAD_CORE` 子条件处理 `CadApp.ShowModa
 ├── AcadBatchPlot.csproj            ← AutoCAD 2015-2024 编译入口 (net48)
 ├── AcadBatchPlot.Core.csproj       ← AutoCAD 2025-2027 Core 编译入口 (net8.0-windows)
 ├── Directory.Build.props           ← 共享 MSBuild 属性 (BaseIntermediateOutputPath)
-├── global.json                     ← .NET SDK 版本 (9.0.315)
+├── global.json                     ← 最低 SDK 9.0.100，同主版本内自动用最新已安装 SDK
 │
 ├── src/
 │   ├── Common/                     ← 双平台共享代码 (#if AUTOCAD)，按 C# 分层目录组织，namespace 仍为 ZwcadBatchPlot
