@@ -1,6 +1,6 @@
 # 批量打印插件架构文档
 
-> 覆盖 ZWCAD 和 AutoCAD 双平台，版本 1.15.4 — 本文档反映当前项目结构，包含可选字段（日期/版次/阶段/信息）、任意纸张单张打印、图号重排、CSV导出、PDF/PNG/JPG/DWF/DWG 多格式输出、插件自有栅格绘图仪、所选格式预览、随包 PIA2 模板初始化等特性。
+> 覆盖 ZWCAD 和 AutoCAD 双平台，版本 1.15.4 — 本文档反映当前项目结构，包含可选字段（日期/版次/阶段/信息）、任意纸张单张打印、图号重排、CSV导出、PDF/PNG/JPG/DWF/DWG 多格式输出、插件自有栅格绘图仪、所选格式预览、随包 PIA2 模板初始化、另存副本式 DWG 拆图与纸面 1mm 外边框内退等特性。
 
 ---
 
@@ -16,6 +16,8 @@
 7. [打印引擎](#7-打印引擎)
    - [7.2 输出格式、绘图仪与纸张单位](#72-输出格式绘图仪与纸张单位)
    - [7.3 输出文件命名](#73-输出文件命名)
+   - [7.4 DWG 拆图内核](#74-dwg-拆图内核)
+   - [7.5 不打印外边框内退](#75-不打印外边框内退)
 8. [PDF 合并](#8-pdf-合并)
 9. [UCS 坐标变换](#9-ucs-坐标变换)
 10. [动态块处理](#10-动态块处理)
@@ -447,7 +449,7 @@ PlotterService.PlotMany(Jobs, deviceName, styleSheet, settings)
                            // 验证失败 → 标记为失败，不阻塞后续 Job
 ```
 
-> `DWG` 输出不进入 `PublishEngine`，而是由 `DwgSplitService` 按每个 `PlotJob` 的窗口或布局拆分为独立 DWG。
+> `DWG` 输出不进入 `PublishEngine`，而是由 `DwgSplitService` 按每个 `PlotJob` 的窗口或布局拆分为独立 DWG。详见 [7.4 DWG 拆图内核](#74-dwg-拆图内核)。
 
 ### 7.2 输出格式、绘图仪与纸张单位
 
@@ -507,6 +509,66 @@ ZWCAD 使用系统 PNG/JPG PC5 作为驱动模板，但把 PMP 关联改写为�
 ```
 {OutputDirectory}\{FileName}_批量打印.pdf
 ```
+
+### 7.4 DWG 拆图内核
+
+> `DWG` 输出不进入 `PublishEngine`，由 `DwgSplitService` 按每个 `PlotJob` 拆出独立 DWG。v1.15.4 起内核改为**另存副本后删框外**，不再使用 `Wblock()` 整库克隆。
+
+**入口**：[`DwgSplitService.cs`](src/Common/Services/Plotting/DwgSplit/DwgSplitService.cs) — 批量调度、输出路径、临时文件替换、源库句柄管理。
+
+**子模块**（`src/Common/Services/Plotting/DwgSplit/`）：
+
+| 文件 | 职责 |
+|------|------|
+| [`DwgModelSplitter.cs`](src/Common/Services/Plotting/DwgSplit/DwgModelSplitter.cs) | 模型空间：Copy 已保存源图 → 只删模型框外 → Purge → SaveAs |
+| [`DwgPaperSplitter.cs`](src/Common/Services/Plotting/DwgSplit/DwgPaperSplitter.cs) | 布局空间：Copy → 删纸面框外 → 删其他布局 → Purge → SaveAs |
+| [`DwgSplitGeometry.cs`](src/Common/Services/Plotting/DwgSplit/DwgSplitGeometry.cs) | 去留判定：UCS 矩形、保留多边形、XCLIP、邻框过滤、穿框相交 |
+| [`DwgDatabaseCleanup.cs`](src/Common/Services/Plotting/DwgSplit/DwgDatabaseCleanup.cs) | 解锁图层、删布局、Purge、解析已保存源路径 |
+
+```
+DwgSplitService.SplitMany(jobs)
+  │
+  ├─ SourceDatabaseContext.Open(job)
+  │   ├─ 当前图 → LockDocument + 内存 Database（含未保存修改，但拆图副本仍 File.Copy 磁盘文件）
+  │   └─ 外部 DWG → ReadDwgFile 侧库
+  │
+  ├─ 模型 (IsPaperSpace=false) → DwgModelSplitter.Split
+  │   ├─ File.Copy(已保存路径) → 输出路径
+  │   ├─ 只擦模型空间框外实体；不删纸面布局、不切 TileMode
+  │   ├─ UCS 仅用于去留判定，不改副本坐标/视图/UCS
+  │   └─ PurgeUnusedNamedObjects → SaveAs
+  │
+  └─ 布局 (IsPaperSpace=true) → DwgPaperSplitter.Split
+      ├─ File.Copy → 删当前布局纸面框外（含视口中心/范围判定）
+      ├─ DeleteUnneededLayouts（保留目标布局 + 模型）
+      └─ Purge → SaveAs
+```
+
+**去留规则**（[`DwgSplitGeometry.ShouldKeepEntity`](src/Common/Services/Plotting/DwgSplit/DwgSplitGeometry.cs)）：
+
+1. **XCLIP 块**：裁剪框与图框打印范围相交即保留，不看插入点或未裁剪外包。
+2. **UCS 图框**：窗口为 UCS 轴对齐矩形；图元 `GetTransformedCopy(WCS→UCS)` 后与矩形相交即留；禁止先取四角 WCS 包围盒再变换。
+3. **WCS / 布局**：保留多边形为扫描四角绕序；曲线采样或与边求交；非曲线外包与多边形相交即留（穿框填充/块/图像不因中心在框外被删）。
+4. **邻框**：仅块参照或闭合多段线；中心在当前框外且尺寸接近当前图框、且未伸入图框内部（内缩 2% 后仍不相交）时丢弃。
+5. **浮动视口**：中心在多边形内，或视口纸面矩形伸入图框内部则保留。
+6. **读不到几何**：保守保留，计入 `UnknownExtentsKept`。
+
+**约束**：
+
+- 未保存图纸：`File.Copy` 不含未保存修改，需先保存源图。
+- Purge 只对副本执行，不 Purge 原图。
+- 模型拆图不删光纸面布局，避免 DWG 缺少 Model + Layout 导致 CAD 报错。
+
+### 7.5 不打印外边框内退
+
+**实现**：[`PlotWindowInset.cs`](src/Common/Services/Plotting/PlotWindowInset.cs)（设置项 `HideFrameBoundaryWhenPlotting`）。
+
+勾选「不打印外边框」时：
+
+- 先按**原打印窗口**完成选纸、比例、旋转和留白计算。
+- 再将 DCS 打印窗口四边各内退 **1mm 纸面**（`PaperInsetMm`），只裁打印内容，不把图框临时移到不打印层。
+- 内退后的窗口**不参与**比例或留白反算，避免 `ScaleToFit` 把内容放大铺满。
+- 纸面短边内退后不足 `MinimumRemainingShortSideMm` 时放弃内退。
 
 ---
 
@@ -725,6 +787,7 @@ AutoCAD Core 版本额外使用 `#if ACAD_CORE` 子条件处理 `CadApp.ShowModa
 │   ├── platform-architecture.md
 │   ├── repository-layout.md
 │   ├── tutorial.html                ← 图文教程网页
+│   ├── RELEASE_NOTES_v1.15.4.md     ← 当前版本发布说明
 │   ├── 用户使用说明.md
 │   └── 软件说明.txt
 │
@@ -761,12 +824,17 @@ AutoCAD Core 版本额外使用 `#if ACAD_CORE` 子条件处理 `CadApp.ShowModa
 │   │   │   │   ├── CustomPaperBatchPreparer.cs  ← 批量打印一次性注册任意纸张
 │   │   │   │   └── OutputPaperNameResolver.cs   ← 输出用图幅名（不回写实际纸张）
 │   │   │   └── Plotting/                    ← 打印/输出服务
+│   │   │       ├── DwgSplit/                    ← DWG 拆图内核（另存副本后删框外）
+│   │   │       │   ├── DwgSplitService.cs       ← 批量调度、路径与临时文件替换
+│   │   │       │   ├── DwgModelSplitter.cs      ← 模型空间拆图
+│   │   │       │   ├── DwgPaperSplitter.cs      ← 布局空间拆图
+│   │   │       │   ├── DwgSplitGeometry.cs      ← 去留、UCS、XCLIP、穿框相交
+│   │   │       │   └── DwgDatabaseCleanup.cs    ← 解锁图层、删布局、Purge
 │   │   │       ├── PdfDocumentService.cs       ← PDF 合并 (PdfSharp)
-│   │   │       ├── DwgSplitService.cs          ← DWG 拆分 (模型空间WBLOCK / 布局空间复制)
 │   │   │       ├── PlotStyleManager.cs          ← CTB 打印样式列表与编辑入口
 │   │   │       ├── PlotTextGeometryFileUpdater.cs ← 绘图仪文字转几何字段
 │   │   │       ├── PlotTextGeometryModeResult.cs  ← 文字输出模式切换结果
-│   │   │       ├── PlotWindowInset.cs           ← 不打印外边框: 按纸面 1mm 内退打印窗口
+│   │   │       ├── PlotWindowInset.cs           ← 不打印外边框: 纸面四边各内退 1mm
 │   │   │       └── RasterPlotOrientation.cs     ← 栅格输出 DCS 方向判断
 │   │   ├── Geometry/                   ← 领域几何：坐标、矩形、空间排序
 │   │   │   ├── BlockFrameGeometry.cs        ← 块定义帧几何: 递归找外框
@@ -842,6 +910,7 @@ AutoCAD Core 版本额外使用 `#if ACAD_CORE` 子条件处理 `CadApp.ShowModa
 │
 ├── scripts/
 │   ├── build-dll.ps1                ← 编译脚本
+│   ├── package-release.ps1          ← 本地发布目录与 ZIP 打包
 │   └── generate-zwcad-plotter.ps1   ← ZWCAD 绘图仪配置生成
 │
 ├── installer/                       ← ZWCAD 用户安装包
