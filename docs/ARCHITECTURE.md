@@ -16,7 +16,7 @@
 7. [打印引擎](#7-打印引擎)
    - [7.2 输出格式、绘图仪与纸张单位](#72-输出格式绘图仪与纸张单位)
    - [7.3 输出文件命名](#73-输出文件命名)
-   - [7.4 DWG 拆图内核](#74-dwg-拆图内核)
+   - [7.4 DWG 拆图（CAD 按图框拆分）](#74-dwg-拆图cad-按图框拆分)
    - [7.5 不打印外边框内退](#75-不打印外边框内退)
 8. [PDF 合并](#8-pdf-合并)
 9. [UCS 坐标变换](#9-ucs-坐标变换)
@@ -449,7 +449,7 @@ PlotterService.PlotMany(Jobs, deviceName, styleSheet, settings)
                            // 验证失败 → 标记为失败，不阻塞后续 Job
 ```
 
-> `DWG` 输出不进入 `PublishEngine`，而是由 `DwgSplitService` 按每个 `PlotJob` 的窗口或布局拆分为独立 DWG。详见 [7.4 DWG 拆图内核](#74-dwg-拆图内核)。
+> `DWG` 输出不进入 `PublishEngine`，而是由 `DwgSplitService` 按每个 `PlotJob` 的窗口或布局拆分为独立 DWG。详见 [7.4 DWG 拆图（CAD 按图框拆分）](#74-dwg-拆图cad-按图框拆分)。
 
 ### 7.2 输出格式、绘图仪与纸张单位
 
@@ -510,54 +510,128 @@ ZWCAD 使用系统 PNG/JPG PC5 作为驱动模板，但把 PMP 关联改写为�
 {OutputDirectory}\{FileName}_批量打印.pdf
 ```
 
-### 7.4 DWG 拆图内核
+### 7.4 DWG 拆图（CAD 按图框拆分）
 
-> `DWG` 输出不进入 `PublishEngine`，由 `DwgSplitService` 按每个 `PlotJob` 拆出独立 DWG。v1.15.4 起内核改为**另存副本后删框外**，不再使用 `Wblock()` 整库克隆。
+> `DWG` 输出**不进入** `PublishEngine`：不走绘图仪、CTB、打印预览和纸面留白逻辑，由 `DwgSplitService` 按每个 `PlotJob` 在磁盘上生成独立 DWG。v1.15.4 起内核为**另存副本后删框外**，不使用 `Wblock()` 整库克隆。
 
-**入口**：[`DwgSplitService.cs`](src/Common/Services/Plotting/DwgSplit/DwgSplitService.cs) — 批量调度、输出路径、临时文件替换、源库句柄管理。
+#### 7.4.1 与打印引擎的边界
 
-**子模块**（`src/Common/Services/Plotting/DwgSplit/`）：
+| 项目 | PDF / PNG / JPG / DWF | DWG 拆图 |
+|------|----------------------|----------|
+| 内核 | `PlotterService` + `PublishEngine` | `DwgSplitService` + `DwgModelSplitter` / `DwgPaperSplitter` |
+| 绘图仪 / CTB | 需要 | 不使用 |
+| 预览 | 支持（CAD PlotEngine） | 不支持，界面提示「拆图操作」 |
+| 留白 / 不打印外边框 | 适用 | 不适用 |
+| 自定义纸张 PMP | 批量注册 | 不适用 |
+| 源图修改 | 只读打印 | 只改**副本**；原图与内存库不 Purge、不改 UCS/视图 |
+
+#### 7.4.2 UI 入口
+
+| 界面 | 触发方式 | 实现 |
+|------|----------|------|
+| 图框块批量打印 [`BatchPlotForm`](src/Common/Views/BatchPlotForm.cs) | 输出格式选 **DWG** →「开始打印」；或工具栏「批量拆图」 | `PrintOrStop()` → `SplitSelectedDwgs()` → `DwgSplitService.SplitMany` |
+| 矩形框批量打印 [`RectangleBatchPlotForm`](src/Common/Views/RectangleBatchPlotForm.cs) | 输出格式选 **DWG** →「开始打印」；或「批量拆图」 | `Print()` → `SplitDwgs()` → `SplitMany` |
+
+选 DWG 时禁用 CTB、合并 PDF、纸面留白等仅用于打印输出的控件；输出路径列标题变为「DWG文件名」。拆图文件名规则与 PDF 相同，使用设置中的 `PdfFileNamePattern`（`A/B/C/D/E/F/G/T/N` 占位符）。
+
+默认输出目录：每个源 DWG 所在目录下的 `DWG` 子目录（与「当前文件夹/输出格式」快捷方式一致）。
+
+#### 7.4.3 PlotJob 窗口字段（拆图用哪些、不用哪些）
+
+扫描阶段写入 `PlotJob` 的窗口信息是拆图与打印的**共同载体**，但拆图几何判定**不用 DCS 窗口**：
+
+| 字段 | 打印 | 拆图去留 |
+|------|------|----------|
+| `CornerPoints`（WCS 四角） | 可转 DCS 作打印窗口 | WCS/布局：构建保留多边形 `BuildKeepPolygon` |
+| `UsesUserCoordinateSystem` + `UcsMin/Max` + UCS 基轴 | 参与 DCS 变换 | 模型 UCS：在 UCS 矩形内判定，不先转 WCS 包盒 |
+| `MinX/MinY/MaxX/MaxY`（常为 DCS） | `GetPlotWindow` 直接使用 | **不用于**拆图去留 |
+| `IsDcsWindow` | 跳过二次变换 | 拆图忽略 |
+| `IsPaperSpace` + `SpaceName` | 布局打印 | 选择 `DwgPaperSplitter` 或 `DwgModelSplitter` |
+
+矩形框扫描注释明确要求：打印窗口可转 DCS，但 `CornerPoints` 必须保留给 DWG 拆图（见 [`RectangleFrameScanner`](src/Common/Services/Scanning/RectangleFrameScanner.cs)）。
+
+#### 7.4.4 调度、源图与输出安全
+
+**入口**：[`DwgSplitService.SplitMany`](src/Common/Services/Plotting/DwgSplit/DwgSplitService.cs)
+
+```
+SplitMany(jobs, document, settings, ...)
+  │
+  ├─ BuildOutputPaths / explicitOutputPaths
+  │   ├─ FileNameSanitizer.FormatFileNamePattern(PdfFileNamePattern, …)
+  │   ├─ 目录：customOutputDirectory 或 源目录 / 源目录\DWG
+  │   └─ MakeUnique：重名时按 AddSequenceWhenPdfExists 追加序号
+  │
+  └─ 对每个 job:
+      ├─ SourceDatabaseContext.Open
+      │   ├─ 当前图路径与 job.SourceFile 一致 → LockDocument + 内存 Database
+      │   └─ 外部 DWG → ReadDwgFile 侧库（只读引用，拆图副本仍 File.Copy 磁盘文件）
+      ├─ EnsureSourceAndOutputDiffer（禁止输出路径与源路径相同）
+      ├─ ExecuteWithSafeOutput(outputPath, buildTemporaryDwg)
+      │   ├─ 写入 .{stem}.split-{guid}.dwg
+      │   ├─ ModelSplitter 或 PaperSplitter 生成临时文件
+      │   ├─ ValidateGeneratedDwg（ReadDwgFile 可读且非空）
+      │   └─ File.Move 或 File.Replace 替换正式输出；失败时旧文件可恢复
+      └─ 单 job 异常记入 SplitResult.Error，不阻断其余任务
+```
+
+**另存源路径**（[`ResolveSavedSourcePath`](src/Common/Services/Plotting/DwgSplit/DwgDatabaseCleanup.cs)）：按 `sourcePath` → `Database.Filename` → `job.SourceFile` 查找**磁盘上已存在**的 DWG。找不到则抛错「请先保存」。`File.Copy` **不含**未保存的内存修改。
+
+#### 7.4.5 模型空间 vs 布局空间
+
+| 步骤 | 模型 [`DwgModelSplitter`](src/Common/Services/Plotting/DwgSplit/DwgModelSplitter.cs) | 布局 [`DwgPaperSplitter`](src/Common/Services/Plotting/DwgSplit/DwgPaperSplitter.cs) |
+|------|-------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------|
+| 复制 | `File.Copy` 已保存源图 | 同左 |
+| 擦除范围 | 仅**模型空间** `BlockTableRecord.ModelSpace` | 目标布局对应 `BlockTableRecord`（纸空间） |
+| 布局 | **不** `DeleteUnneededLayouts`、不切 `TileMode` | `DeleteUnneededLayouts`：删非目标纸面布局，保留 Model |
+| 视口 | 无 | 根视口（Number==1 / `GetViewports()[0]`）必留；浮动视口按中心或纸面矩形是否伸入图框 |
+| 临时 overlay | 删 `ZBP_TEMP_SEQUENCE_OVERLAY` 层实体 | 同左 |
+| 图层 | 临时解锁全部图层，提交后恢复 | 同左 |
+| Purge | 副本上多轮 `PurgeUnusedNamedObjects` | 同左 |
+| 空结果 | `KeptEntities==0` 抛错，不生成空 DWG | 无此硬校验 |
+| WorkingDatabase | 拆图期间切到副本 `Database` | 同左；删布局时 `LayoutManager.Current` 指向副本 |
+
+布局拆图通过 `LayoutManager.Current` 删除多余布局；模型拆图若个别纸面布局因代理数据无法删除，**保留该布局**也比让已清理的模型拆图整体失败更安全。
+
+#### 7.4.6 子模块职责
+
+`src/Common/Services/Plotting/DwgSplit/`：
 
 | 文件 | 职责 |
 |------|------|
-| [`DwgModelSplitter.cs`](src/Common/Services/Plotting/DwgSplit/DwgModelSplitter.cs) | 模型空间：Copy 已保存源图 → 只删模型框外 → Purge → SaveAs |
-| [`DwgPaperSplitter.cs`](src/Common/Services/Plotting/DwgSplit/DwgPaperSplitter.cs) | 布局空间：Copy → 删纸面框外 → 删其他布局 → Purge → SaveAs |
-| [`DwgSplitGeometry.cs`](src/Common/Services/Plotting/DwgSplit/DwgSplitGeometry.cs) | 去留判定：UCS 矩形、保留多边形、XCLIP、邻框过滤、穿框相交 |
-| [`DwgDatabaseCleanup.cs`](src/Common/Services/Plotting/DwgSplit/DwgDatabaseCleanup.cs) | 解锁图层、删布局、Purge、解析已保存源路径 |
+| [`DwgSplitService.cs`](src/Common/Services/Plotting/DwgSplit/DwgSplitService.cs) | 批量调度、路径、临时文件替换、`SplitResult` 统计 |
+| [`DwgModelSplitter.cs`](src/Common/Services/Plotting/DwgSplit/DwgModelSplitter.cs) | 模型：Copy → 擦模型框外 → Purge → SaveAs |
+| [`DwgPaperSplitter.cs`](src/Common/Services/Plotting/DwgSplit/DwgPaperSplitter.cs) | 布局：Copy → 擦纸面框外 → 删其他布局 → Purge → SaveAs |
+| [`DwgSplitGeometry.cs`](src/Common/Services/Plotting/DwgSplit/DwgSplitGeometry.cs) | 保留多边形、UCS 矩形、XCLIP、邻框、穿框相交 |
+| [`DwgDatabaseCleanup.cs`](src/Common/Services/Plotting/DwgSplit/DwgDatabaseCleanup.cs) | 已保存路径、解锁图层、删布局、Purge、排除序号 overlay |
 
-```
-DwgSplitService.SplitMany(jobs)
-  │
-  ├─ SourceDatabaseContext.Open(job)
-  │   ├─ 当前图 → LockDocument + 内存 Database（含未保存修改，但拆图副本仍 File.Copy 磁盘文件）
-  │   └─ 外部 DWG → ReadDwgFile 侧库
-  │
-  ├─ 模型 (IsPaperSpace=false) → DwgModelSplitter.Split
-  │   ├─ File.Copy(已保存路径) → 输出路径
-  │   ├─ 只擦模型空间框外实体；不删纸面布局、不切 TileMode
-  │   ├─ UCS 仅用于去留判定，不改副本坐标/视图/UCS
-  │   └─ PurgeUnusedNamedObjects → SaveAs
-  │
-  └─ 布局 (IsPaperSpace=true) → DwgPaperSplitter.Split
-      ├─ File.Copy → 删当前布局纸面框外（含视口中心/范围判定）
-      ├─ DeleteUnneededLayouts（保留目标布局 + 模型）
-      └─ Purge → SaveAs
-```
+#### 7.4.7 几何去留（`DwgSplitGeometry`）
 
-**去留规则**（[`DwgSplitGeometry.ShouldKeepEntity`](src/Common/Services/Plotting/DwgSplit/DwgSplitGeometry.cs)）：
+**保留窗口构建**：
 
-1. **XCLIP 块**：裁剪框与图框打印范围相交即保留，不看插入点或未裁剪外包。
-2. **UCS 图框**：窗口为 UCS 轴对齐矩形；图元 `GetTransformedCopy(WCS→UCS)` 后与矩形相交即留；禁止先取四角 WCS 包围盒再变换。
-3. **WCS / 布局**：保留多边形为扫描四角绕序；曲线采样或与边求交；非曲线外包与多边形相交即留（穿框填充/块/图像不因中心在框外被删）。
-4. **邻框**：仅块参照或闭合多段线；中心在当前框外且尺寸接近当前图框、且未伸入图框内部（内缩 2% 后仍不相交）时丢弃。
-5. **浮动视口**：中心在多边形内，或视口纸面矩形伸入图框内部则保留。
-6. **读不到几何**：保守保留，计入 `UnknownExtentsKept`。
+- **WCS / 布局**：`BuildKeepPolygon(job)` — UCS 图框时将 `UcsMin/Max` 四角经 `UcsToWorld` 连成斜矩形；否则用 `CornerPoints` 或 `Min/Max` 四角。
+- **UCS 模型**：判定窗口为 UCS 轴对齐矩形（`UcsMin/Max`），与 [`CadSelectionWindow.TransformWorldPointsToBounds`](src/Common/Geometry/CadCoordinateSystem.cs) 同一套上下文；**禁止**先取 WCS 四角包围盒再变换（旋转时约放大 √2）。
 
-**约束**：
+**`ShouldKeepEntity` 判定顺序**：
 
-- 未保存图纸：`File.Copy` 不含未保存修改，需先保存源图。
-- Purge 只对副本执行，不 Purge 原图。
-- 模型拆图不删光纸面布局，避免 DWG 缺少 Model + Layout 导致 CAD 报错。
+1. **XCLIP 块**（`TryGetXclipBoundary`）：`XclipFrameHitsPrintRange` — 裁剪多边形与图框打印范围相交即留，不看插入点或未裁剪外包。
+2. **UCS 模型**（`ShouldKeepByUcsRectangle`）：邻框过滤 → 曲线采样/与 UCS 矩形边求交 → 变换后外包与 UCS 矩形相交；失败则保守保留。
+3. **WCS / 布局**：邻框过滤（仅块、闭合多段线；中心在框外、尺寸接近、未伸入内缩 2% 多边形）→ `EntityHitsKeepPolygon`（曲线求交 + 外包与多边形相交）。
+4. **浮动视口**（仅布局）：`ViewportHitsKeepPolygon` — 中心在内，或纸面视口矩形伸入内缩多边形。
+5. **异常**：`UnknownExtentsKept++`，默认保留。
+
+**与打印 UCS 文档（§9）的关系**：打印用 DCS 包围盒排版；拆图在 WCS 多边形或 UCS 矩形内做**实体级**相交，两者共用 `CornerPoints` / `CadSelectionWindow.GetJobUcsToWorld`，但拆图**不读** `IsDcsWindow` 与 DCS `Min/Max`。
+
+#### 7.4.8 约束与禁止事项
+
+- **先保存**：副本来自磁盘；未保存修改不会进入拆出文件。
+- **禁止 Wblock**：避免视口 Off、UCS 被改写、拆出空图。
+- **禁止 Purge 原图**：Purge 仅对副本，减小体积；失败不阻断拆图。
+- **模型不删光布局**：DWG 须保留 Model + 至少一个 Layout，否则 CAD 打开报错。
+- **不改副本 UCS/视图**：UCS 只参与去留计算，不写回实体坐标。
+- **输出路径**：不能与源 DWG 相同；多任务不能共用同一输出路径。
+
+`SplitResult` 字段：`KeptEntities`、`RemovedEntities`、`UnknownExtentsKept` 写入批量打印日志（受「生成打印日志」总开关控制）。
 
 ### 7.5 不打印外边框内退
 

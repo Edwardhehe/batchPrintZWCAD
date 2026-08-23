@@ -154,7 +154,7 @@ AutoCAD 2025 ~ 2027 如果菜单栏未显示，可以执行 `ZBP_SHOW_PANEL` 打
 - **穿框图元**：与图框相交的填充、块、图像和骑框视口会保留；只贴边的紧邻图框仍不带入。
 - **未保存图纸**：拆图副本来自磁盘文件，请先保存源图。
 
-拆图与 PDF/PNG 等打印走不同内核，不走 `PublishEngine`、CTB 和打印预览。详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#74-dwg-拆图内核)。
+拆图与 PDF/PNG 等打印走不同内核，不走 `PublishEngine`、CTB 和打印预览。详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#74-dwg-拆图cad-按图框拆分)。
 
 ## 图纸目录
 
