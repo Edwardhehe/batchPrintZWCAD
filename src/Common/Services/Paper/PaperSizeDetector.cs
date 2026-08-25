@@ -48,6 +48,7 @@ public static class PaperSizeDetector
         /// <summary>
         /// 可自由拉伸图框录入专用：纸张只保存 A1+ 这类基础图幅，
         /// 具体加长分数和物理尺寸由每个块参照的当前外框重新识别。
+        /// 此类动态块按常用比例识别，不会出现任意比例套标准图幅的情况。
         /// </summary>
         public bool IncludeGenericDynamicTitleBlockPaper { get; set; }
         /// <summary>
@@ -110,6 +111,12 @@ public static class PaperSizeDetector
     /// </summary>
     public const string CustomPaperName = "自定义";
 
+    /// <summary>
+    /// 图纸长宽比与标准 A0~A4（及 1/8 模数加长图）长宽比的绝对误差上限。
+    /// 命中后允许以任意比例将该图幅解释为对应标准或加长纸张。
+    /// </summary>
+    public const double AspectRatioMatchTolerance = 0.01d;
+
     private static readonly int[] IntegerScales = { 1, 2, 4, 5, 8, 10, 20, 25, 50, 100, 200, 500, 1000 };
 
     /// <summary>
@@ -154,6 +161,165 @@ public static class PaperSizeDetector
         var paperWidth = drawingWidth / scale;
         var paperHeight = drawingHeight / scale;
         return (paperWidth, paperHeight, scale);
+    }
+
+    /// <summary>
+    /// 按图纸长宽比匹配标准 A0~A4 及其 1/8 模数加长图，不要求比例落在常用比例列表中。
+    /// 误差为 |图纸长边/短边 − 纸张长边/短边|，小于 <paramref name="maxAspectRatioError"/> 即命中。
+    /// 返回项的物理尺寸为对应标准或加长图幅（方向与图纸一致），比例按 图面短边 / 纸张短边 计算。
+    /// 列表先按 A4→A0 标准图幅，再按同序加长图幅排列。
+    /// </summary>
+    public static IReadOnlyList<PaperDetection> DetectByAspectRatio(
+        double width,
+        double height,
+        double maxAspectRatioError = AspectRatioMatchTolerance)
+    {
+        var actualWidth = Math.Abs(width);
+        var actualHeight = Math.Abs(height);
+        var actualShort = Math.Min(actualWidth, actualHeight);
+        var actualLong = Math.Max(actualWidth, actualHeight);
+        if (actualShort <= 1e-9d)
+        {
+            return new PaperDetection[0];
+        }
+
+        var drawingRatio = actualLong / actualShort;
+        var landscape = actualWidth >= actualHeight;
+        var matches = new List<PaperDetection>();
+        AddAspectRatioMatches(matches, actualShort, actualLong, drawingRatio, landscape, maxAspectRatioError, elongated: false);
+        AddAspectRatioMatches(matches, actualShort, actualLong, drawingRatio, landscape, maxAspectRatioError, elongated: true);
+        return matches;
+    }
+
+    /// <summary>
+    /// 按 A4→A0 加入长宽比命中的标准图幅或加长图幅。
+    /// 加长图先按短边反推任意比例，再把还原长边吸附到 1/8 模数；吸附后的长宽比仍须落入容差。
+    /// </summary>
+    private static void AddAspectRatioMatches(
+        List<PaperDetection> matches,
+        double actualShort,
+        double actualLong,
+        double drawingRatio,
+        bool landscape,
+        double maxAspectRatioError,
+        bool elongated)
+    {
+        for (var i = Standards.Length - 1; i >= 0; i--)
+        {
+            var paper = Standards[i];
+            var scale = actualShort / paper.ShortSide;
+            if (double.IsNaN(scale) || double.IsInfinity(scale) || scale <= 0d)
+            {
+                continue;
+            }
+
+            var restoredLongMm = actualLong / scale;
+            double paperLongMm;
+            double ratioError;
+            if (elongated)
+            {
+                // SnapLongSide 的下限是 +1/8，标准图幅不能走加长分支，否则会被硬吸附成加长图。
+                if (restoredLongMm <= paper.LongSide * 1.03d)
+                {
+                    continue;
+                }
+
+                paperLongMm = SnapLongSide(restoredLongMm, paper.LongSide);
+                ratioError = Math.Abs(drawingRatio - paperLongMm / paper.ShortSide);
+            }
+            else
+            {
+                paperLongMm = paper.LongSide;
+                ratioError = Math.Abs(drawingRatio - paper.LongSide / paper.ShortSide);
+            }
+
+            if (ratioError >= maxAspectRatioError)
+            {
+                continue;
+            }
+
+            var paperWidthMm = landscape ? paperLongMm : paper.ShortSide;
+            var paperHeightMm = landscape ? paper.ShortSide : paperLongMm;
+            var paperName = elongated
+                ? paper.Name + "+" + LongPaperExtension(paperWidthMm, paperHeightMm, paper)
+                : paper.Name;
+            matches.Add(new PaperDetection
+            {
+                PaperName = paperName,
+                ScaleValue = scale,
+                ScaleText = ToScaleText(scale),
+                IsLong = elongated,
+                PaperWidthMm = paperWidthMm,
+                PaperHeightMm = paperHeightMm,
+                Note = elongated
+                    ? $"{paper.Name} 加长图，长宽比误差 {ratioError:0.####}（容差 {maxAspectRatioError}），"
+                      + $"长边吸附 1/8 模数 {paperLongMm:0.###}mm，按任意比例 {ToScaleText(scale)}"
+                    : $"{paper.Name} 标准图幅，长宽比误差 {ratioError:0.####}（容差 {maxAspectRatioError}），"
+                      + $"按任意比例 {ToScaleText(scale)} 还原长边 {restoredLongMm:0.###}mm"
+            });
+        }
+    }
+
+    /// <summary>
+    /// 在 <see cref="DetectByAspectRatio"/> 的结果中选出默认图幅：
+    /// 先比长宽比误差，再比比例是否接近整数，最后偏向较小图幅。
+    /// </summary>
+    public static int IndexOfPreferredAspectRatioPaper(
+        double width,
+        double height,
+        IReadOnlyList<PaperDetection> papers)
+    {
+        var actualShort = Math.Min(Math.Abs(width), Math.Abs(height));
+        var actualLong = Math.Max(Math.Abs(width), Math.Abs(height));
+        if (papers.Count == 0 || actualShort <= 1e-9d)
+        {
+            return -1;
+        }
+
+        var drawingRatio = actualLong / actualShort;
+        var bestIndex = 0;
+        var bestError = double.MaxValue;
+        var bestRoundness = double.MaxValue;
+        var bestShortSide = double.MaxValue;
+        for (var i = 0; i < papers.Count; i++)
+        {
+            var paper = papers[i];
+            var paperShort = Math.Min(paper.PaperWidthMm, paper.PaperHeightMm);
+            var paperLong = Math.Max(paper.PaperWidthMm, paper.PaperHeightMm);
+            if (paperShort <= 1e-9d)
+            {
+                continue;
+            }
+
+            var error = Math.Abs(drawingRatio - paperLong / paperShort);
+            var roundness = ScaleIntegerDeviation(paper.ScaleValue);
+            if (error < bestError - 1e-12d
+                || (Math.Abs(error - bestError) <= 1e-12d && roundness < bestRoundness - 1e-9d)
+                || (Math.Abs(error - bestError) <= 1e-12d
+                    && Math.Abs(roundness - bestRoundness) <= 1e-9d
+                    && paperShort < bestShortSide))
+            {
+                bestError = error;
+                bestRoundness = roundness;
+                bestShortSide = paperShort;
+                bestIndex = i;
+            }
+        }
+
+        return bestIndex;
+    }
+
+    /// <summary>比例与最近整数的相对偏差；放大比例按倒数判断，便于 4:1 这类取值靠近整数。</summary>
+    private static double ScaleIntegerDeviation(double scale)
+    {
+        var reference = scale >= 1d ? scale : 1d / Math.Max(scale, 1e-9d);
+        var rounded = Math.Round(reference);
+        if (rounded < 1d)
+        {
+            return Math.Abs(reference - 1d);
+        }
+
+        return Math.Abs(reference - rounded) / rounded;
     }
 
     public static PaperDetection Detect(double width, double height)
@@ -477,6 +643,9 @@ public static class PaperSizeDetector
         };
     }
 
+    /// <summary>
+    /// 可自由拉伸图框只保留 A1+ 这类基础图幅名，具体加长长度扫描时再判定。
+    /// </summary>
     private static PaperDetection ToGenericDynamicTitleBlockPaper(PaperDetection paper)
     {
         var plusIndex = paper.PaperName.IndexOf('+');

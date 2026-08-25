@@ -118,55 +118,64 @@ public sealed partial class BatchPlotCommands
                     return;
                 }
 
-                var scale = scaleForm.SelectedScale;
-                var paperW = scaleForm.PaperWidthMm;
-                var paperH = scaleForm.PaperHeightMm;
-
-                // 向 LA_pdf.pmp 注册自定义纸张（自动适配 PIA 3.0 / PIA 2.0 / ZWCAD INI）
-                try
+                // 长宽比命中标准图幅时直接按 A0~A4 打印，不必注册自定义纸张。
+                if (scaleForm.SelectedStandardPaper != null)
                 {
-                    customPmpPath = Path.Combine(plottersDir, "PMP Files", "LA_pdf.pmp");
-                    if (!File.Exists(customPmpPath))
-                        throw new FileNotFoundException("LA_pdf.pmp 不存在，无法注册任意纸张。", customPmpPath);
+                    isArbitraryPaper = false;
+                    candidates = new List<PaperDetection> { scaleForm.SelectedStandardPaper };
+                }
+                else
+                {
+                    var scale = scaleForm.SelectedScale;
+                    var paperW = scaleForm.PaperWidthMm;
+                    var paperH = scaleForm.PaperHeightMm;
 
-                    customPaperRegistration = PmpCustomPaper.RegisterCustomPaper(customPmpPath, paperW, paperH)
-                        ?? throw new InvalidOperationException("LA_pdf.pmp 注册任意纸张失败。");
-                    forceCustomPaperReload = customPaperRegistration.WasAdded;
+                    // 向 LA_pdf.pmp 注册自定义纸张（自动适配 PIA 3.0 / PIA 2.0 / ZWCAD INI）
+                    try
+                    {
+                        customPmpPath = Path.Combine(plottersDir, "PMP Files", "LA_pdf.pmp");
+                        if (!File.Exists(customPmpPath))
+                            throw new FileNotFoundException("LA_pdf.pmp 不存在，无法注册任意纸张。", customPmpPath);
+
+                        customPaperRegistration = PmpCustomPaper.RegisterCustomPaper(customPmpPath, paperW, paperH)
+                            ?? throw new InvalidOperationException("LA_pdf.pmp 注册任意纸张失败。");
+                        forceCustomPaperReload = customPaperRegistration.WasAdded;
 #if AUTOCAD
-                    // AutoCAD 2027 的 PIA2 会缓存设备介质。已有同尺寸纸张返回 WasAdded=false，
-                    // 但当前会话仍可能没有枚举到它；单张打印必须照样重写关联并强制刷新。
-                    forceCustomPaperReload |=
-                        AcadPlotterInstaller.RequiresRefreshForReusedCustomPaper(installedPlotter);
-                    var attachment = AcadPlotterInstaller.EnsureActivePdfPmpAttachment(
-                        installedPlotter,
-                        customPmpPath,
-                        forceRewrite: forceCustomPaperReload);
-                    if (!attachment.Success)
-                    {
-                        throw new InvalidOperationException("LA_pdf.pc3 关联当前 PMP 失败：" + attachment.Message);
-                    }
-                    forceCustomPaperReload |= attachment.Changed;
-                    editor.WriteMessage("\nAutoCAD 打印机关联刷新: " + attachment.Message);
+                        // AutoCAD 2027 的 PIA2 会缓存设备介质。已有同尺寸纸张返回 WasAdded=false，
+                        // 但当前会话仍可能没有枚举到它；单张打印必须照样重写关联并强制刷新。
+                        forceCustomPaperReload |=
+                            AcadPlotterInstaller.RequiresRefreshForReusedCustomPaper(installedPlotter);
+                        var attachment = AcadPlotterInstaller.EnsureActivePdfPmpAttachment(
+                            installedPlotter,
+                            customPmpPath,
+                            forceRewrite: forceCustomPaperReload);
+                        if (!attachment.Success)
+                        {
+                            throw new InvalidOperationException("LA_pdf.pc3 关联当前 PMP 失败：" + attachment.Message);
+                        }
+                        forceCustomPaperReload |= attachment.Changed;
+                        editor.WriteMessage("\nAutoCAD 打印机关联刷新: " + attachment.Message);
 #endif
-                    editor.WriteMessage($"\n自定义纸张注册: pmp={customPmpPath}, paperName={customPaperRegistration.PaperName}, wasAdded={customPaperRegistration.WasAdded}, forceReload={forceCustomPaperReload}, paperW={paperW:0.######}, paperH={paperH:0.######}");
-                }
-                catch (Exception ex)
-                {
-                    throw new InvalidOperationException("任意纸张注册失败，已停止打印，避免回退到错误纸张。", ex);
-                }
-
-                candidates = new List<PaperDetection>
-                {
-                    new()
-                    {
-                        PaperName = customPaperRegistration.PaperName,
-                        PaperWidthMm = paperW,
-                        PaperHeightMm = paperH,
-                        ScaleValue = scale,
-                        ScaleText = PaperSizeDetector.ToScaleText(scale),
-                        Note = $"自定义纸张 {paperW:0.##} x {paperH:0.##} mm"
+                        editor.WriteMessage($"\n自定义纸张注册: pmp={customPmpPath}, paperName={customPaperRegistration.PaperName}, wasAdded={customPaperRegistration.WasAdded}, forceReload={forceCustomPaperReload}, paperW={paperW:0.######}, paperH={paperH:0.######}");
                     }
-                };
+                    catch (Exception ex)
+                    {
+                        throw new InvalidOperationException("任意纸张注册失败，已停止打印，避免回退到错误纸张。", ex);
+                    }
+
+                    candidates = new List<PaperDetection>
+                    {
+                        new()
+                        {
+                            PaperName = customPaperRegistration.PaperName,
+                            PaperWidthMm = paperW,
+                            PaperHeightMm = paperH,
+                            ScaleValue = scale,
+                            ScaleText = PaperSizeDetector.ToScaleText(scale),
+                            Note = $"自定义纸张 {paperW:0.##} x {paperH:0.##} mm"
+                        }
+                    };
+                }
             }
 
             var sourceFile = string.IsNullOrWhiteSpace(doc.Database.Filename)

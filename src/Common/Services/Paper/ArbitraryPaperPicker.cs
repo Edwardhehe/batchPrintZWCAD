@@ -14,9 +14,9 @@ using CadApp = ZwSoft.ZwCAD.ApplicationServices.Application;
 namespace ZwcadBatchPlot;
 
 /// <summary>
-/// 任意纸张录入帮助类：图框外框识别不到 A4~A0 及其加长纸张时，
-/// 弹出 <see cref="CustomScaleForm"/> 要求用户输入绘图比例，
-/// 按 图面尺寸 / 比例 = 纸张毫米尺寸 生成"自定义"纸张候选（RequiresCustomPaper=true）。
+/// 任意纸张录入帮助类：图框外框识别不到 A4~A0 及其加长纸张时，弹出 <see cref="CustomScaleForm"/>。
+/// 固定图框若长宽比仍接近标准图幅或 1/8 模数加长图，用户可选择 A0~A4 / A3+1/2 等（比例可为任意值，后续扫描按所选图幅尺寸反推比例）。
+/// 可自由拉伸动态块不会出现这种随便比例，仍只按常用比例识别，匹配不到时仅手填自定义尺寸。
 /// 用户取消时沿用 <see cref="PaperSizeDetector.DetectCandidatesOrFallback"/> 的 GuessScale 兜底，
 /// 保证候选列表始终非空。
 /// </summary>
@@ -48,32 +48,64 @@ public static class ArbitraryPaperPicker
         var actualWidth = Math.Abs(width);
         var actualHeight = Math.Abs(height);
         var guessedScale = PaperSizeDetector.GuessScale(actualWidth, actualHeight);
-        using var scaleForm = new CustomScaleForm(actualWidth, actualHeight, guessedScale, HintText);
+        // 可自由拉伸动态块只按常用比例识别加长长度，不会以任意比例套标准图幅。
+        var allowAspectRatioPapers = !options.IncludeGenericDynamicTitleBlockPaper;
+        using var scaleForm = new CustomScaleForm(actualWidth, actualHeight, guessedScale, HintText, allowAspectRatioPapers);
         var dialogResult = owner != null
             ? scaleForm.ShowDialog(owner)
             : ShowScaleDialog(scaleForm);
-        if (dialogResult == DialogResult.OK && scaleForm.SelectedScale >= 1)
+        if (dialogResult == DialogResult.OK
+            && (scaleForm.SelectedStandardPaper != null || scaleForm.SelectedScale >= 1))
         {
-            var scale = scaleForm.SelectedScale;
-            var paperWidthMm = actualWidth / scale;
-            var paperHeightMm = actualHeight / scale;
-            return new[]
+            var chosen = CreatePaperFromScaleForm(scaleForm, actualWidth, actualHeight);
+            if (string.Equals(chosen.PaperName, PaperSizeDetector.CustomPaperName, StringComparison.OrdinalIgnoreCase)
+                || !allowAspectRatioPapers)
             {
-                new PaperDetection
+                return new[] { chosen };
+            }
+
+            // 把用户确认的图幅放在首位，其余长宽比候选一并交给后续纸张下拉，便于改选。
+            var ordered = new List<PaperDetection> { chosen };
+            foreach (var paper in PaperSizeDetector.DetectByAspectRatio(actualWidth, actualHeight))
+            {
+                if (!string.Equals(paper.PaperName, chosen.PaperName, StringComparison.OrdinalIgnoreCase))
                 {
-                    PaperName = PaperSizeDetector.CustomPaperName,
-                    PaperWidthMm = paperWidthMm,
-                    PaperHeightMm = paperHeightMm,
-                    ScaleValue = scale,
-                    ScaleText = PaperSizeDetector.ToScaleText(scale),
-                    RequiresCustomPaper = true,
-                    Note = $"任意纸张：按用户输入比例 {PaperSizeDetector.ToScaleText(scale)} 换算，输出纸张 {paperWidthMm:0.##} x {paperHeightMm:0.##} mm"
+                    ordered.Add(paper);
                 }
-            };
+            }
+
+            return ordered;
         }
 
         // 用户取消：沿用原有 GuessScale 兜底，保证候选列表非空。
         return PaperSizeDetector.DetectCandidatesOrFallback(width, height, options);
+    }
+
+    /// <summary>
+    /// 将比例对话框的确认结果转为纸张候选。
+    /// 用户若选择了长宽比匹配的标准或加长图幅，则保存该图幅的标准物理尺寸，后续扫描按该尺寸反推任意比例；
+    /// 否则仍按输入比例换算自定义纸张。
+    /// </summary>
+    public static PaperDetection CreatePaperFromScaleForm(CustomScaleForm form, double width, double height)
+    {
+        if (form.SelectedStandardPaper != null)
+        {
+            return form.SelectedStandardPaper;
+        }
+
+        var scale = form.SelectedScale;
+        var paperWidthMm = width / scale;
+        var paperHeightMm = height / scale;
+        return new PaperDetection
+        {
+            PaperName = PaperSizeDetector.CustomPaperName,
+            PaperWidthMm = paperWidthMm,
+            PaperHeightMm = paperHeightMm,
+            ScaleValue = scale,
+            ScaleText = PaperSizeDetector.ToScaleText(scale),
+            RequiresCustomPaper = true,
+            Note = $"任意纸张：按用户输入比例 {PaperSizeDetector.ToScaleText(scale)} 换算，输出纸张 {paperWidthMm:0.##} x {paperHeightMm:0.##} mm"
+        };
     }
 
     private static DialogResult ShowScaleDialog(Form form)

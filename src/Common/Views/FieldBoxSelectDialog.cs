@@ -576,8 +576,9 @@ public sealed class FieldBoxSelectDialog : Form
     }
 
     /// <summary>
-    /// 主动指定任意纸张：按当前打印范围宽高弹出比例输入框，
-    /// 生成的"自定义"候选加入下拉并选中（同尺寸项去重替换）。
+    /// 主动指定任意纸张：按当前打印范围宽高弹出比例对话框。
+    /// 长宽比接近标准图幅或 1/8 模数加长图时可选择目标图幅（任意比例）；否则按输入比例生成自定义纸张。
+    /// 生成的候选加入下拉并选中（同名同尺寸项去重替换）。
     /// </summary>
     private void PickArbitraryPaper()
     {
@@ -589,28 +590,23 @@ public sealed class FieldBoxSelectDialog : Form
         }
 
         var guessedScale = PaperSizeDetector.GuessScale(width, height);
-        using var scaleForm = new CustomScaleForm(width, height, guessedScale, ArbitraryPaperPicker.HintText);
+        using var scaleForm = new CustomScaleForm(
+            width,
+            height,
+            guessedScale,
+            ArbitraryPaperPicker.HintText,
+            allowAspectRatioPapers: !_paperDetectionOptions.IncludeGenericDynamicTitleBlockPaper);
         if (scaleForm.ShowDialog(this) != DialogResult.OK)
         {
             return;
         }
 
-        var scale = scaleForm.SelectedScale;
-        var arbitrary = new PaperDetection
-        {
-            PaperName = PaperSizeDetector.CustomPaperName,
-            PaperWidthMm = width / scale,
-            PaperHeightMm = height / scale,
-            ScaleValue = scale,
-            ScaleText = PaperSizeDetector.ToScaleText(scale),
-            RequiresCustomPaper = true,
-            Note = $"任意纸张：按用户输入比例 {PaperSizeDetector.ToScaleText(scale)} 换算，输出纸张 {width / scale:0.##} x {height / scale:0.##} mm"
-        };
+        var arbitrary = ArbitraryPaperPicker.CreatePaperFromScaleForm(scaleForm, width, height);
 
-        // 同尺寸"自定义"项去重替换，避免重复添加。
+        // 同名同尺寸项去重替换，避免重复添加。
         var options = _paperOptions.ToList();
         var existingIndex = options.FindIndex(x =>
-            string.Equals(x.PaperName, PaperSizeDetector.CustomPaperName, StringComparison.OrdinalIgnoreCase)
+            string.Equals(x.PaperName, arbitrary.PaperName, StringComparison.OrdinalIgnoreCase)
             && Math.Abs(x.PaperWidthMm - arbitrary.PaperWidthMm) <= 0.01d
             && Math.Abs(x.PaperHeightMm - arbitrary.PaperHeightMm) <= 0.01d);
         if (existingIndex >= 0)
