@@ -1,6 +1,7 @@
-# 批量打印插件架构文档
+# LA批量打印架构文档
 
-> 覆盖 ZWCAD 和 AutoCAD 双平台，版本 1.15.5 — 本文档反映当前项目结构，包含可选字段（日期/版次/阶段/信息）、任意纸张单张打印、图号重排、CSV导出、PDF/PNG/JPG/DWF/DWG 多格式输出、插件自有栅格绘图仪、所选格式预览、随包 PIA2 模板初始化、另存副本式 DWG 拆图与纸面 1mm 外边框内退、动态块按“块名+可见性名”识别等特性。
+> 产品名 **LA批量打印**，覆盖 ZWCAD 与 AutoCAD 双平台，当前版本 **1.15.5**。  
+> 本文档反映当前实现：图框库（含日期/版次/阶段/信息可选字段）、动态块按「块名+可见性名」识别、图框块任意比例与固定图框长宽比选纸、矩形框比例列表、图号重排、CSV 导出、PDF/PNG/JPG/DWF/DWG 多格式输出、自有栅格绘图仪、所选格式预览、随包 PIA2 模板、另存副本式 DWG 拆图、纸面 1mm 外边框内退等。
 
 ---
 
@@ -12,7 +13,7 @@
 4. [流程二：扫描图框（图框库匹配）](#4-流程二扫描图框图框库匹配)
 5. [流程三：扫描矩形框](#5-流程三扫描矩形框)
 6. [流程四：单张打印](#6-流程四单张打印)
-   - [6.4 自定义纸张尺寸（非标图纸）](#64-自定义纸张尺寸非标图纸)
+   - [6.4 自定义纸张与长宽比选纸](#64-自定义纸张与长宽比选纸)
 7. [打印引擎](#7-打印引擎)
    - [7.2 输出格式、绘图仪与纸张单位](#72-输出格式绘图仪与纸张单位)
    - [7.3 输出文件命名](#73-输出文件命名)
@@ -21,14 +22,16 @@
 8. [PDF 合并](#8-pdf-合并)
 9. [UCS 坐标变换](#9-ucs-坐标变换)
 10. [动态块处理](#10-动态块处理)
-11. [ZWCAD vs AutoCAD 差异](#11-zwcad-vs-autocad-差异)
-12. [项目文件结构](#12-项目文件结构)
+    - [10.7 任意纸张与长宽比选纸](#107-任意纸张与长宽比选纸)
+11. [快捷键设置（命令别名）](#11-快捷键设置命令别名)
+12. [ZWCAD vs AutoCAD 差异](#12-zwcad-vs-autocad-差异)
+13. [项目文件结构](#13-项目文件结构)
 
 ---
 
 ## 1. 命令入口一览
 
-所有命令定义在 `BatchPlotCommands`（partial class，跨 4 个文件），通过 CAD 命令行或菜单触发：
+所有命令定义在 `BatchPlotCommands`（partial class，跨 5 个文件），通过 CAD 命令行或菜单触发：
 
 | 命令 | 功能 | 所在文件 |
 |------|------|---------|
@@ -50,7 +53,7 @@
 
 ## 2. 源码组织：Partial Class 拆分
 
-`BatchPlotCommands` 是一个 `partial class`，跨 4 个文件：
+`BatchPlotCommands` 是一个 `partial class`，跨 5 个文件：
 
 | 文件 | 职责 |
 |------|------|
@@ -81,19 +84,21 @@
   │   // 动态块: 返回 DynamicBlockTableRecord.Name ("【地铁院】图框")
   │   // 匿名块名 (*U12) 不会暴露给调用方
   │
-  ├─ GetLibraryIdentityName(blockRef)
+  ├─ GetLibraryIdentityName(blockRef) → 图框库身份名
   │   // 带可见性属性: 库 key = "【地铁院】图框+A2"（块名+当前可见性名）
   │   // 普通块 / 纯拉伸块: 库 key = 块名
   │   // 读不到可见性名时，才回退 TryGetVisibleNestedBlock 用“外层+内层块名”
+  │   // 外框优先用当前求值定义（BlockFrameGeometry 递归进可见内层）
   │
-  ├─ 用户框选打印边界（可选，回车则用块外包框）
-  │   // 框选时通过 inverse 矩阵变换回块内坐标
-  ├─ 用户框选图名区域
-  ├─ 用户框选图号区域
-  ├─ FieldBoxSelectDialog → 可选字段框选（日期/版次/设计阶段/信息1/信息2）
-  │   // 每个可选字段独立框选，也可全部跳过
-  ├─ PaperSizeDetector.Detect(width, height) → 自动检测纸张尺寸
-  │   // 匹配 A0~A3 标准/加长尺寸 × 常用比例 (0.5~100)
+  ├─ BlockFrameGeometry.TryGetFrame → 自动识别打印外框（最大闭合矩形 / 线包围盒）
+  ├─ FieldBoxSelectDialog → 框选图名/图号/可选字段，可改打印范围与纸张
+  │   // 可选字段: 日期/版次/设计阶段/信息1/信息2（可全部跳过）
+  ├─ ArbitraryPaperPicker.DetectCandidatesOrPrompt(width, height)
+  │   // ① 常用比例 × A0~A4 / 加长图
+  │   // ② 无候选时弹 CustomScaleForm：
+  │   //    - 固定图框：长宽比接近标准/加长图 → 可选目标图幅（任意比例）
+  │   //    - 可自由拉伸块：不允许长宽比套图幅，只手填自定义比例
+  │   //    - 否则按用户比例生成 PaperName="自定义"
   ├─ 用户确认/调整纸张
   │
   └─ TitleBlockLibraryStore.Upsert(definition)
@@ -109,7 +114,7 @@
   "Version": 2,
   "Blocks": [
     {
-      "BlockName": "A2",
+      "BlockName": "【地铁院】图框+A2",
       "HasPrintRegion": true,
       "CoordinateMode": "Frame",
       "PrintRegion": { "MinX": 0, "MinY": 0, "MaxX": 594, "MaxY": 420 },
@@ -130,7 +135,9 @@
 }
 ```
 
-**新增字段（v2）**：`DateRegion`、`RevisionRegion`、`PhaseRegion`、`Info1Region`、`Info2Region` — 零区域（.HasArea()=false）表示未配置。
+`BlockName` 为图框库身份键：普通块为块名；带可见性属性的动态块为 `块名+可见性名`；旧库可能仍是 `外层+内层块名`。
+
+**新增字段（v2）**：`DateRegion`、`RevisionRegion`、`PhaseRegion`、`Info1Region`、`Info2Region` — 零区域（`.HasArea()=false`）表示未配置。
 
 ---
 
@@ -175,10 +182,12 @@ TitleBlockScanner.Scan(Document, TitleBlockLibrary)
   │       │      // 可选字段: 日期/版次/设计阶段/信息1/信息2
   │       │      // 三级优先级: Attribute(最高) > OwnerSpace > BlockDefinition(最低)
   │       │      // 文字清洗: %%C→Φ, %%D→°, 移除 MTEXT 格式码
-  │       ├─ ⑥ PaperSizeDetector.Detect(宽度, 高度) → 纸张识别
-  │       │      // 库中有固定纸张则优先使用
-  │       │      // 加长图优先使用实际检测尺寸
-  │       └─ ⑦ new PlotJob { ..., Date, Revision, Phase, Info1, Info2, ... } → 加入结果列表
+  │       ├─ ⑥ 纸张识别
+  │       │      // 优先 TryDetectTitleBlockAtArbitraryScale：
+  │       │      //   当前短边 ÷ 录入纸张短边 → 任意比例（含 1:143、10:1）
+  │       │      //   长边只判断标准/加长/实测动态纸
+  │       │      // 否则 PaperSizeDetector.Detect；库中固定纸张优先
+  │       └─ ⑦ new PlotJob { BlockName=identity 或库命中名, ... } → 加入结果列表
   │
   ├─ DeduplicateOverlappingJobs()
   │   │ // 去重逻辑
@@ -269,13 +278,10 @@ RectangleFrameScanner.ScanScope(Document, scope)
   │     ├─ 有候选 → 继续
   │     │   // 只有一个候选: 直接使用
   │     │   // 有多个候选: 弹出 SinglePlotPaperSelectionForm 让用户选择
-  │     └─ 无候选 → 进入自定义纸张流程（详见 6.4）
-  │         ├─ GuessScale(width, height) → 推测整比例
-  │         ├─ CustomScaleForm 弹窗确认比例
-  │         ├─ InstallBundledPlotter() 确保打印机已安装
-  │         ├─ PmpCustomPaper.RegisterCustomPaper() 写入 PMP
-  │         ├─ 组装自定义纸张候选
-  │         └─ finally: RemoveCustomPaper() 清理 PMP
+  │     └─ 无候选 → 进入非标流程（详见 6.4）
+  │         ├─ CustomScaleForm（默认允许长宽比选纸）
+  │         ├─ 选中标准/加长图幅 → 按该纸张物理尺寸打印，不必注册自定义纸
+  │         └─ 手填自定义比例 → RegisterCustomPaper / EnsurePmpAttachment / finally 清理
   │
   ├─ ③ SinglePlotForm 弹窗 → 用户确认预览/纸张/路径/留边
   │     // 支持预览和直接打印两种模式
@@ -309,47 +315,29 @@ RectangleFrameScanner.ScanScope(Document, scope)
 
 用户在 SinglePlotForm 中可切换为预览模式，调用 `PlotterService.Preview()` 使用 CAD PlotEngine 直接预览排版效果，无需生成临时 PDF。
 
-### 6.4 自定义纸张尺寸（非标图纸）
+### 6.4 自定义纸张与长宽比选纸
 
-当用户框选的区域无法匹配 A0~A4 标准纸张时，系统自动进入自定义纸张流程。
+当框选区域匹配不到常用比例下的 A0~A4 / 加长图时，进入非标流程。
 
-**触发条件**：`PaperSizeDetector.DetectCandidates()` 返回空列表。
+**触发条件**：PaperSizeDetector.DetectCandidates() 返回空列表。
 
-**流程**：
+**两条分支**（[CustomScaleForm](src/Common/Views/CustomScaleForm.cs)，单张默认 llowAspectRatioPapers=true）：
 
-```
+1. **长宽比选纸**：PaperSizeDetector.DetectByAspectRatio 命中标准图幅或 1/8 模数加长图时，下拉可选目标图幅；比例按短边反推（可为任意值）。选中后按该图幅物理尺寸打印，**不**写入自定义 PMP。
+2. **手填自定义比例**：输入 143 / 1:143 等，按 图面尺寸 / 比例 = 纸张mm 注册任意纸张。
+
+`
 SinglePlotCore() 中 candidates.Count == 0
   │
-  ├─ ① GuessScale(width, height)
-  │   // 根据短边尺寸推测最可能的整数比例
-  │   // 尝试 [1,2,4,5,8,10,20,25,50,100,200,500,1000]
-  │   // 使纸张短边落入 100-900mm 范围
+  ├─ CustomScaleForm(width, height, GuessScale(...))
+  │   ├─ SelectedStandardPaper != null → 直接使用该 PaperDetection
+  │   └─ 否则 → 手填比例，进入下方 PMP 注册
   │
-  ├─ ② CustomScaleForm(width, height, guessedScale)
-  │   // 弹窗显示当前图形尺寸和推测比例
-  │   // 用户可调整整数比例值
-  │   // 根据所选比例反算纸张尺寸: paperW = drawingW / scale
-  │
-  ├─ ③ 确保 LA_pdf 打印机和 PMP 已安装
-  │
-  ├─ ④ PmpCustomPaper.RegisterCustomPaper(pmpPath, paperW, paperH)
-  │   // 向 LA_pdf.pmp 写入自定义纸张条目
-  │   // 自动检测 PMP 格式:
-  │   │   ├─ "PIAFILEVERSION_3.0,..." → PIA 3.0 JSON (AutoCAD 2024+)
-  │   │   ├─ "[Meta]" → ZWCAD INI 格式
-  │   │   └─ 其他 → PIA 2.0 压缩 (AutoCAD 2019-2023, 使用 PianNoCN)
-  │   // 如果同尺寸已存在则返回已有 paperName 而不重复添加
-  │   // 返回 paperName（用于后续删除）
-  │
-  ├─ ⑤ AutoCAD: EnsurePmpAttachment() 刷新 PC3 对 PMP 的引用
-  │
-  ├─ ⑥ 组装自定义纸张候选
-  │   // PaperName = customPaperName, RequireExactPaperSize=true
-  │
-  └─ ⑦ finally: PmpCustomPaper.RemoveCustomPaper(pmpPath, paperName)
-       // 无论打印成功或失败，清理 PMP 中的自定义条目
-       // 防止污染用户 PMP 文件
-```
+  ├─ PmpCustomPaper.RegisterCustomPaper(pmpPath, paperW, paperH)
+  │   // 自动适配 PIA 3.0 / PIA 2.0 / ZWCAD INI；同尺寸已存在则复用
+  ├─ AutoCAD: EnsureActivePdfPmpAttachment() 刷新 PC3↔PMP
+  └─ finally: RemoveCustomPaper(...) 清理本次新增条目
+`
 
 **PIA 版本适配**：
 
@@ -357,20 +345,19 @@ SinglePlotCore() 中 candidates.Count == 0
 |---------|----------|----------|
 | 2024+ | PIA 3.0 JSON | Newtonsoft.Json 解析/修改 JSON |
 | 2019-2023 | PIA 2.0 压缩 | PianNoCN 库解压→修改→重新压缩 |
-| ZWCAD | INI 文本 | Regex 匹配 `[Meta]/[user]` 段 |
+| ZWCAD | INI 文本 | Regex 匹配 Meta/user 段 |
 
 **关键代码路径**：
 
 | 步骤 | 代码位置 |
 |------|---------|
-| 比例推测 | `PaperSizeDetector.GuessScale()` — [`PaperSizeDetector.cs`](src/Common/Services/Paper/PaperSizeDetector.cs) |
-| 自定义比例对话框 | `CustomScaleForm` — [`CustomScaleForm.cs`](src/Common/Views/CustomScaleForm.cs) |
-| PMP 注册（入口） | `PmpCustomPaper.RegisterCustomPaper()` — [`PmpCustomPaper.cs`](src/Common/Services/Paper/PmpCustomPaper.cs) |
-| PMP 清理 | `PmpCustomPaper.RemoveCustomPaper()` — [`PmpCustomPaper.cs`](src/Common/Services/Paper/PmpCustomPaper.cs) |
-| PIA 格式策略 | 所有 AutoCAD 版本统一使用随包、已验证的 LA PIA2 模板 |
-| 模板纸张基准 | PDF/DWF 各 85 个毫米规格；PNG/JPG 各 170 个横竖像素介质 |
-| 既有 LA 处理 | 不读取、不转换、不合并，直接用模板覆盖；任意尺寸由本次打印重新注册 |
-| PC3 关联刷新 | `AcadPlotterInstaller.EnsurePmpAttachment()` — 平台特有 |
+| 长宽比匹配 | PaperSizeDetector.DetectByAspectRatio — [PaperSizeDetector.cs](src/Common/Services/Paper/PaperSizeDetector.cs) |
+| 比例/图幅对话框 | CustomScaleForm — [CustomScaleForm.cs](src/Common/Views/CustomScaleForm.cs) |
+| 图框录入任意纸 | ArbitraryPaperPicker.DetectCandidatesOrPrompt — [ArbitraryPaperPicker.cs](src/Common/Services/Paper/ArbitraryPaperPicker.cs) |
+| PMP 注册/清理 | PmpCustomPaper — [PmpCustomPaper.cs](src/Common/Services/Paper/PmpCustomPaper.cs) |
+| PC3 关联刷新 | AcadPlotterInstaller.EnsureActivePdfPmpAttachment — 平台特有 |
+
+> 图框录入侧与单张类似，但可自由拉伸动态块（IncludeGenericDynamicTitleBlockPaper=true）**禁止**长宽比套标准图幅，避免把拉伸长度当成任意比例。详见 [10.7](#107-任意纸张与长宽比选纸)。
 
 ---
 
@@ -715,13 +702,16 @@ private static bool IsEntityVisible(Entity entity)
 }
 ```
 
-### 10.2 涉及的三处位置
+### 10.2 身份匹配与可见性过滤
 
 | 位置 | 文件:方法 | 作用 | 守卫条件 |
 |------|----------|------|---------|
 | 矩形框扫描 | `RectangleFrameScanner.CollectEntityRectangles` | 遍历子实体时过滤隐藏状态 | 无守卫，所有实体通用 |
-| 新增图框 | `CadTextExtractor.GetLibraryIdentityName` | 带可见性则按“块名+可见性名”入库 | `TryGetVisibilityStateName` |
-| 图框库扫描 | `TitleBlockScanner` 身份名匹配 | 先按可见性身份命中，再兼容旧内层名 | 身份名未命中时才嵌套查找 |
+| 身份名 | `CadTextExtractor.GetLibraryIdentityName` | 带可见性则 `块名+可见性名` | `TryGetVisibilityStateName`（属性名含「可见/visibility」） |
+| 图框库匹配 | `CadTextExtractor.BlockNameMatches` | 先身份名，再外层名，再旧「外层+内层」 | — |
+| 新增图框 | `AddTitleBlockCommands` | 按身份名入库；外框用当前求值定义 | 无可见性名才回退嵌套复合名 |
+| 图框库扫描 | `TitleBlockScanner` | 先按身份名命中，再嵌套/外层兼容 | 身份名未命中时才嵌套查找 |
+| 图框库管理高亮 | `TitleBlockLibraryManagerForm` | 当前图中已存在的身份名整行淡粉 | 同时登记旧内层复合名 |
 
 ### 10.3 可拉伸图框（FrameRightBottomDynamic 坐标模式）
 
@@ -765,17 +755,33 @@ private static bool IsEntityVisible(Entity entity)
 - `RestoreDialog(this)` — CAD 取点结束后恢复原窗口并置顶
 - 所有回到 CAD 取点的流程（框选字段、框选打印范围、生成目录等）统一使用
 
-### 10.7 任意纸张（识别不到标准纸张时按用户比例换算）
+### 10.7 任意纸张与长宽比选纸
 
-> 图框外框尺寸识别不到 A4~A0 及其加长纸张时（如 40000×30000 图框），
-> 要求用户输入绘图比例，按 `图面尺寸 / 比例 = 纸张mm` 生成任意纸张（40000×30000 ÷ 100 = 400×300mm），
-> 避免打印出超大尺寸的图。
+> 常用比例匹配失败时，有两条出路：长宽比仍接近标准/加长图 → 选定目标图幅并反推任意比例；否则手填比例生成自定义纸张。
 
-**录入/编辑**：[`ArbitraryPaperPicker.cs`](src/Common/Services/Paper/ArbitraryPaperPicker.cs) 的 `DetectCandidatesOrPrompt` 在候选为空时弹出 [`CustomScaleForm`](src/Common/Views/CustomScaleForm.cs)（带提示文案、支持小数比例 `143`/`1:143`），用户确认后生成 `PaperName="自定义"`（`PaperSizeDetector.CustomPaperName`）+ `RequiresCustomPaper=true` 的候选；取消则沿用原 `GuessScale` 兜底。录入（`AddTitleBlockCommands`）、编辑（`EditTitleBlockCommands`）、对话框内重新框选打印范围（`FieldBoxSelectDialog.SelectPrintArea`）三处统一接入；`FieldBoxSelectDialog` 纸张行另有"任意纸张…"按钮可主动指定。
+**图框录入/编辑**（[`ArbitraryPaperPicker.DetectCandidatesOrPrompt`](src/Common/Services/Paper/ArbitraryPaperPicker.cs)）：
 
-**扫描**：`TitleBlockScanner.ApplyFixedPaper` 对"自定义"条目始终固定使用库中纸张尺寸（不被自动识别的加长图覆盖），并按当前图框外框实际边长重算比例（`InferFrameScale`，同向/宽高互换取误差小者，块缩放时仍正确），置 `RequiresCustomPaper=true`。
+```
+DetectCandidates(常用比例 × A0~A4/加长)
+  │
+  ├─ 有候选 → 直接返回
+  └─ 无候选 → CustomScaleForm
+        ├─ allowAspectRatioPapers = !IncludeGenericDynamicTitleBlockPaper
+        │     // 可自由拉伸块禁止长宽比套图幅
+        ├─ 选标准/加长图幅 → 保存该图幅物理尺寸（后续扫描按短边反推比例）
+        └─ 手填比例 → PaperName="自定义" + RequiresCustomPaper
+```
 
-**打印**：走既有任意纸链路——`CustomPaperBatchPreparer` 注册 PMP 纸张 → `RequireExactPaperSize`/`UseExactWindowScale` → `PlotterService.SetExactWindowScale` 按窗口与纸张物理尺寸精确等比打印，无需额外代码。
+接入点：`AddTitleBlockCommands`、`EditTitleBlockCommands`、`FieldBoxSelectDialog`（改打印范围 /「任意纸张…」按钮）。
+
+**扫描**：
+
+- 已录入标准图幅：`TryDetectTitleBlockAtArbitraryScale` — 当前短边 ÷ 录入短边 → 任意比例；长边只做标准/加长/实测判断。
+- `PaperName="自定义"`：`ApplyFixedPaper` 固定库中纸张尺寸，并按当前外框重算比例。
+
+**打印**：自定义纸走 `CustomPaperBatchPreparer` → `RequireExactPaperSize` / `UseExactWindowScale` → `PlotterService.SetExactWindowScale`。
+
+**与矩形框批打的边界**：矩形框仍只认「比例设置」中的内置/自定义比例列表；图框块任意比例不受该列表限制。
 
 ---
 
@@ -803,7 +809,7 @@ ShortcutSettingsDialog (WinForms 壳 + ElementHost)
 
 ## 12. ZWCAD vs AutoCAD 差异
 
-### 11.1 条件编译
+### 12.1 条件编译
 
 ```csharp
 #if AUTOCAD
@@ -816,7 +822,7 @@ ShortcutSettingsDialog (WinForms 壳 + ElementHost)
 所有 `src/Common/` 下的文件使用 `#if AUTOCAD` 条件编译，共享逻辑不变，仅切换命名空间。
 AutoCAD Core 版本额外使用 `#if ACAD_CORE` 子条件处理 `CadApp.ShowModalDialog` 等 API 差异。
 
-### 11.2 平台差异清单
+### 12.2 平台差异清单
 
 | 方面 | AutoCAD | ZWCAD |
 |------|---------|-------|
@@ -834,7 +840,7 @@ AutoCAD Core 版本额外使用 `#if ACAD_CORE` 子条件处理 `CadApp.ShowModa
 | 图框库迁移 | 首次加载时自动从 ZWCAD 路径导入 | 无迁移逻辑 |
 | 动态块 API | `IsDynamicBlock` / `DynamicBlockTableRecord` 稳定 | 老版本可能异常 → 已用 try/catch 保护 |
 
-### 11.3 编译项目对应
+### 12.3 编译项目对应
 
 | .csproj | 平台 | Target | Output |
 |---------|------|--------|--------|
@@ -846,14 +852,12 @@ AutoCAD Core 版本额外使用 `#if ACAD_CORE` 子条件处理 `CadApp.ShowModa
 
 ---
 
-## 12. 项目文件结构
+## 13. 项目文件结构
 
 ```
-批量打印/
+LA批量打印/
 ├── docs/
 │   ├── ARCHITECTURE.md              ← 本文档
-│   ├── platform-architecture.md
-│   ├── repository-layout.md
 │   ├── tutorial.html                ← 图文教程网页
 │   ├── RELEASE_NOTES_v1.15.5.md     ← 当前版本发布说明
 │   ├── 用户使用说明.md
@@ -869,8 +873,8 @@ AutoCAD Core 版本额外使用 `#if ACAD_CORE` 子条件处理 `CadApp.ShowModa
 │   ├── Common/                     ← 双平台共享代码 (#if AUTOCAD)，按 C# 分层目录组织，namespace 仍为 ZwcadBatchPlot
 │   │   ├── Commands/                   ← 命令层：CAD 命令入口（BatchPlotCommands partial class）
 │   │   │   ├── BatchPlotCommands.cs        ← 命令注册入口 + 面板生命周期 + UI工具
-│   │   │   ├── AddTitleBlockCommands.cs    ← 新增图框向导 + 动态块可见性
-│   │   │   ├── SinglePlotCommands.cs       ← 单张打印核心 + 打印机选择 + 自定义纸张
+│   │   │   ├── AddTitleBlockCommands.cs    ← 新增图框向导 + 动态块可见性身份
+│   │   │   ├── SinglePlotCommands.cs       ← 单张打印核心 + 长宽比/自定义纸张
 │   │   │   ├── EditTitleBlockCommands.cs   ← 从图框库编辑已有图框记录
 │   │   │   └── CoordinateUtils.cs          ← UCS/DCS 坐标变换矩阵
 │   │   ├── Models/                     ← 模型层：数据模型与持久化
@@ -879,13 +883,13 @@ AutoCAD Core 版本额外使用 `#if ACAD_CORE` 子条件处理 `CadApp.ShowModa
 │   │   │   └── TitleBlockLibraryStore.cs    ← 图框库持久化 (JSON 原子写入)
 │   │   ├── Services/                   ← 服务层：业务逻辑
 │   │   │   ├── Scanning/                   ← 扫描与文字提取
-│   │   │   │   ├── TitleBlockScanner.cs        ← 图框库扫描器: 扫描→匹配→生成PlotJob
-│   │   │   │   ├── RectangleFrameScanner.cs    ← 矩形框扫描器: 递归扫描→XCLIP过滤→空框过滤→TabOrder排序
-│   │   │   │   ├── CadTextExtractor.cs         ← 文字提取: 属性/文字/多行文字, XCLIP 过滤, 三级优先级
+│   │   │   │   ├── TitleBlockScanner.cs        ← 图框库扫描: 身份名匹配 + 任意比例识别
+│   │   │   │   ├── RectangleFrameScanner.cs    ← 矩形框扫描: 递归/XCLIP/空框/TabOrder
+│   │   │   │   ├── CadTextExtractor.cs         ← 文字提取 + GetLibraryIdentityName / BlockNameMatches
 │   │   │   │   └── CadTextUpdater.cs           ← 文字回写: 将图号图名写回DWG
 │   │   │   ├── Paper/                      ← 纸张识别与 PMP
-│   │   │   │   ├── PaperSizeDetector.cs        ← 纸张尺寸检测: A0~A3标准/加长 + GuessScale
-│   │   │   │   ├── ArbitraryPaperPicker.cs      ← 任意纸张: 识别不到标准纸时弹比例输入框换算
+│   │   │   │   ├── PaperSizeDetector.cs        ← 常用比例检测 + DetectByAspectRatio + 图框任意比例
+│   │   │   │   ├── ArbitraryPaperPicker.cs      ← 无标准候选时弹窗：长宽比选纸或手填比例
 │   │   │   │   ├── ScaleSettingsPicker.cs       ← 比例设置: 图中拾取图框反推自定义比例
 │   │   │   │   ├── PmpCustomPaper.cs           ← PMP 自定义纸张注册/删除
 │   │   │   │   ├── PmpPiaConverter.cs          ← 历史兼容工具（LA 安装链路不调用）
