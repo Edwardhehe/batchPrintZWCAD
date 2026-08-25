@@ -66,16 +66,18 @@ public sealed partial class BatchPlotCommands
             using (var tr = doc.Database.TransactionManager.StartTransaction())
             {
                 var blockRef = (BlockReference)tr.GetObject(blockResult.ObjectId, OpenMode.ForRead);
-                blockName = CadTextExtractor.GetBlockName(blockRef, tr);
+                var outerName = CadTextExtractor.GetBlockName(blockRef, tr);
+                blockName = CadTextExtractor.GetLibraryIdentityName(blockRef, tr);
                 blockTransform = blockRef.BlockTransform;
                 frameDefinitionId = blockRef.BlockTableRecord;
                 // “可拉伸”与“可见性切换基础图幅”是两个独立特性。这里检查距离拉伸和
-                // 查寻列表（加长列表）定长拉伸；A1/A2/A3 等可见状态仍由下面的复合块名分别入库和匹配。
+                // 查寻列表（加长列表）定长拉伸；带可见性属性的动态块按“块名+可见性名”分别入库。
                 var hasLookupStretch = HasLookupStretchProperty(blockRef);
                 isStretchableBlock = HasStretchDistanceProperty(blockRef) || hasLookupStretch;
+                var hasVisibilityIdentity = !string.Equals(blockName, outerName, StringComparison.OrdinalIgnoreCase);
                 var hasPaperVisibilityStates = HasVisibilityStateProperty(blockRef);
                 // 求值定义里被隐藏的内层块参照是“可见性切换内层图框”的直接证据，
-                // 与属性名是否叫“可见”无关，自定义属性名的可见性块也能识别。
+                // 与属性名是否叫“可见”无关；无标准可见性属性名时仍可走旧的内层复合名。
                 var hasNestedVisibilityStates = HasHiddenNestedBlockReference(tr, blockRef);
 
                 // 纸张候选顺序必须与矩形框批打一致：模型空间优先 1:100、再 1:1；
@@ -85,14 +87,11 @@ public sealed partial class BatchPlotCommands
                     && !owner.LayoutId.IsNull
                     && !((Layout)tr.GetObject(owner.LayoutId, OpenMode.ForRead)).ModelType;
 
-                // 动态块通过可见性状态切换不同尺寸
-                // 入库块名使用“外层块名+内层可见嵌套块名”复合名，变换矩阵取内层嵌套块的
-                // 查寻列表拉伸块的外框在外层自身求值定义里，进入内层复合身份会丢掉加长后的实际长度；
-                // 但求值定义里存在被隐藏的内层块参照时，说明是可见性状态在切换内层图框，
-                // 不同可见内层块本质是不同图框，必须按“外层+可见内层”复合名各自独立入库。
-                if ((hasNestedVisibilityStates || !hasLookupStretch)
-                    && hasPaperVisibilityStates
-                    && TryGetVisibleNestedBlock(
+                // 带可见性属性时身份已是“块名+可见性名”，打印外框留在当前求值定义
+                // （BlockFrameGeometry 会递归进入当前可见内层）。查寻加长块同样必须留在外层，
+                // 进入内层会丢掉加长后的实际长度。仅当读不到可见性名、且存在隐藏内层图框时，
+                // 才回退到旧的“外层+内层块名”复合身份。
+                if (TryGetVisibleNestedBlock(
                         tr,
                         blockRef,
                         out var innerName,
@@ -100,12 +99,22 @@ public sealed partial class BatchPlotCommands
                         out var innerDefinitionId,
                         out var isInnerStretchable))
                 {
-                    blockName = blockName + "+" + innerName;
-                    blockTransform = innerTransform * blockRef.BlockTransform;
-                    frameDefinitionId = innerDefinitionId;
-                    // 组合情况：外层负责 A1/A2/A3 可见性，当前可见内层块本身还可自由拉长。
                     isStretchableBlock |= isInnerStretchable;
-                    AddBlockLog($"Paper visibility state detected: outer={CadTextExtractor.GetBlockName(blockRef, tr)}, inner={innerName}, stored={blockName}");
+                    if (hasVisibilityIdentity)
+                    {
+                        AddBlockLog($"Visibility identity detected: outer={outerName}, stored={blockName}");
+                    }
+                    else if ((hasNestedVisibilityStates || !hasLookupStretch) && hasPaperVisibilityStates)
+                    {
+                        blockName = outerName + "+" + innerName;
+                        blockTransform = innerTransform * blockRef.BlockTransform;
+                        frameDefinitionId = innerDefinitionId;
+                        AddBlockLog($"Legacy nested identity detected: outer={outerName}, inner={innerName}, stored={blockName}");
+                    }
+                }
+                else if (hasVisibilityIdentity)
+                {
+                    AddBlockLog($"Visibility identity detected: outer={outerName}, stored={blockName}");
                 }
                 else if (isStretchableBlock)
                 {
@@ -118,7 +127,7 @@ public sealed partial class BatchPlotCommands
 
             AddBlockLog("Selected block: " + blockName);
 
-            // 动态块的可见性状态可能形成“外层块名+内层块名”的复合身份，
+            // 动态块可能形成“块名+可见性名”或旧的“外层+内层块名”复合身份，
             // 必须等最终身份解析完成后立即检查重名；若用户不覆盖，就不要继续识别外框和录入字段。
             var existingLibrary = TitleBlockLibraryStore.Load();
             if (existingLibrary.Blocks.Any(x =>
@@ -427,8 +436,8 @@ public sealed partial class BatchPlotCommands
 
     /// <summary>
     /// 判断动态块当前求值定义里是否存在被隐藏的内层块参照。存在即说明该块通过可见性状态
-    /// 在内层图框之间切换：不同可见内层块本质是不同图框，必须走“外层+可见内层”复合名
-    /// 分别入库；查寻列表（加长）拉伸块没有这种隐藏内层块，不能因此混入复合身份。
+    /// 在内层图框之间切换。读不到标准可见性属性名时，才回退到旧的“外层+内层块名”复合身份；
+    /// 查寻列表（加长）拉伸块没有这种隐藏内层块，不能因此混入复合身份。
     /// </summary>
     private static bool HasHiddenNestedBlockReference(Transaction tr, BlockReference blockRef)
     {
@@ -520,9 +529,7 @@ public sealed partial class BatchPlotCommands
                     continue;
                 }
 
-                var propertyName = property.PropertyName ?? "";
-                if (propertyName.IndexOf("可见", StringComparison.OrdinalIgnoreCase) >= 0
-                    || propertyName.IndexOf("visibility", StringComparison.OrdinalIgnoreCase) >= 0)
+                if (CadTextExtractor.IsVisibilityPropertyName(property.PropertyName))
                 {
                     continue;
                 }
@@ -543,8 +550,8 @@ public sealed partial class BatchPlotCommands
     }
 
     /// <summary>
-    /// 判断外层动态块是否通过状态切换选择 A1/A2/A3 等内部图幅。只有这种情况才进入当前
-    /// 可见内层块建立复合身份；单纯存在一个随拉伸移动的内层图签不能作为进入内层的依据。
+    /// 判断外层动态块是否通过状态切换选择 A1/A2/A3 等内部图幅。读不到标准可见性名时，
+    /// 才用它决定是否回退到旧的内层复合身份；单纯随拉伸移动的内层图签不能作为依据。
     /// </summary>
     private static bool HasVisibilityStateProperty(BlockReference blockRef)
     {
@@ -568,10 +575,7 @@ public sealed partial class BatchPlotCommands
                     continue;
                 }
 
-                var propertyName = property.PropertyName ?? "";
-                var explicitlyNamedVisibility =
-                    propertyName.IndexOf("可见", StringComparison.OrdinalIgnoreCase) >= 0
-                    || propertyName.IndexOf("visibility", StringComparison.OrdinalIgnoreCase) >= 0;
+                var explicitlyNamedVisibility = CadTextExtractor.IsVisibilityPropertyName(property.PropertyName);
                 var stringStateSelector =
                     property.UnitsType == DynamicBlockReferencePropertyUnitsType.NoUnits
                     && property.Value is string;

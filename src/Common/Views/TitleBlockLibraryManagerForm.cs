@@ -377,6 +377,7 @@ public sealed class TitleBlockLibraryManagerForm : Form
 
                     var blockName = CadTextExtractor.GetBlockName(blockRef, tr);
                     _presentBlockNames.Add(blockName);
+                    _presentBlockNames.Add(CadTextExtractor.GetLibraryIdentityName(blockRef, tr));
 
                     if (CadTextExtractor.TryGetVisibleNestedBlockName(tr, blockRef, out var innerName))
                     {

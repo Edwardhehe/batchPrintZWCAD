@@ -1,6 +1,6 @@
 # 中望 CAD 批量打印插件
 
-一个面向 ZWCAD 和 AutoCAD 的 .NET 批量打印插件。插件可以学习图框块，识别图名、图号、图幅和比例，支持跨文件批量扫描，并输出 PDF、PNG、JPG、DWF 或按图框拆分 DWG。当前版本：v1.15.4。
+一个面向 ZWCAD 和 AutoCAD 的 .NET 批量打印插件。插件可以学习图框块，识别图名、图号、图幅和比例，支持跨文件批量扫描，并输出 PDF、PNG、JPG、DWF 或按图框拆分 DWG。当前版本：v1.15.5。
 
 ## 使用教程
 
@@ -21,7 +21,7 @@ AutoCAD 2015 ~ 2024 全系列共用同一个 `AcadBatchPlot.dll`，使用 .NET F
 ## 主要功能
 
 - 图框信息库：新增、编辑、删除、导入、导出图框定义。
-- 图框识别：按块名匹配图框，支持用户框选图名、图号和打印外边界。
+- 图框识别：按块名匹配图框；带可见性属性的动态块按“块名+可见性名”区分不同状态。支持用户框选图名、图号和打印外边界。
 - 固定输出纸张：图框加入信息库时可设置输出图幅，以后该图框始终按这个纸张尺寸打印。
 - 图幅识别：支持 A0、A1、A2、A3 以及加长图。
 - 比例识别：图框块按录入纸张短边自动识别任意比例，包括 1:143、10:1、2.1:1；加长图按同一比例继续识别实际长边。
@@ -202,7 +202,7 @@ AutoCAD 2025 ~ 2027 如果菜单栏未显示，可以执行 `ZBP_SHOW_PANEL` 打
 | --- | --- |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 架构与主流程（命令、扫描、打印、拆图内核） |
 | [docs/用户使用说明.md](docs/用户使用说明.md) | 安装、菜单与常见问题 |
-| [docs/RELEASE_NOTES_v1.15.4.md](docs/RELEASE_NOTES_v1.15.4.md) | 当前版本发布说明 |
+| [docs/RELEASE_NOTES_v1.15.5.md](docs/RELEASE_NOTES_v1.15.5.md) | 当前版本发布说明 |
 | [docs/tutorial.html](docs/tutorial.html) | 图文教程 |
 
 ## 开发
@@ -250,10 +250,10 @@ dotnet build BatchPlotter.csproj -c Release
 生成本地发布目录与三组 ZIP：
 
 ```powershell
-.\scripts\package-release.ps1 -Version 1.15.4
+.\scripts\package-release.ps1 -Version 1.15.5
 ```
 
-输出位于 `release\v1.15.4\`，包含 ZWCAD、AutoCAD 2015–2024、AutoCAD 2025–2027 三组完整安装目录和对应压缩包。
+输出位于 `release\v1.15.5\`，包含 ZWCAD、AutoCAD 2015–2024、AutoCAD 2025–2027 三组完整安装目录和对应压缩包。
 
 ## 说明
 

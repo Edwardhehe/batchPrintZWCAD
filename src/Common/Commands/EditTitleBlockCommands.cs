@@ -432,9 +432,11 @@ public sealed partial class BatchPlotCommands
                 }
 
                 var outerName = CadTextExtractor.GetBlockName(blockRef, tr);
+                var identityName = CadTextExtractor.GetLibraryIdentityName(blockRef, tr);
                 Matrix3d nestedTransform;
                 ObjectId frameDefinitionId;
-                if (string.Equals(storedBlockName, outerName, StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(storedBlockName, identityName, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(storedBlockName, outerName, StringComparison.OrdinalIgnoreCase))
                 {
                     nestedTransform = Matrix3d.Identity;
                     frameDefinitionId = blockRef.BlockTableRecord;

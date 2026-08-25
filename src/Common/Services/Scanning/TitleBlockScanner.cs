@@ -161,9 +161,11 @@ public static class TitleBlockScanner
                 }
 
                 string blockName;
+                string identityName;
                 try
                 {
                     blockName = CadTextExtractor.GetBlockName(blockRef, tr);
+                    identityName = CadTextExtractor.GetLibraryIdentityName(blockRef, tr);
                 }
                 catch (Exception ex)
                 {
@@ -172,12 +174,11 @@ public static class TitleBlockScanner
                 }
 
                 var definition = library.Blocks.FirstOrDefault(x =>
-                    string.Equals(x.BlockName, blockName, StringComparison.OrdinalIgnoreCase));
+                    string.Equals(x.BlockName, identityName, StringComparison.OrdinalIgnoreCase));
 
-                // If no direct match, peek deeper: the outer block may be a
-                // dynamic-block container whose visible inner block was registered instead.
+                // 可见性身份未入库时，再按旧规则找：当前可见内层块，或仅外层块名。
                 Matrix3d effectiveBlockTransform = blockRef.BlockTransform;
-                string effectiveBlockName = blockName;
+                string effectiveBlockName = identityName;
                 ObjectId frameDefinitionId = blockRef.BlockTableRecord;
                 // 嵌套匹配时需记录从内层块定义到外层块定义空间的累积变换，用于后续 region 坐标对齐。
                 Matrix3d nestedToOuter = Matrix3d.Identity;
@@ -199,6 +200,19 @@ public static class TitleBlockScanner
                         frameDefinitionId = nestedDefinitionId;
                         isNestedMatch = true;
                     }
+                    else if (!string.Equals(identityName, blockName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        definition = library.Blocks.FirstOrDefault(x =>
+                            string.Equals(x.BlockName, blockName, StringComparison.OrdinalIgnoreCase));
+                        if (definition != null)
+                        {
+                            effectiveBlockName = definition.BlockName;
+                        }
+                    }
+                }
+                else
+                {
+                    effectiveBlockName = definition.BlockName;
                 }
 
                 if (definition == null)
@@ -665,7 +679,7 @@ public static class TitleBlockScanner
         if (mode == RegionCoordinateMode.FrameRightBottomDynamic)
         {
             // 可拉伸模板的录入 PrintRegion 只是回退值。每个块参照都必须从当前求值定义重新取外框。
-            // 若外层还带 A1/A2/A3 可见性切换，前面的嵌套匹配已先选定当前可见内层定义。
+            // 带可见性属性的块按“块名+可见性名”命中后，外框就在当前可见性对应的求值定义里。
             if (BlockFrameGeometry.TryGetFrame(
                     tr,
                     frameDefinitionId,
@@ -996,11 +1010,7 @@ public static class TitleBlockScanner
     }
 
     /// <summary>
-    /// When a top-level block reference doesn't directly match the library, recursively
-    /// search nested blocks up to 6 levels deep for a visible inner block that matches.
-    /// </summary>
-    /// <summary>
-    /// 图框库块名可能是“外层+内层”复合名：文字缓存按外层参照名过滤，
+    /// 图框库块名可能是“块名+可见性名”或旧的“外层+内层”复合名：文字缓存按外层参照名过滤，
     /// 需要完整名和各分段都能命中，因此把复合名拆开后一起返回。
     /// </summary>
     private static IEnumerable<string> ExpandLibraryNameParts(string? blockName)
@@ -1022,6 +1032,9 @@ public static class TitleBlockScanner
         }
     }
 
+    /// <summary>
+    /// 顶层块名未直接命中图框库时，向可见内层嵌套块递归查找（兼容旧库“外层+内层块名”）。
+    /// </summary>
     private static TitleBlockDefinition? ResolveNestedLibraryMatch(
         Transaction tr,
         BlockReference outerRef,
@@ -1092,7 +1105,8 @@ public static class TitleBlockScanner
                 continue;
             }
 
-            // 新版“外层+内层”复合名只在第一层嵌套匹配，优先于旧版图框库的纯内层名记录。
+            // 旧版“外层+内层”复合名只在第一层嵌套匹配，优先于更旧的纯内层名记录。
+            // 新版“块名+可见性名”已在扫描入口按身份名直接命中，不会走到这里。
             var match = depth == 0 && !string.IsNullOrWhiteSpace(outerBlockName)
                 ? library.Blocks.FirstOrDefault(x =>
                     string.Equals(x.BlockName, outerBlockName + "+" + nestedName, StringComparison.OrdinalIgnoreCase))

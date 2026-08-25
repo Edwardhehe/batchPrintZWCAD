@@ -1,6 +1,6 @@
 # 批量打印插件架构文档
 
-> 覆盖 ZWCAD 和 AutoCAD 双平台，版本 1.15.4 — 本文档反映当前项目结构，包含可选字段（日期/版次/阶段/信息）、任意纸张单张打印、图号重排、CSV导出、PDF/PNG/JPG/DWF/DWG 多格式输出、插件自有栅格绘图仪、所选格式预览、随包 PIA2 模板初始化、另存副本式 DWG 拆图与纸面 1mm 外边框内退等特性。
+> 覆盖 ZWCAD 和 AutoCAD 双平台，版本 1.15.5 — 本文档反映当前项目结构，包含可选字段（日期/版次/阶段/信息）、任意纸张单张打印、图号重排、CSV导出、PDF/PNG/JPG/DWF/DWG 多格式输出、插件自有栅格绘图仪、所选格式预览、随包 PIA2 模板初始化、另存副本式 DWG 拆图与纸面 1mm 外边框内退、动态块按“块名+可见性名”识别等特性。
 
 ---
 
@@ -81,16 +81,10 @@
   │   // 动态块: 返回 DynamicBlockTableRecord.Name ("【地铁院】图框")
   │   // 匿名块名 (*U12) 不会暴露给调用方
   │
-  ├─ TryGetVisibleNestedBlock(tr, blockRef)
-  │   │ // 守卫: IsDynamicBlock=false → 直接返回 false，不干扰普通块
-  │   │ // 只针对动态块：深入一层找到当前可见的内层嵌套块
-  │   ├─ 进入匿名块定义 (*U12)
-  │   ├─ 遍历所有嵌套 BlockReference
-  │   ├─ entity.Visible == true? → CAD 引擎原生判断可见性
-  │   │   // 动态块切换状态时，CAD 自动将隐藏状态的 Visible 设为 false
-  │   ├─ 多个可见时：选包围盒面积最大的（transform 行列式 |
-  │   └─ 返回 (可见嵌套块名, 嵌套块变换矩阵)
-  │       // 例: "【地铁院】图框" → 深入 → 可见的 "A2" → 库 key = "A2"
+  ├─ GetLibraryIdentityName(blockRef)
+  │   // 带可见性属性: 库 key = "【地铁院】图框+A2"（块名+当前可见性名）
+  │   // 普通块 / 纯拉伸块: 库 key = 块名
+  │   // 读不到可见性名时，才回退 TryGetVisibleNestedBlock 用“外层+内层块名”
   │
   ├─ 用户框选打印边界（可选，回车则用块外包框）
   │   // 框选时通过 inverse 矩阵变换回块内坐标
@@ -158,15 +152,15 @@ TitleBlockScanner.Scan(Document, TitleBlockLibrary)
   │   │
   │   └─ 遍历布局中所有 BlockReference（通过 owner 遍历顶层实体）
   │       │
-  │       ├─ ① CadTextExtractor.GetBlockName(blockRef)
-  │       │      // 动态块 → DynamicBlockTableRecord.Name
+  │       ├─ ① CadTextExtractor.GetLibraryIdentityName(blockRef)
+  │       │      // 动态块 → “块名+当前可见性名”；无可见性 → 块名
   │       │
-  │       ├─ ② 查图框库: library.Blocks.FirstOrDefault(x => x.BlockName == blockName)
+  │       ├─ ② 查图框库: library.Blocks.FirstOrDefault(x => x.BlockName == identityName)
   │       │      │
   │       │      ├─ 有 → 直接匹配 ✅
   │       │      │
-  │       │      └─ 没有 → ③ ResolveNestedLibraryMatch(tr, blockRef)
-  │       │            │ // 外层块名不匹配时，深入动态块找可见内层
+  │       │      └─ 没有 → ③ ResolveNestedLibraryMatch / 外层块名
+  │       │            │ // 兼容旧库“外层+内层块名”或仅外层名
   │       │            ├─ 进入匿名块定义 (*U12)
   │       │            ├─ 遍历嵌套 BlockReference
   │       │            ├─ entity.Visible? → CAD 原生可见性过滤（不猜图层不猜名字）
@@ -726,8 +720,8 @@ private static bool IsEntityVisible(Entity entity)
 | 位置 | 文件:方法 | 作用 | 守卫条件 |
 |------|----------|------|---------|
 | 矩形框扫描 | `RectangleFrameScanner.CollectEntityRectangles` | 遍历子实体时过滤隐藏状态 | 无守卫，所有实体通用 |
-| 新增图框 | `AddTitleBlockCommands.TryGetVisibleNestedBlock` | 定位当前可见嵌套块名入库 | `IsDynamicBlock` — 普通块直接返回 false |
-| 图框库扫描 | `TitleBlockScanner.ResolveNestedLibraryMatch` | 深入动态块找可见嵌套块的库匹配 | 仅 `definition==null` 时触发 |
+| 新增图框 | `CadTextExtractor.GetLibraryIdentityName` | 带可见性则按“块名+可见性名”入库 | `TryGetVisibilityStateName` |
+| 图框库扫描 | `TitleBlockScanner` 身份名匹配 | 先按可见性身份命中，再兼容旧内层名 | 身份名未命中时才嵌套查找 |
 
 ### 10.3 可拉伸图框（FrameRightBottomDynamic 坐标模式）
 
@@ -745,9 +739,9 @@ private static bool IsEntityVisible(Entity entity)
 **录入流程**：
 ```
 检测块类型 → 三种组合判断 → 确定坐标模式和纸张策略
-  ├─ 可见性切换块 → 复合名入库（外层+内层可见名）
+  ├─ 带可见性属性 → 身份名“块名+可见性名”（如 地铁图框+A2），外框用当前求值定义
   ├─ 拉伸块（包括查寻列表）→ FrameRightBottomDynamic + A1+ 泛型纸
-  └─ 组合块 → 可见性匹配走嵌套，拉伸走动态外框
+  └─ 读不到可见性名但有隐藏内层图框 → 回退旧身份“外层+内层块名”
 ```
 
 ### 10.4 公共矩形几何函数（RectangleGeometry）
@@ -861,7 +855,7 @@ AutoCAD Core 版本额外使用 `#if ACAD_CORE` 子条件处理 `CadApp.ShowModa
 │   ├── platform-architecture.md
 │   ├── repository-layout.md
 │   ├── tutorial.html                ← 图文教程网页
-│   ├── RELEASE_NOTES_v1.15.4.md     ← 当前版本发布说明
+│   ├── RELEASE_NOTES_v1.15.5.md     ← 当前版本发布说明
 │   ├── 用户使用说明.md
 │   └── 软件说明.txt
 │
@@ -998,7 +992,7 @@ AutoCAD Core 版本额外使用 `#if ACAD_CORE` 子条件处理 `CadApp.ShowModa
 │   └── 使用说明.txt
 │
 ├── release/                         ← 本地发布目录（不纳入 Git）
-│   └── v1.15.4/
+│   └── v1.15.5/
 │       ├── ZWCAD/
 │       ├── AutoCAD2015-2024/
 │       ├── AutoCAD2025-2027/

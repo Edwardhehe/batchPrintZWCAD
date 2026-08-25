@@ -45,7 +45,85 @@ public static class CadTextExtractor
     }
 
     /// <summary>
-    /// 取块参照当前可见的第一层嵌套块名（动态块可见性状态对应的内层块）。
+    /// 判断动态属性名是否为可见性参数。CAD 默认名为 Visibility/可见性，
+    /// 用户改名后通常仍保留“可见”或 visibility 字样。
+    /// </summary>
+    /// <param name="propertyName">动态块属性名。</param>
+    /// <returns>属性名指向可见性参数时返回 true。</returns>
+    public static bool IsVisibilityPropertyName(string? propertyName)
+    {
+        var name = propertyName ?? "";
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return false;
+        }
+
+        return name.IndexOf("可见", StringComparison.OrdinalIgnoreCase) >= 0
+            || name.IndexOf("visibility", StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    /// <summary>
+    /// 读取动态块当前可见性状态名。只认属性名含“可见/visibility”的参数，
+    /// 避免把查寻加长列表的当前档位误当成可见性身份。
+    /// </summary>
+    /// <param name="blockRef">待读取的块参照。</param>
+    /// <param name="visibilityName">当前可见性状态名。</param>
+    /// <returns>存在可读的可见性状态时返回 true。</returns>
+    public static bool TryGetVisibilityStateName(BlockReference blockRef, out string visibilityName)
+    {
+        visibilityName = "";
+        try
+        {
+            if (!blockRef.IsDynamicBlock)
+            {
+                return false;
+            }
+
+            foreach (DynamicBlockReferenceProperty property in blockRef.DynamicBlockReferencePropertyCollection)
+            {
+                if (!IsVisibilityPropertyName(property.PropertyName))
+                {
+                    continue;
+                }
+
+                var valueText = Convert.ToString(property.Value)?.Trim() ?? "";
+                if (valueText.Length == 0)
+                {
+                    continue;
+                }
+
+                visibilityName = valueText;
+                return true;
+            }
+        }
+        catch
+        {
+            // 老版本宿主无法读取动态属性时按普通块处理。
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// 图框库身份名。普通块为块名；带可见性属性的动态块为“块名+当前可见性名”，
+    /// 使同一动态块的不同可见性状态能分别录入和识别。
+    /// </summary>
+    /// <param name="blockRef">待识别的块参照。</param>
+    /// <param name="tr">当前事务。</param>
+    /// <returns>用于图框库匹配的身份名。</returns>
+    public static string GetLibraryIdentityName(BlockReference blockRef, Transaction tr)
+    {
+        var blockName = GetBlockName(blockRef, tr);
+        if (TryGetVisibilityStateName(blockRef, out var visibilityName))
+        {
+            return blockName + "+" + visibilityName;
+        }
+
+        return blockName;
+    }
+
+    /// <summary>
+    /// 取块参照当前可见的第一层嵌套块名（旧版“外层+内层块名”身份的兼容读取）。
     /// 非动态块或无可见嵌套块时返回 false。
     /// </summary>
     public static bool TryGetVisibleNestedBlockName(Transaction tr, BlockReference blockRef, out string innerBlockName)
@@ -115,14 +193,24 @@ public static class CadTextExtractor
 
     /// <summary>
     /// 判断图框库/任务中的块名是否与图纸中的块参照匹配。
-    /// 块名可能是“外层+内层”复合名（动态块可见性尺寸），此时要求参照的外层名一致
-    /// 且当前可见内层块名一致；不含 '+' 的纯名只比对外层名。
+    /// 优先按“块名+可见性名”身份匹配；否则比对外层块名；
+    /// 旧库中的“外层+内层嵌套块名”仍按当前可见内层块兼容。
     /// </summary>
+    /// <param name="storedName">图框库或打印任务中保存的块名。</param>
+    /// <param name="blockRef">图纸中的块参照。</param>
+    /// <param name="tr">当前事务。</param>
+    /// <returns>身份一致时返回 true。</returns>
     public static bool BlockNameMatches(string storedName, BlockReference blockRef, Transaction tr)
     {
         if (string.IsNullOrWhiteSpace(storedName))
         {
             return false;
+        }
+
+        var identityName = GetLibraryIdentityName(blockRef, tr);
+        if (string.Equals(storedName, identityName, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
         }
 
         var outerName = GetBlockName(blockRef, tr);
@@ -131,7 +219,7 @@ public static class CadTextExtractor
             return true;
         }
 
-        // 复合名拆分以第一个 '+' 为界：外层名含 '+' 时无法良定义拆分，按不匹配处理。
+        // 旧版“外层+内层”复合名以第一个 '+' 为界；外层名含 '+' 时无法良定义拆分。
         var plusIndex = storedName.IndexOf('+');
         if (plusIndex <= 0 || plusIndex >= storedName.Length - 1)
         {
