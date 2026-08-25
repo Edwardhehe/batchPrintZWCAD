@@ -173,47 +173,115 @@ public sealed class TemporarySequenceOverlay : IDisposable
 
     public void Clear(bool repaint = true)
     {
-        if (_entityIds.Count == 0)
-        {
-            return;
-        }
-
-        try
-        {
-            using var docLock = _document.LockDocument();
-            using var tr = _document.Database.TransactionManager.StartTransaction();
-            foreach (var id in _entityIds)
-            {
-                if (id.IsNull || id.IsErased)
-                {
-                    continue;
-                }
-
-                if (tr.GetObject(id, OpenMode.ForWrite, false) is Entity entity && !entity.IsErased)
-                {
-                    entity.Erase();
-                }
-            }
-
-            tr.Commit();
-        }
-        catch
-        {
-        }
-        finally
+        // 列表已空仍扫图层：避免上次 Clear 失败把 ID 丢掉后，残留红框永远删不掉。
+        var cleared = TryEraseOverlayEntities();
+        if (cleared)
         {
             _entityIds.Clear();
             _entityGroups.Clear();
             _highlightedJob = null;
-            if (repaint)
-            {
-                Regen();
-            }
+        }
+
+        if (repaint)
+        {
+            Regen();
         }
     }
 
     // 覆盖层不再接管 CAD 的 ERASE/DELETE；释放时只清理插件创建的临时标识。
-    public void Dispose() => Clear();
+    public void Dispose()
+    {
+        Clear();
+        // 打印刚结束时文档偶发仍被占用；失败则保留 ID，再试一次。
+        if (_entityIds.Count > 0)
+        {
+            Clear();
+        }
+    }
+
+    /// <summary>
+    /// 删除已知临时实体，并按图层兜底扫描模型空间与各布局。
+    /// 成功才返回 true；失败时保留 _entityIds，供后续重试。
+    /// </summary>
+    private bool TryEraseOverlayEntities()
+    {
+        try
+        {
+            using var docLock = _document.LockDocument();
+            using var tr = _document.Database.TransactionManager.StartTransaction();
+            var db = _document.Database;
+            EnsureLayerUnlocked(tr, db);
+
+            foreach (var id in _entityIds)
+            {
+                EraseEntityIfAlive(tr, id);
+            }
+
+            // 按图层扫一遍，覆盖 ID 丢失、部分失败、旧版残留等情形。
+            EraseAllEntitiesOnOverlayLayer(tr, db);
+
+            tr.Commit();
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void EnsureLayerUnlocked(Transaction tr, Database db)
+    {
+        var table = (LayerTable)tr.GetObject(db.LayerTableId, OpenMode.ForRead);
+        if (!table.Has(LayerName))
+        {
+            return;
+        }
+
+        var layer = (LayerTableRecord)tr.GetObject(table[LayerName], OpenMode.ForWrite);
+        layer.IsOff = false;
+        layer.IsFrozen = false;
+        layer.IsLocked = false;
+    }
+
+    private static void EraseAllEntitiesOnOverlayLayer(Transaction tr, Database db)
+    {
+        var blockTable = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+        foreach (ObjectId btrId in blockTable)
+        {
+            var btr = (BlockTableRecord)tr.GetObject(btrId, OpenMode.ForRead);
+            // 只扫模型空间与布局空间；块定义里不应有临时红框。
+            if (!btr.IsLayout)
+            {
+                continue;
+            }
+
+            foreach (ObjectId entId in btr)
+            {
+                if (tr.GetObject(entId, OpenMode.ForRead, false) is not Entity entity
+                    || entity.IsErased
+                    || !string.Equals(entity.Layer, LayerName, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                entity.UpgradeOpen();
+                entity.Erase();
+            }
+        }
+    }
+
+    private static void EraseEntityIfAlive(Transaction tr, ObjectId id)
+    {
+        if (id.IsNull || id.IsErased)
+        {
+            return;
+        }
+
+        if (tr.GetObject(id, OpenMode.ForWrite, false) is Entity entity && !entity.IsErased)
+        {
+            entity.Erase();
+        }
+    }
 
     private static ObjectId EnsureLayer(Transaction tr, Database db)
     {
