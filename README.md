@@ -1,6 +1,6 @@
 # LA批量打印
 
-一个面向 ZWCAD 和 AutoCAD 的 .NET 批量打印插件。插件可以学习图框块，识别图名、图号、图幅和比例，支持跨文件批量扫描，并输出 PDF、PNG、JPG、DWF 或按图框拆分 DWG。当前版本：v1.15.5。
+一个面向 ZWCAD 和 AutoCAD 的 .NET 批量打印插件。插件可以学习图框块，识别图名、图号、图幅和比例，支持跨文件批量扫描，并输出 PDF、PNG、JPG、DWF 或按图框拆分 DWG。当前版本：v1.15.6。
 
 ## 使用教程
 
@@ -202,7 +202,7 @@ AutoCAD 2025 ~ 2027 如果菜单栏未显示，可以执行 `ZBP_SHOW_PANEL` 打
 | --- | --- |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 架构与主流程（命令、扫描、打印、拆图内核） |
 | [docs/用户使用说明.md](docs/用户使用说明.md) | 安装、菜单与常见问题 |
-| [docs/RELEASE_NOTES_v1.15.5.md](docs/RELEASE_NOTES_v1.15.5.md) | 当前版本发布说明 |
+| [docs/RELEASE_NOTES_v1.15.6.md](docs/RELEASE_NOTES_v1.15.6.md) | 当前版本发布说明 |
 | [docs/tutorial.html](docs/tutorial.html) | 图文教程 |
 
 ## 开发
@@ -250,10 +250,10 @@ dotnet build BatchPlotter.csproj -c Release
 生成本地发布目录与三组 ZIP：
 
 ```powershell
-.\scripts\package-release.ps1 -Version 1.15.5
+.\scripts\package-release.ps1 -Version 1.15.6
 ```
 
-输出位于 `release\v1.15.5\`，包含 ZWCAD、AutoCAD 2015–2024、AutoCAD 2025–2027 三组完整安装目录和对应压缩包。
+输出位于 `release\v1.15.6\`，包含 ZWCAD、AutoCAD 2015–2024、AutoCAD 2025–2027 三组完整安装目录和对应压缩包。
 
 ## 说明
 
