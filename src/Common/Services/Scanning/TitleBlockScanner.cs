@@ -111,8 +111,6 @@ public static class TitleBlockScanner
         double? paperMatchToleranceMm = null,
         CadSelectionWindow? modelCoordinateContext = null)
     {
-        var jobs = new List<PlotJob>();
-        var warnings = new List<string>();
         var storedSettings = AppSettingsStore.Load();
         var effectivePaperToleranceMm = paperMatchToleranceMm ?? storedSettings.PaperMatchToleranceMm;
         if (string.IsNullOrWhiteSpace(sourceName))
@@ -120,12 +118,43 @@ public static class TitleBlockScanner
             sourceName = db.Filename;
         }
 
+        TitleBlockScanCaches.Begin();
+        try
+        {
+            return ScanCore(
+                db,
+                library,
+                sourceName,
+                scanWindow,
+                scope,
+                currentSpaceName,
+                effectivePaperToleranceMm,
+                modelCoordinateContext);
+        }
+        finally
+        {
+            TitleBlockScanCaches.End();
+        }
+    }
+
+    private static List<PlotJob> ScanCore(
+        Database db,
+        TitleBlockLibrary library,
+        string sourceName,
+        Extents3d? scanWindow,
+        TitleBlockScanScope scope,
+        string? currentSpaceName,
+        double effectivePaperToleranceMm,
+        CadSelectionWindow? modelCoordinateContext)
+    {
+        var jobs = new List<PlotJob>();
+        var warnings = new List<string>();
+        var storedSettings = AppSettingsStore.Load();
+
         using var tr = db.TransactionManager.StartTransaction();
         var blockTable = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
 
-        var libraryBlockNames = new HashSet<string>(
-            library.Blocks.SelectMany(x => ExpandLibraryNameParts(x.BlockName)).Where(name => !string.IsNullOrWhiteSpace(name)),
-            StringComparer.OrdinalIgnoreCase);
+        var libraryIndex = new TitleBlockLibraryIndex(library);
 
         var matchIndex = 0;
         foreach (ObjectId recordId in blockTable)
@@ -146,7 +175,7 @@ public static class TitleBlockScanner
             CadTextExtractor.OwnerTextCache? ownerTextCache = null;
             try
             {
-                ownerTextCache = CadTextExtractor.BuildOwnerTextCache(tr, owner, libraryBlockNames);
+                ownerTextCache = CadTextExtractor.BuildOwnerTextCache(tr, owner, libraryIndex.NameParts);
             }
             catch (Exception ex)
             {
@@ -161,11 +190,9 @@ public static class TitleBlockScanner
                 }
 
                 string blockName;
-                string identityName;
                 try
                 {
                     blockName = CadTextExtractor.GetBlockName(blockRef, tr);
-                    identityName = CadTextExtractor.GetLibraryIdentityName(blockRef, tr);
                 }
                 catch (Exception ex)
                 {
@@ -173,8 +200,25 @@ public static class TitleBlockScanner
                     continue;
                 }
 
-                var definition = library.Blocks.FirstOrDefault(x =>
-                    string.Equals(x.BlockName, identityName, StringComparison.OrdinalIgnoreCase));
+                // 图框库记录可能是“块名+可见性名”，图纸上块参照名通常只是外层块名；
+                // 先用库名分段过滤无关块，再读取完整身份名，避免对全图块做嵌套递归。
+                if (!libraryIndex.IsPotentialTitleBlock(blockName))
+                {
+                    continue;
+                }
+
+                string identityName;
+                try
+                {
+                    identityName = CadTextExtractor.GetLibraryIdentityName(blockRef, tr);
+                }
+                catch (Exception ex)
+                {
+                    warnings.Add($"布局={spaceName} 句柄={blockRef.Handle} 身份名读取失败: {ex.Message}");
+                    continue;
+                }
+
+                var definition = libraryIndex.TryGet(identityName);
 
                 // 可见性身份未入库时，再按旧规则找：当前可见内层块，或仅外层块名。
                 Matrix3d effectiveBlockTransform = blockRef.BlockTransform;
@@ -183,13 +227,13 @@ public static class TitleBlockScanner
                 // 嵌套匹配时需记录从内层块定义到外层块定义空间的累积变换，用于后续 region 坐标对齐。
                 Matrix3d nestedToOuter = Matrix3d.Identity;
                 bool isNestedMatch = false;
-                if (definition == null)
+                if (definition == null && libraryIndex.ShouldAttemptNestedMatch(blockName))
                 {
                     definition = ResolveNestedLibraryMatch(
                         tr,
                         blockRef,
                         blockName,
-                        library,
+                        libraryIndex,
                         out var nestedTransform,
                         out var nestedDefinitionId);
                     if (definition != null)
@@ -200,17 +244,17 @@ public static class TitleBlockScanner
                         frameDefinitionId = nestedDefinitionId;
                         isNestedMatch = true;
                     }
-                    else if (!string.Equals(identityName, blockName, StringComparison.OrdinalIgnoreCase))
+                }
+
+                if (definition == null && !string.Equals(identityName, blockName, StringComparison.OrdinalIgnoreCase))
+                {
+                    definition = libraryIndex.TryGet(blockName);
+                    if (definition != null)
                     {
-                        definition = library.Blocks.FirstOrDefault(x =>
-                            string.Equals(x.BlockName, blockName, StringComparison.OrdinalIgnoreCase));
-                        if (definition != null)
-                        {
-                            effectiveBlockName = definition.BlockName;
-                        }
+                        effectiveBlockName = definition.BlockName;
                     }
                 }
-                else
+                else if (definition != null)
                 {
                     effectiveBlockName = definition.BlockName;
                 }
@@ -350,18 +394,19 @@ public static class TitleBlockScanner
                 string info2 = "";
                 try
                 {
-                    title = CadTextExtractor.ExtractRegionText(tr, blockRef, owner, titleRegion, ownerTextCache);
-                    number = CadTextExtractor.ExtractRegionText(tr, blockRef, owner, numberRegion, ownerTextCache);
+                    var blockTextCache = CadTextExtractor.BuildBlockReferenceTextCache(tr, blockRef);
+                    title = CadTextExtractor.ExtractRegionText(tr, blockRef, owner, titleRegion, ownerTextCache, blockTextCache);
+                    number = CadTextExtractor.ExtractRegionText(tr, blockRef, owner, numberRegion, ownerTextCache, blockTextCache);
                     if (dateRegion.HasArea())
-                        date = CadTextExtractor.ExtractRegionText(tr, blockRef, owner, dateRegion, ownerTextCache);
+                        date = CadTextExtractor.ExtractRegionText(tr, blockRef, owner, dateRegion, ownerTextCache, blockTextCache);
                     if (revisionRegion.HasArea())
-                        revision = CadTextExtractor.ExtractRegionText(tr, blockRef, owner, revisionRegion, ownerTextCache);
+                        revision = CadTextExtractor.ExtractRegionText(tr, blockRef, owner, revisionRegion, ownerTextCache, blockTextCache);
                     if (phaseRegion.HasArea())
-                        phase = CadTextExtractor.ExtractRegionText(tr, blockRef, owner, phaseRegion, ownerTextCache);
+                        phase = CadTextExtractor.ExtractRegionText(tr, blockRef, owner, phaseRegion, ownerTextCache, blockTextCache);
                     if (info1Region.HasArea())
-                        info1 = CadTextExtractor.ExtractRegionText(tr, blockRef, owner, info1Region, ownerTextCache);
+                        info1 = CadTextExtractor.ExtractRegionText(tr, blockRef, owner, info1Region, ownerTextCache, blockTextCache);
                     if (info2Region.HasArea())
-                        info2 = CadTextExtractor.ExtractRegionText(tr, blockRef, owner, info2Region, ownerTextCache);
+                        info2 = CadTextExtractor.ExtractRegionText(tr, blockRef, owner, info2Region, ownerTextCache, blockTextCache);
                 }
                 catch (Exception ex)
                 {
@@ -1033,13 +1078,86 @@ public static class TitleBlockScanner
     }
 
     /// <summary>
+    /// 图框库名称索引：支持“块名+可见性名”身份匹配，并过滤与库无关的块参照。
+    /// </summary>
+    private sealed class TitleBlockLibraryIndex
+    {
+        private readonly Dictionary<string, TitleBlockDefinition> _byName;
+        /// <summary>早退与文字缓存过滤：完整库名 + 复合名外层块名，不含“+”后的可见性后缀。</summary>
+        private readonly HashSet<string> _blockNameFilter;
+        private readonly HashSet<string> _compositeOuterNames;
+
+        public TitleBlockLibraryIndex(TitleBlockLibrary library)
+        {
+            _byName = new Dictionary<string, TitleBlockDefinition>(StringComparer.OrdinalIgnoreCase);
+            _blockNameFilter = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            _compositeOuterNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var block in library.Blocks)
+            {
+                if (string.IsNullOrWhiteSpace(block.BlockName))
+                {
+                    continue;
+                }
+
+                _byName[block.BlockName] = block;
+                _blockNameFilter.Add(block.BlockName);
+
+                var plusIndex = block.BlockName.IndexOf('+');
+                if (plusIndex > 0)
+                {
+                    var outerName = block.BlockName.Substring(0, plusIndex).Trim();
+                    if (outerName.Length > 0)
+                    {
+                        _compositeOuterNames.Add(outerName);
+                        _blockNameFilter.Add(outerName);
+                    }
+                }
+            }
+        }
+
+        public HashSet<string> NameParts => _blockNameFilter;
+
+        /// <summary>
+        /// 块参照块名是否可能与图框库有关。库记录为“块名+可见性名”时，
+        /// 图纸块名通常只是外层“块名”；不把“+”后的可见性后缀（A0/A1/A2…）单独当作命中，
+        /// 避免用户块名碰巧与可见性状态同名时被误扫。
+        /// </summary>
+        public bool IsPotentialTitleBlock(string blockName)
+        {
+            if (string.IsNullOrWhiteSpace(blockName))
+            {
+                return false;
+            }
+
+            return _blockNameFilter.Contains(blockName);
+        }
+
+        /// <summary>仅对库中存在“外层+…”复合名的外层块尝试嵌套匹配。</summary>
+        public bool ShouldAttemptNestedMatch(string blockName)
+        {
+            return !string.IsNullOrWhiteSpace(blockName) && _compositeOuterNames.Contains(blockName);
+        }
+
+        public TitleBlockDefinition? TryGet(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                return null;
+            }
+
+            return _byName.TryGetValue(name, out var definition) ? definition : null;
+        }
+    }
+
+    /// <summary>
     /// 顶层块名未直接命中图框库时，向可见内层嵌套块递归查找（兼容旧库“外层+内层块名”）。
     /// </summary>
     private static TitleBlockDefinition? ResolveNestedLibraryMatch(
         Transaction tr,
         BlockReference outerRef,
         string outerBlockName,
-        TitleBlockLibrary library,
+        TitleBlockLibraryIndex libraryIndex,
         out Matrix3d nestedTransform,
         out ObjectId matchedDefinitionId)
     {
@@ -1058,7 +1176,7 @@ public static class TitleBlockScanner
             definition,
             Matrix3d.Identity,
             outerBlockName,
-            library,
+            libraryIndex,
             out nestedTransform,
             out matchedDefinitionId,
             new HashSet<ObjectId>(),
@@ -1070,7 +1188,7 @@ public static class TitleBlockScanner
         BlockTableRecord definition,
         Matrix3d accumulatedTransform,
         string outerBlockName,
-        TitleBlockLibrary library,
+        TitleBlockLibraryIndex libraryIndex,
         out Matrix3d nestedTransform,
         out ObjectId matchedDefinitionId,
         ISet<ObjectId> visited,
@@ -1108,11 +1226,9 @@ public static class TitleBlockScanner
             // 旧版“外层+内层”复合名只在第一层嵌套匹配，优先于更旧的纯内层名记录。
             // 新版“块名+可见性名”已在扫描入口按身份名直接命中，不会走到这里。
             var match = depth == 0 && !string.IsNullOrWhiteSpace(outerBlockName)
-                ? library.Blocks.FirstOrDefault(x =>
-                    string.Equals(x.BlockName, outerBlockName + "+" + nestedName, StringComparison.OrdinalIgnoreCase))
+                ? libraryIndex.TryGet(outerBlockName + "+" + nestedName)
                 : null;
-            match ??= library.Blocks.FirstOrDefault(x =>
-                string.Equals(x.BlockName, nestedName, StringComparison.OrdinalIgnoreCase));
+            match ??= libraryIndex.TryGet(nestedName);
             if (match != null)
             {
                 nestedTransform = nested.BlockTransform * accumulatedTransform;
@@ -1130,7 +1246,7 @@ public static class TitleBlockScanner
                     nestedDef,
                     innerTransform,
                     outerBlockName,
-                    library,
+                    libraryIndex,
                     out var deeperTransform,
                     out var deeperDefinitionId,
                     visited,

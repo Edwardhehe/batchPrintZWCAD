@@ -168,11 +168,22 @@ public sealed class TemporarySequenceOverlay : IDisposable
 
         _highlightedJob = highlightJob;
         tr.Commit();
-        Regen();
+        UpdateScreenOnly();
     }
 
     public void Clear(bool repaint = true)
     {
+        if (_entityIds.Count == 0 && _entityGroups.Count == 0)
+        {
+            _highlightedJob = null;
+            if (repaint)
+            {
+                UpdateScreenOnly();
+            }
+
+            return;
+        }
+
         // 列表已空仍扫图层：避免上次 Clear 失败把 ID 丢掉后，残留红框永远删不掉。
         var cleared = TryEraseOverlayEntities();
         if (cleared)
@@ -184,19 +195,14 @@ public sealed class TemporarySequenceOverlay : IDisposable
 
         if (repaint)
         {
-            Regen();
+            UpdateScreenOnly();
         }
     }
 
     // 覆盖层不再接管 CAD 的 ERASE/DELETE；释放时只清理插件创建的临时标识。
     public void Dispose()
     {
-        Clear();
-        // 打印刚结束时文档偶发仍被占用；失败则保留 ID，再试一次。
-        if (_entityIds.Count > 0)
-        {
-            Clear();
-        }
+        Clear(repaint: false);
     }
 
     /// <summary>
@@ -205,6 +211,11 @@ public sealed class TemporarySequenceOverlay : IDisposable
     /// </summary>
     private bool TryEraseOverlayEntities()
     {
+        if (_entityIds.Count == 0 && _entityGroups.Count == 0)
+        {
+            return true;
+        }
+
         try
         {
             using var docLock = _document.LockDocument();
@@ -212,13 +223,17 @@ public sealed class TemporarySequenceOverlay : IDisposable
             var db = _document.Database;
             EnsureLayerUnlocked(tr, db);
 
+            var trackedIds = _entityIds.Count;
             foreach (var id in _entityIds)
             {
                 EraseEntityIfAlive(tr, id);
             }
 
-            // 按图层扫一遍，覆盖 ID 丢失、部分失败、旧版残留等情形。
-            EraseAllEntitiesOnOverlayLayer(tr, db);
+            // 有跟踪 ID 时按 ID 删除即可；全图扫图层只在 ID 丢失时做兜底，避免关闭窗口时遍历整张图纸。
+            if (trackedIds == 0)
+            {
+                EraseAllEntitiesOnOverlayLayer(tr, db);
+            }
 
             tr.Commit();
             return true;

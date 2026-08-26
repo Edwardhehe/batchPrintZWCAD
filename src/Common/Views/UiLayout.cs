@@ -132,5 +132,8 @@ public static class UiLayout
         grid.ColumnHeadersDefaultCellStyle.ForeColor = Color.Black;
         grid.ColumnHeadersDefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleLeft;
         grid.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(250, 250, 250);
+        typeof(DataGridView)
+            .GetProperty("DoubleBuffered", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            ?.SetValue(grid, true, null);
     }
 }

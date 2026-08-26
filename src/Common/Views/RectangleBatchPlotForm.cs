@@ -44,6 +44,7 @@ public sealed class RectangleBatchPlotForm : Form
     private readonly AppSettings _settings;
     private readonly TemporarySequenceOverlay _overlay;
     private int _highlightedJobIndex = -1;
+    private int _overlayScheduleGeneration;
     private readonly BindingList<Row> _rows = new();
     private readonly BindingList<Row> _displayRows = new();
     private readonly DataGridView _grid = new();
@@ -77,7 +78,6 @@ public sealed class RectangleBatchPlotForm : Form
         _overlay = new TemporarySequenceOverlay(document);
         InitializeComponents();
         LoadPlotOptions();
-        FormClosed += (_, _) => _overlay.Clear();
     }
 
     private void InitializeComponents()
@@ -355,14 +355,8 @@ public sealed class RectangleBatchPlotForm : Form
             if (e.RowIndex >= 0 && e.RowIndex < _displayRows.Count)
             {
                 _highlightedJobIndex = _rows.IndexOf(_displayRows[e.RowIndex]);
-                try
-                {
-                    var selectedJobs = _rows.Where(row => row.Selected).Select(row => row.Job).ToList();
-                    var targetJob = _displayRows[e.RowIndex].Job;
-                    var idx = selectedJobs.FindIndex(j => ReferenceEquals(j, targetJob));
-                    _overlay.Show(selectedJobs, idx);
-                }
-                catch { }
+                var targetJob = _displayRows[e.RowIndex].Job;
+                _overlay.SetHighlight(targetJob);
             }
         };
         _grid.CellFormatting += GridCellFormatting;
@@ -708,10 +702,17 @@ public sealed class RectangleBatchPlotForm : Form
         _viewSortedByHeader = true;
         _viewSortColumnIndex = e.ColumnIndex;
         var sorted = _rows.OrderBy(row => GetHeaderSortValue(row, e.ColumnIndex), NaturalStringComparer.Instance).ToList();
-        _displayRows.Clear();
-        foreach (var row in sorted)
+        var wasUpdating = _updating;
+        _updating = true;
+        _grid.SuspendLayout();
+        try
         {
-            _displayRows.Add(row);
+            ReplaceBindingListContents(_displayRows, sorted);
+        }
+        finally
+        {
+            _grid.ResumeLayout();
+            _updating = wasUpdating;
         }
         ConfigurePaperCells();
         _grid.Refresh();
@@ -1582,20 +1583,50 @@ public sealed class RectangleBatchPlotForm : Form
         var selected = _rows.Count(row => row.Selected);
         var order = _settings.SortOrderHorizontalFirst ? "左→右、上→下" : "上→下、左→右";
         _status.Text = $"识别 {_rows.Count} 个矩形框  |  已选 {selected} 个  |  格式：{SelectedOutputFormat}  |  顺序：{order}  |  输出：{_outputDirectory.Text}";
+        ScheduleOverlayRefresh();
+    }
+
+    /// <summary>
+    /// 表格先刷新完，下一帧再画 CAD 红框，避免识别结果和 Regen 挤在同一次 UI 消息里卡住窗口。
+    /// </summary>
+    private void ScheduleOverlayRefresh()
+    {
+        if (IsDisposed)
+        {
+            return;
+        }
+
+        var generation = ++_overlayScheduleGeneration;
+        // 构造窗口时句柄尚未创建，BeginInvoke 会抛 InvalidOperationException。
+        if (!IsHandleCreated)
+        {
+            return;
+        }
+
+        BeginInvoke(new Action(() =>
+        {
+            if (IsDisposed || generation != _overlayScheduleGeneration)
+            {
+                return;
+            }
+
+            ShowOverlayNow();
+        }));
+    }
+
+    private void ShowOverlayNow()
+    {
         try
         {
             var selectedJobs = _displayRows.Where(row => row.Selected).Select(row => row.Job).ToList();
-            var highlightIdx = -1;
-            if (_highlightedJobIndex >= 0 && _highlightedJobIndex < _rows.Count)
-            {
-                var targetJob = _rows[_highlightedJobIndex].Job;
-                highlightIdx = selectedJobs.FindIndex(j => ReferenceEquals(j, targetJob));
-            }
-            _overlay.Show(selectedJobs, highlightIdx);
+            var highlightJob = (_highlightedJobIndex >= 0 && _highlightedJobIndex < _rows.Count)
+                ? _rows[_highlightedJobIndex].Job
+                : null;
+            _overlay.Show(selectedJobs, highlightJob);
         }
         catch
         {
-            _overlay.Clear();
+            _overlay.Clear(repaint: false);
         }
     }
 
@@ -1803,6 +1834,7 @@ public sealed class RectangleBatchPlotForm : Form
     {
         if (disposing)
         {
+            _overlayScheduleGeneration++;
             // 关闭窗口时只清理临时红框和序号，不再退订或接管 CAD 删除命令。
             _overlay.Dispose();
         }

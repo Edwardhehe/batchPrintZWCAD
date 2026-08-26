@@ -49,6 +49,7 @@ public sealed class BatchPlotForm : Form
     private readonly TemporarySequenceOverlay _sequenceOverlay;
     private readonly AppSettings _settings;
     private bool _sequenceOverlayFollowsCurrentJobs;
+    private int _overlayScheduleGeneration;
     private bool _outputDirectoryIsCustom;
     private bool _updatingPrintSelection;
     private bool _allowDoubleClickTextEdit;
@@ -641,7 +642,6 @@ public sealed class BatchPlotForm : Form
             return;
         }
 
-        _jobs.Clear();
         _selectedDwgFiles.Clear();
         var scannedJobs = TitleBlockScanner.Scan(
             _currentDocument,
@@ -651,14 +651,10 @@ public sealed class BatchPlotForm : Form
 
         // 扫描结果坐标是 WCS，转为 DCS 后打印（和矩形框批量打印同理）
         TransformScannedJobsToDcs(scannedJobs);
-
-        foreach (var job in scannedJobs)
-        {
-            _jobs.Add(job);
-        }
+        ReplaceBindingListContents(_jobs, scannedJobs);
 
         SortAndRefreshOutputPaths();
-        ShowSequenceOverlayForCurrentJobs();
+        ScheduleSequenceOverlayForCurrentJobs();
         AppendLog("INFO", $"扫描当前图完成，识别 {_jobs.Count} 张。");
     }
 
@@ -696,7 +692,6 @@ public sealed class BatchPlotForm : Form
                 second.Value,
                 _currentDocument.Database.TileMode);
 
-            _jobs.Clear();
             _selectedDwgFiles.Clear();
             var scannedJobs = TitleBlockScanner.Scan(
                 _currentDocument,
@@ -706,14 +701,10 @@ public sealed class BatchPlotForm : Form
 
             // 扫描结果坐标是 WCS，转为 DCS 后打印
             TransformScannedJobsToDcs(scannedJobs);
-
-            foreach (var job in scannedJobs)
-            {
-                _jobs.Add(job);
-            }
+            ReplaceBindingListContents(_jobs, scannedJobs);
 
             SortAndRefreshOutputPaths();
-            ShowSequenceOverlayForCurrentJobs();
+            ScheduleSequenceOverlayForCurrentJobs();
             AppendLog("INFO", $"框选扫描当前图完成，识别 {_jobs.Count} 张。");
         }
         finally
@@ -824,15 +815,16 @@ public sealed class BatchPlotForm : Form
             }
         }
 
-        foreach (var job in added)
+        if (added.Count > 0)
         {
-            _jobs.Add(job);
+            var merged = _jobs.Concat(added).ToList();
+            ReplaceBindingListContents(_jobs, merged);
         }
 
         SortAndRefreshOutputPaths();
         if (_jobs.Count > 0 && _jobs.All(IsCurrentDocumentJob))
         {
-            ShowSequenceOverlayForCurrentJobs();
+            ScheduleSequenceOverlayForCurrentJobs();
         }
         else
         {
@@ -879,7 +871,6 @@ public sealed class BatchPlotForm : Form
         // 所有会改变清单的入口最终都回到这里，确保表格、红框序号、输出文件名和打印顺序使用同一结果。
         var sorted = SortTitleBlockJobs(_jobs.ToList());
 
-        _jobs.Clear();
         var sequenceDigits = FileNameSanitizer.ResolveSequenceDigits(
             _settings.AutoFileNameSequenceDigits,
             _settings.FileNameSequenceDigits,
@@ -894,6 +885,7 @@ public sealed class BatchPlotForm : Form
                 sourceSubfolder: AutomaticOutputSubfolder)
             : null;
         var reservedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var refreshed = new List<PlotJob>(sorted.Count);
         for (var index = 0; index < sorted.Count; index++)
         {
             var job = sorted[index];
@@ -908,13 +900,45 @@ public sealed class BatchPlotForm : Form
             }
             // 表格显示最终命名结果；合并 PDF 的临时路径不得覆盖这个值。
             job.DisplayOutputFileName = job.OutputFileName;
-            _jobs.Add(job);
+            refreshed.Add(job);
+        }
+
+        _grid.SuspendLayout();
+        try
+        {
+            ReplaceBindingListContents(_jobs, refreshed);
+        }
+        finally
+        {
+            _grid.ResumeLayout();
         }
 
         RefreshStatus();
         if (_sequenceOverlayFollowsCurrentJobs)
         {
-            ShowSequenceOverlayForCurrentJobs();
+            ScheduleSequenceOverlayForCurrentJobs();
+        }
+    }
+
+    /// <summary>
+    /// 一次性替换绑定列表，结束时只发一次 Reset。
+    /// 大图识别出几十上百张时，逐行 Add 会让 DataGridView 反复重绑，界面卡住。
+    /// </summary>
+    private static void ReplaceBindingListContents<T>(BindingList<T> target, IEnumerable<T> values)
+    {
+        target.RaiseListChangedEvents = false;
+        try
+        {
+            target.Clear();
+            foreach (var value in values)
+            {
+                target.Add(value);
+            }
+        }
+        finally
+        {
+            target.RaiseListChangedEvents = true;
+            target.ResetBindings();
         }
     }
 
@@ -1015,6 +1039,33 @@ public sealed class BatchPlotForm : Form
         }
     }
 
+    /// <summary>
+    /// 清单刷新完成后再绘制 CAD 红框，避免识别与 Regen 挤在同一次 UI 消息里。
+    /// </summary>
+    private void ScheduleSequenceOverlayForCurrentJobs()
+    {
+        if (IsDisposed)
+        {
+            return;
+        }
+
+        var generation = ++_overlayScheduleGeneration;
+        if (!IsHandleCreated)
+        {
+            return;
+        }
+
+        BeginInvoke(new Action(() =>
+        {
+            if (IsDisposed || generation != _overlayScheduleGeneration)
+            {
+                return;
+            }
+
+            ShowSequenceOverlayForCurrentJobs();
+        }));
+    }
+
     private void ShowRenumberPreviewOverlay(IReadOnlyList<PlotJob> previewOrder)
     {
         _sequenceOverlayFollowsCurrentJobs = true;
@@ -1053,10 +1104,11 @@ public sealed class BatchPlotForm : Form
         _sequenceOverlay.SetHighlight(job);
     }
 
-    private void ClearSequenceOverlay()
+    private void ClearSequenceOverlay(bool repaint = true)
     {
+        _overlayScheduleGeneration++;
         _sequenceOverlayFollowsCurrentJobs = false;
-        _sequenceOverlay.Clear();
+        _sequenceOverlay.Clear(repaint);
     }
 
     private bool IsCurrentDocumentJob(PlotJob job)
@@ -1201,7 +1253,7 @@ public sealed class BatchPlotForm : Form
     {
         if (_sequenceOverlayFollowsCurrentJobs)
         {
-            ShowSequenceOverlayForCurrentJobs();
+            ScheduleSequenceOverlayForCurrentJobs();
         }
     }
 
@@ -1267,7 +1319,6 @@ public sealed class BatchPlotForm : Form
             }
             _grid.Refresh();
             SortAndRefreshOutputPaths();
-            ShowSequenceOverlayForCurrentJobs();
             dialog.Dispose();
             return;
         }
@@ -1284,7 +1335,6 @@ public sealed class BatchPlotForm : Form
         _settings.SortOrderHorizontalFirst = dialog.HorizontalFirst;
         AppSettingsStore.Save(_settings);
         SortAndRefreshOutputPaths();
-        ShowSequenceOverlayForCurrentJobs();
 
         // 反写 CAD 文件中的图号（批量：共享一次文档锁定/事务/图框库加载，逐张写在图多时会明显变慢）
         var updated = CadTextUpdater.UpdateDrawingNumbers(finalSorted, _currentDocument,
@@ -2717,7 +2767,7 @@ public sealed class BatchPlotForm : Form
         if (!HasPendingPrint)
         {
             _renumberDialog?.Close();
-            ClearSequenceOverlay();
+            ClearSequenceOverlay(repaint: false);
         }
 
         SaveCurrentSettings();

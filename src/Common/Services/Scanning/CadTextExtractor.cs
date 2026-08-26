@@ -17,12 +17,113 @@ public static class CadTextExtractor
 {
     public sealed class OwnerTextCache
     {
-        internal OwnerTextCache(IReadOnlyList<TextCandidate> candidates)
+        internal OwnerTextCache(
+            IReadOnlyList<TextCandidate> candidates,
+            IReadOnlyList<OverlapBlockRef> overlapBlocks)
         {
             Candidates = candidates;
+            OverlapBlocks = overlapBlocks;
         }
 
         internal IReadOnlyList<TextCandidate> Candidates { get; }
+
+        /// <summary>布局内块参照及其包围盒，供字段提取时查找重叠图签，避免每个字段都遍历整张图。</summary>
+        internal IReadOnlyList<OverlapBlockRef> OverlapBlocks { get; }
+    }
+
+    /// <summary>布局中一个块参照的包围盒快照，与建立缓存的事务共用。</summary>
+    internal readonly struct OverlapBlockRef
+    {
+        public OverlapBlockRef(ObjectId id, Extents3d extents, BlockReference block)
+        {
+            Id = id;
+            Extents = extents;
+            Block = block;
+        }
+
+        public ObjectId Id { get; }
+        public Extents3d Extents { get; }
+        public BlockReference Block { get; }
+    }
+
+    /// <summary>
+    /// 单个图框块参照的块内文字缓存，供多字段区域复用，避免重复递归块定义树。
+    /// </summary>
+    public sealed class BlockReferenceTextCache
+    {
+        internal BlockReferenceTextCache(
+            IReadOnlyList<TextCandidate> attributeCandidates,
+            IReadOnlyList<TextCandidate> definitionCandidates)
+        {
+            AttributeCandidates = attributeCandidates;
+            DefinitionCandidates = definitionCandidates;
+        }
+
+        internal IReadOnlyList<TextCandidate> AttributeCandidates { get; }
+        internal IReadOnlyList<TextCandidate> DefinitionCandidates { get; }
+    }
+
+    /// <summary>
+    /// 预收集块参照属性与块定义内全部可见文字（块局部坐标）。
+    /// 同一块定义树只遍历一次，多图框实例复用。
+    /// </summary>
+    public static BlockReferenceTextCache BuildBlockReferenceTextCache(Transaction tr, BlockReference blockRef)
+    {
+        var inverse = blockRef.BlockTransform.Inverse();
+        var attributes = new List<TextCandidate>();
+        foreach (ObjectId attributeId in blockRef.AttributeCollection)
+        {
+            if (!attributeId.IsValid || attributeId.IsErased)
+            {
+                continue;
+            }
+
+            if (tr.GetObject(attributeId, OpenMode.ForRead, false) is AttributeReference attribute
+                && IsEntityVisible(attribute)
+                && TryGetText(attribute, out var text, out var worldPoint))
+            {
+                var local = worldPoint.TransformBy(inverse);
+                AddText(attributes, text, local, TextSourcePriority.Attribute);
+            }
+        }
+
+        var definitionId = blockRef.BlockTableRecord;
+        var definitions = GetOrBuildDefinitionTextCache(tr, definitionId);
+        return new BlockReferenceTextCache(attributes, definitions);
+    }
+
+    /// <summary>按块定义缓存可见文字，避免同一图框定义被每个实例、每个字段重复递归。</summary>
+    private static IReadOnlyList<TextCandidate> GetOrBuildDefinitionTextCache(Transaction tr, ObjectId definitionId)
+    {
+        if (TitleBlockScanCaches.Active
+            && TitleBlockScanCaches.DefinitionTexts.TryGetValue(definitionId, out var cached))
+        {
+            return cached;
+        }
+
+        var definitions = new List<TextCandidate>();
+        if (definitionId.IsNull)
+        {
+            return definitions;
+        }
+
+        var definition = (BlockTableRecord)tr.GetObject(definitionId, OpenMode.ForRead);
+        CollectDefinitionText(
+            tr,
+            definition,
+            Matrix3d.Identity,
+            LocalRectangle.FromPoints(double.MinValue / 2, double.MinValue / 2, double.MaxValue / 2, double.MaxValue / 2),
+            definitions,
+            TextSourcePriority.BlockDefinition,
+            new HashSet<ObjectId>(),
+            0);
+
+        if (TitleBlockScanCaches.Active)
+        {
+            TitleBlockScanCaches.DefinitionTexts[definitionId] = definitions;
+        }
+
+        return definitions;
     }
 
     public static string GetBlockName(BlockReference blockRef, Transaction tr)
@@ -40,8 +141,20 @@ public static class CadTextExtractor
             // Older CAD versions may not expose dynamic-block metadata reliably.
         }
 
+        if (TitleBlockScanCaches.Active
+            && TitleBlockScanCaches.BlockNames.TryGetValue(definitionId, out var cachedName))
+        {
+            return cachedName;
+        }
+
         var btr = (BlockTableRecord)tr.GetObject(definitionId, OpenMode.ForRead);
-        return btr.Name;
+        var name = btr.Name;
+        if (TitleBlockScanCaches.Active)
+        {
+            TitleBlockScanCaches.BlockNames[definitionId] = name;
+        }
+
+        return name;
     }
 
     /// <summary>
@@ -245,6 +358,7 @@ public static class CadTextExtractor
     public static OwnerTextCache BuildOwnerTextCache(Transaction tr, BlockTableRecord owner, HashSet<string>? libraryBlockNames)
     {
         var values = new List<TextCandidate>();
+        var overlapBlocks = new List<OverlapBlockRef>();
         foreach (ObjectId id in owner)
         {
             if (tr.GetObject(id, OpenMode.ForRead, false) is not Entity entity)
@@ -259,6 +373,14 @@ public static class CadTextExtractor
 
             if (entity is BlockReference ownerBlock)
             {
+                try
+                {
+                    overlapBlocks.Add(new OverlapBlockRef(id, ownerBlock.GeometricExtents, ownerBlock));
+                }
+                catch
+                {
+                }
+
                 if (!IsBlockClipped(tr, ownerBlock))
                 {
                     // 若提供了库名列表，只递归遍历匹配的块，大幅减少无意义遍历
@@ -279,7 +401,7 @@ public static class CadTextExtractor
             }
         }
 
-        return new OwnerTextCache(values);
+        return new OwnerTextCache(values, overlapBlocks);
     }
 
     private static bool TryGetOwnerSpaceText(Entity entity, out string text, out Point3d point)
@@ -303,30 +425,53 @@ public static class CadTextExtractor
 
     public static string ExtractRegionText(Transaction tr, BlockReference blockRef, BlockTableRecord owner, LocalRectangle region, OwnerTextCache? ownerTextCache)
     {
+        return ExtractRegionText(tr, blockRef, owner, region, ownerTextCache, null);
+    }
+
+    /// <summary>
+    /// 从字段区域提取文字。传入 <paramref name="blockTextCache"/> 时复用块内属性与块定义文字，
+    /// 同一图框多字段扫描时避免重复递归块定义树。
+    /// </summary>
+    public static string ExtractRegionText(
+        Transaction tr,
+        BlockReference blockRef,
+        BlockTableRecord owner,
+        LocalRectangle region,
+        OwnerTextCache? ownerTextCache,
+        BlockReferenceTextCache? blockTextCache)
+    {
         var values = new List<TextCandidate>();
         var inverse = blockRef.BlockTransform.Inverse();
+        var blockLocal = Matrix3d.Identity;
 
-        foreach (ObjectId attributeId in blockRef.AttributeCollection)
+        if (blockTextCache != null)
         {
-            if (!attributeId.IsValid || attributeId.IsErased)
+            AppendCachedCandidates(values, blockTextCache.AttributeCandidates, blockLocal, region);
+        }
+        else
+        {
+            foreach (ObjectId attributeId in blockRef.AttributeCollection)
             {
-                continue;
-            }
-
-            if (tr.GetObject(attributeId, OpenMode.ForRead, false) is AttributeReference attribute)
-            {
-                // 动态块被可见性状态隐藏的属性仍挂在块参照上且保留旧位置，必须跳过。
-                if (!IsEntityVisible(attribute))
+                if (!attributeId.IsValid || attributeId.IsErased)
                 {
                     continue;
                 }
 
-                if (TryGetText(attribute, out var text, out var worldPoint))
+                if (tr.GetObject(attributeId, OpenMode.ForRead, false) is AttributeReference attribute)
                 {
-                    var local = worldPoint.TransformBy(inverse);
-                    if (IsInRegion(attribute, inverse, region, local))
+                    // 动态块被可见性状态隐藏的属性仍挂在块参照上且保留旧位置，必须跳过。
+                    if (!IsEntityVisible(attribute))
                     {
-                        AddText(values, text, local, TextSourcePriority.Attribute);
+                        continue;
+                    }
+
+                    if (TryGetText(attribute, out var text, out var worldPoint))
+                    {
+                        var local = worldPoint.TransformBy(inverse);
+                        if (IsInRegion(attribute, inverse, region, local))
+                        {
+                            AddText(values, text, local, TextSourcePriority.Attribute);
+                        }
                     }
                 }
             }
@@ -346,21 +491,48 @@ public static class CadTextExtractor
             }
         }
 
-        var definition = (BlockTableRecord)tr.GetObject(blockRef.BlockTableRecord, OpenMode.ForRead);
-        CollectDefinitionText(
-            tr,
-            definition,
-            Matrix3d.Identity,
-            region,
-            values,
-            TextSourcePriority.BlockDefinition,
-            new HashSet<ObjectId>(),
-            0);
+        if (blockTextCache != null)
+        {
+            AppendCachedCandidates(values, blockTextCache.DefinitionCandidates, blockLocal, region);
+        }
+        else
+        {
+            var definition = (BlockTableRecord)tr.GetObject(blockRef.BlockTableRecord, OpenMode.ForRead);
+            CollectDefinitionText(
+                tr,
+                definition,
+                Matrix3d.Identity,
+                region,
+                values,
+                TextSourcePriority.BlockDefinition,
+                new HashSet<ObjectId>(),
+                0);
+        }
 
         // 图框块和图签块可能是分开的两个块引用，此时需要检查所有者空间中
         // 其他与字段区域重叠的块引用，确保其中的文字（如日期）不被遗漏。
-        CollectOverlappingBlockText(tr, blockRef, owner, region, values);
+        CollectOverlappingBlockText(tr, blockRef, owner, region, values, ownerTextCache);
 
+        return SelectBestRegionText(values);
+    }
+
+    private static void AppendCachedCandidates(
+        ICollection<TextCandidate> values,
+        IReadOnlyList<TextCandidate> cached,
+        Matrix3d blockLocal,
+        LocalRectangle region)
+    {
+        foreach (var candidate in cached)
+        {
+            if (IsCandidateInRegion(candidate, blockLocal, region, candidate.Point))
+            {
+                values.Add(new TextCandidate(candidate.Text, candidate.Point, candidate.Priority));
+            }
+        }
+    }
+
+    private static string SelectBestRegionText(List<TextCandidate> values)
+    {
         if (values.Count == 0)
         {
             return "";
@@ -598,16 +770,17 @@ public static class CadTextExtractor
 
     /// <summary>
     /// 检查所有者空间中与字段区域重叠的其他块引用（如图框块与图签块分离的情况），
-    /// 将区域变换到对方块内坐标后递归提取文字。
+    /// 将区域变换到对方块内坐标后提取属性与块定义文字。提取逻辑不变，
+    /// 仅用布局级包围盒缓存避免每个字段都遍历整张图、重复求 GeometricExtents。
     /// </summary>
     private static void CollectOverlappingBlockText(
         Transaction tr,
         BlockReference self,
         BlockTableRecord owner,
         LocalRectangle region,
-        ICollection<TextCandidate> values)
+        ICollection<TextCandidate> values,
+        OwnerTextCache? ownerTextCache)
     {
-        // 将字段区域从当前块的局部坐标变换到世界坐标
         var blockTransform = self.BlockTransform;
         var corners = new[]
         {
@@ -621,55 +794,106 @@ public static class CadTextExtractor
         var worldMinY = corners.Min(p => p.Y);
         var worldMaxY = corners.Max(p => p.Y);
 
+        if (ownerTextCache != null)
+        {
+            foreach (var other in ownerTextCache.OverlapBlocks)
+            {
+                if (other.Id == self.ObjectId)
+                {
+                    continue;
+                }
+
+                var otherExtents = other.Extents;
+                if (otherExtents.MaxPoint.X < worldMinX || otherExtents.MinPoint.X > worldMaxX
+                    || otherExtents.MaxPoint.Y < worldMinY || otherExtents.MinPoint.Y > worldMaxY)
+                {
+                    continue;
+                }
+
+                AppendOverlappingBlockText(tr, other.Block, corners, values);
+            }
+
+            return;
+        }
+
         foreach (ObjectId id in owner)
         {
             if (id == self.ObjectId)
+            {
                 continue;
+            }
 
             if (tr.GetObject(id, OpenMode.ForRead, false) is not BlockReference otherBlock)
+            {
                 continue;
+            }
 
             if (!IsEntityVisible(otherBlock))
+            {
                 continue;
+            }
 
-            // 快速剔除：检查两个包围盒是否相交
             Extents3d otherExtents;
-            try { otherExtents = otherBlock.GeometricExtents; }
-            catch { continue; }
+            try
+            {
+                otherExtents = otherBlock.GeometricExtents;
+            }
+            catch
+            {
+                continue;
+            }
 
             if (otherExtents.MaxPoint.X < worldMinX || otherExtents.MinPoint.X > worldMaxX
                 || otherExtents.MaxPoint.Y < worldMinY || otherExtents.MinPoint.Y > worldMaxY)
-                continue;
-
-            // 将世界坐标区域变换到对方块内局部坐标
-            var otherInverse = otherBlock.BlockTransform.Inverse();
-            var localPoints = corners.Select(p => p.TransformBy(otherInverse)).ToArray();
-            var otherLocalRegion = LocalRectangle.FromPoints(
-                localPoints.Min(p => p.X), localPoints.Min(p => p.Y),
-                localPoints.Max(p => p.X), localPoints.Max(p => p.Y));
-
-            // 检查对方块引用自身的属性（如日期是图签块的属性定义）
-            foreach (ObjectId attrId in otherBlock.AttributeCollection)
             {
-                if (!attrId.IsValid || attrId.IsErased)
-                    continue;
-                if (tr.GetObject(attrId, OpenMode.ForRead, false) is AttributeReference attr
-                    && IsEntityVisible(attr)
-                    && TryGetText(attr, out var attrText, out var attrWorldPoint))
+                continue;
+            }
+
+            AppendOverlappingBlockText(tr, otherBlock, corners, values);
+        }
+    }
+
+    /// <summary>
+    /// 从重叠块参照提取属性与块定义文字。块定义树按定义 ID 缓存，多图框共享同一图签定义时只扫一次。
+    /// </summary>
+    private static void AppendOverlappingBlockText(
+        Transaction tr,
+        BlockReference otherBlock,
+        Point3d[] worldCorners,
+        ICollection<TextCandidate> values)
+    {
+        var otherInverse = otherBlock.BlockTransform.Inverse();
+        var localPoints = worldCorners.Select(p => p.TransformBy(otherInverse)).ToArray();
+        var otherLocalRegion = LocalRectangle.FromPoints(
+            localPoints.Min(p => p.X), localPoints.Min(p => p.Y),
+            localPoints.Max(p => p.X), localPoints.Max(p => p.Y));
+
+        foreach (ObjectId attrId in otherBlock.AttributeCollection)
+        {
+            if (!attrId.IsValid || attrId.IsErased)
+            {
+                continue;
+            }
+
+            if (tr.GetObject(attrId, OpenMode.ForRead, false) is AttributeReference attr
+                && IsEntityVisible(attr)
+                && TryGetText(attr, out var attrText, out var attrWorldPoint))
+            {
+                var attrLocal = attrWorldPoint.TransformBy(otherInverse);
+                if (otherLocalRegion.Contains(attrLocal.X, attrLocal.Y))
                 {
-                    var attrLocal = attrWorldPoint.TransformBy(otherInverse);
-                    if (otherLocalRegion.Contains(attrLocal.X, attrLocal.Y))
-                        AddText(values, attrText, attrLocal, TextSourcePriority.Attribute);
+                    AddText(values, attrText, attrLocal, TextSourcePriority.Attribute);
                 }
             }
+        }
 
-            try
-            {
-                var otherDef = (BlockTableRecord)tr.GetObject(otherBlock.BlockTableRecord, OpenMode.ForRead);
-                CollectDefinitionText(tr, otherDef, Matrix3d.Identity, otherLocalRegion, values,
-                    TextSourcePriority.BlockDefinition, new HashSet<ObjectId>(), 0);
-            }
-            catch { }
+        try
+        {
+            var cached = GetOrBuildDefinitionTextCache(tr, otherBlock.BlockTableRecord);
+            AppendCachedCandidates(values, cached, Matrix3d.Identity, otherLocalRegion);
+        }
+        catch
+        {
         }
     }
 
@@ -1022,5 +1246,34 @@ public static class CadTextExtractor
         {
             return false;
         }
+    }
+}
+
+/// <summary>
+/// 一次图框扫描内的复用缓存。不改变提取结果，只避免同一块名、同一块定义、同一外框被重复计算。
+/// </summary>
+internal static class TitleBlockScanCaches
+{
+    internal static bool Active;
+    internal static readonly Dictionary<ObjectId, string> BlockNames = new();
+    internal static readonly Dictionary<ObjectId, List<CadTextExtractor.TextCandidate>> DefinitionTexts = new();
+    internal static readonly Dictionary<ObjectId, (bool Ok, LocalRectangle Frame, BlockFrameSource Source)> Frames = new();
+
+    /// <summary>开始一次扫描，清空上一轮缓存。</summary>
+    internal static void Begin()
+    {
+        Active = true;
+        BlockNames.Clear();
+        DefinitionTexts.Clear();
+        Frames.Clear();
+    }
+
+    /// <summary>结束扫描并释放缓存，避免跨图纸残留。</summary>
+    internal static void End()
+    {
+        Active = false;
+        BlockNames.Clear();
+        DefinitionTexts.Clear();
+        Frames.Clear();
     }
 }

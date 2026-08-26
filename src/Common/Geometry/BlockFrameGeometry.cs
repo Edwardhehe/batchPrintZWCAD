@@ -49,6 +49,14 @@ internal static class BlockFrameGeometry
             return false;
         }
 
+        if (TitleBlockScanCaches.Active
+            && TitleBlockScanCaches.Frames.TryGetValue(rootDefinitionId, out var cached))
+        {
+            frame = cached.Frame;
+            source = cached.Source;
+            return cached.Ok;
+        }
+
         var rectangles = new List<LocalRectangle>();
         var lineExtents = new List<Extents3d>();
         Collect(
@@ -60,32 +68,43 @@ internal static class BlockFrameGeometry
             new HashSet<ObjectId>(),
             depth: 0);
 
+        bool ok;
         if (rectangles.Count > 0)
         {
             frame = rectangles.OrderByDescending(RectangleGeometry.GetActualArea).First();
             source = BlockFrameSource.ClosedRectangle;
-            return frame.HasArea();
+            ok = frame.HasArea();
         }
-
-        if (lineExtents.Count == 0)
+        else if (lineExtents.Count == 0)
         {
-            return false;
+            ok = false;
         }
-
-        var merged = lineExtents[0];
-        for (var index = 1; index < lineExtents.Count; index++)
+        else
         {
-            merged.AddExtents(lineExtents[index]);
+            var merged = lineExtents[0];
+            for (var index = 1; index < lineExtents.Count; index++)
+            {
+                merged.AddExtents(lineExtents[index]);
+            }
+
+            if (!HasValidExtents(merged))
+            {
+                ok = false;
+            }
+            else
+            {
+                frame = CreateRectangleFromExtents(merged);
+                source = BlockFrameSource.LineExtents;
+                ok = true;
+            }
         }
 
-        if (!HasValidExtents(merged))
+        if (TitleBlockScanCaches.Active)
         {
-            return false;
+            TitleBlockScanCaches.Frames[rootDefinitionId] = (ok, frame, source);
         }
 
-        frame = CreateRectangleFromExtents(merged);
-        source = BlockFrameSource.LineExtents;
-        return true;
+        return ok;
     }
 
     private static void Collect(
