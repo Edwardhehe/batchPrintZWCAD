@@ -93,18 +93,21 @@ public sealed class RectangleBatchPlotForm : Form
         BackColor = Color.FromArgb(245, 247, 250);
         var tips = new ToolTip { AutoPopDelay = 8000, InitialDelay = 400, ReshowDelay = 100, ShowAlways = true };
 
+        var actionRowHeight = UiLayout.ButtonHeight() + UiLayout.Scale(6);
+        var settingsRowHeight = UiLayout.ButtonHeight() + UiLayout.Scale(4);
+        var optionsRowHeight = UiLayout.ButtonHeight() + UiLayout.Scale(2);
         var top = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
-            Height = UiLayout.Scale(106),
+            Height = actionRowHeight + settingsRowHeight + optionsRowHeight + UiLayout.Scale(8),
             ColumnCount = 1,
             RowCount = 3,
             Padding = new Padding(UiLayout.Scale(10), UiLayout.Scale(4), UiLayout.Scale(10), UiLayout.Scale(4)),
             BackColor = Color.FromArgb(245, 247, 250)
         };
-        top.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.ButtonHeight() + UiLayout.Scale(3)));
-        top.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.ButtonHeight() + UiLayout.Scale(4)));
-        top.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.ButtonHeight() + UiLayout.Scale(2)));
+        top.RowStyles.Add(new RowStyle(SizeType.Absolute, actionRowHeight));
+        top.RowStyles.Add(new RowStyle(SizeType.Absolute, settingsRowHeight));
+        top.RowStyles.Add(new RowStyle(SizeType.Absolute, optionsRowHeight));
 
         var actions = NewFlow();
         var scanCurrent = UiLayout.CreateButton("扫描当前图", 108);
@@ -122,7 +125,7 @@ public sealed class RectangleBatchPlotForm : Form
             Text = "右键条目可设为不打印、删除或批量改纸张",
             AutoSize = true,
             ForeColor = Color.DimGray,
-            Margin = new Padding(UiLayout.Scale(10), UiLayout.Scale(8), 0, 0)
+            Margin = new Padding(UiLayout.Scale(10), UiLayout.Scale(4), 0, 0)
         });
         tips.SetToolTip(scanCurrent, "扫描当前打开图纸中的全部符合纸张比例的矩形框。");
         tips.SetToolTip(scanWindow, "回到 CAD 框选区域，只识别框内矩形框。");
