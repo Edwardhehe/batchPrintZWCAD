@@ -297,6 +297,7 @@ public static class DirectoryTableGenerator
             "Sequence" => (rowIndex + 1).ToString(),
             "DrawingNumber" => job.DrawingNumber,
             "Title" => job.Title,
+            // 仍复用文件名的加长图规范化（分数/小数），写入 CAD 前由 ToCadDirectoryText 把 ∕ 换成普通 /。
             "PaperName" => FileNameSanitizer.NormalizeLongPaperFraction(
                 OutputPaperNameResolver.Resolve(job, settings.LongPaperSnapToleranceMm),
                 settings.LongPaperNameFormat),
@@ -307,6 +308,17 @@ public static class DirectoryTableGenerator
             "Info2" => job.Info2,
             _ => ""
         } ?? "";
+    }
+
+    /// <summary>
+    /// 把文件名用的除号斜杠 U+2215 换成普通 "/"。CAD 常用字体不含该字符时会显示为问号。
+    /// 只影响写入图纸目录的文字，不改变 PDF/DWG 等输出文件名。
+    /// </summary>
+    /// <param name="value">目录单元格原始文本。</param>
+    /// <returns>可写入 CAD 文字的文本。</returns>
+    private static string ToCadDirectoryText(string value)
+    {
+        return (value ?? "").Replace('\u2215', '/');
     }
 
     private static void DrawGrid(
@@ -401,10 +413,11 @@ public static class DirectoryTableGenerator
             ? new Point3d(left + width / 2.0, centerY, 0)
             : new Point3d(left + horizontalPadding, centerY, 0);
 
+        var cadText = ToCadDirectoryText(text);
         var dbText = new DBText
         {
-            TextString = text ?? "",
-            Height = GetTextHeight(text ?? "", width, rowHeight, settings),
+            TextString = cadText,
+            Height = GetTextHeight(cadText, width, rowHeight, settings),
             WidthFactor = settings.DirectoryTextWidthFactor,
             Position = insertion,
             HorizontalMode = centered ? TextHorizontalMode.TextCenter : TextHorizontalMode.TextLeft,

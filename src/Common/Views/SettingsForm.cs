@@ -37,6 +37,7 @@ public sealed class SettingsForm : Form
     private readonly CheckBox _openOutputDirectoryAfterBatchPrint = new();
     private readonly CheckBox _openMergedPdfAfterMerge = new();
     private readonly CheckBox _generatePrintLog = new();
+    private readonly CheckBox _plotTransparency = new();
     private readonly CheckBox _convertTextToGeometryWhenPlotting = new();
     private readonly ComboBox _directoryColorIndex = new();
     private readonly NumericUpDown _directoryTextHeight = new();
@@ -215,6 +216,14 @@ public sealed class SettingsForm : Form
             _hideFrameBoundaryWhenPlotting,
             "勾选后，正式打印把内容四边各裁 1mm，外框线不再输出；纸张、比例和留白不变。");
 
+        _plotTransparency.Text = "打印透明度";
+        _plotTransparency.AutoSize = true;
+        _plotTransparency.Dock = DockStyle.Fill;
+        var plotTransparencyTip = new ToolTip();
+        plotTransparencyTip.SetToolTip(
+            _plotTransparency,
+            "勾选后按对象透明度输出，对应 CAD 打印对话框中的“打印透明度”；默认开启。");
+
         _generatePrintLog.Text = "生成打印日志";
         _generatePrintLog.AutoSize = true;
         _generatePrintLog.Dock = DockStyle.Fill;
@@ -231,11 +240,12 @@ public sealed class SettingsForm : Form
             _convertTextToGeometryWhenPlotting,
             "勾选后，PDF/DWF 输出会把 TrueType 文字转换为图形轮廓，避免接收方缺少字体；不会炸开或修改原 DWG 文字。PNG/JPG 本身已是图像输出。默认关闭。");
 
-        var plotTable = CreateSettingsTable(4);
+        var plotTable = CreateSettingsTable(5);
         UiLayout.AddRow(plotTable, 0, "", _openExternalDwgForPlot);
         UiLayout.AddRow(plotTable, 1, "", _hideFrameBoundaryWhenPlotting);
-        UiLayout.AddRow(plotTable, 2, "", _generatePrintLog);
-        UiLayout.AddRow(plotTable, 3, "", _convertTextToGeometryWhenPlotting);
+        UiLayout.AddRow(plotTable, 2, "", _plotTransparency);
+        UiLayout.AddRow(plotTable, 3, "", _generatePrintLog);
+        UiLayout.AddRow(plotTable, 4, "", _convertTextToGeometryWhenPlotting);
 
         var outputTable = CreateSettingsTable(1);
         UiLayout.AddRow(outputTable, 0, "", _addSequenceWhenPdfExists);
@@ -1434,6 +1444,7 @@ public sealed class SettingsForm : Form
         _paperTolerance.Value = UiLayout.Clamp(_paperTolerance, settings.PaperMatchToleranceMm);
         _recognizeFourLineRectangleFrames.Checked = settings.RecognizeFourLineRectangleFrames;
         _hideFrameBoundaryWhenPlotting.Checked = settings.HideFrameBoundaryWhenPlotting;
+        _plotTransparency.Checked = settings.PlotTransparency;
         _addSequenceWhenPdfExists.Checked = settings.AddSequenceWhenPdfExists;
         _useFileNameAsPdfBookmark.Checked = settings.UseFileNameAsPdfBookmark;
         _mergePdfByPaperSize.Checked = settings.MergePdfByPaperSize;
@@ -1491,6 +1502,7 @@ public sealed class SettingsForm : Form
         current.PaperMatchToleranceMm = (double)_paperTolerance.Value;
         current.RecognizeFourLineRectangleFrames = _recognizeFourLineRectangleFrames.Checked;
         current.HideFrameBoundaryWhenPlotting = _hideFrameBoundaryWhenPlotting.Checked;
+        current.PlotTransparency = _plotTransparency.Checked;
         current.AddSequenceWhenPdfExists = _addSequenceWhenPdfExists.Checked;
         current.UseFileNameAsPdfBookmark = _useFileNameAsPdfBookmark.Checked;
         current.MergePdfByPaperSize = _mergePdfByPaperSize.Checked;

@@ -1875,6 +1875,7 @@ public sealed class RectangleBatchPlotForm : Form
             _settings.PaperMatchToleranceMm = updated.PaperMatchToleranceMm;
             _settings.RecognizeFourLineRectangleFrames = updated.RecognizeFourLineRectangleFrames;
             _settings.HideFrameBoundaryWhenPlotting = updated.HideFrameBoundaryWhenPlotting;
+            _settings.PlotTransparency = updated.PlotTransparency;
             _settings.GeneratePrintLog = updated.GeneratePrintLog;
             _settings.ConvertTextToGeometryWhenPlotting = updated.ConvertTextToGeometryWhenPlotting;
             _settings.LongPaperSnapToleranceMm = updated.LongPaperSnapToleranceMm;

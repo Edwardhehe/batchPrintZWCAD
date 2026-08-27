@@ -85,6 +85,10 @@ public sealed class AppSettings
     /// 使用插件自有 PDF/DWF 绘图仪时，是否把 TrueType 文字按图形轮廓输出。默认关闭，且不修改 DWG 文字实体。
     /// </summary>
     public bool ConvertTextToGeometryWhenPlotting { get; set; }
+    /// <summary>
+    /// 正式打印时是否输出对象透明度。默认开启，对应 CAD 打印对话框中的“打印透明度”。
+    /// </summary>
+    public bool PlotTransparency { get; set; } = true;
     public bool AddFileNameSequence { get; set; }
     public bool LeavePaperMargin { get; set; }
     public double PaperMarginMm { get; set; } = 1;

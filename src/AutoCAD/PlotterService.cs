@@ -90,7 +90,7 @@ public static class PlotterService
         var oldActive = CadApp.DocumentManager.MdiActiveDocument;
 
         EnsureTextGeometryMode(deviceName, settings.ConvertTextToGeometryWhenPlotting);
-        using var variables = PlotSystemVariables.Apply();
+        using var variables = PlotSystemVariables.Apply(settings.PlotTransparency);
         try
         {
             foreach (var group in jobs.GroupBy(job => GetGroupKey(job, currentDocument, settings)))
@@ -154,7 +154,7 @@ public static class PlotterService
         var shouldClose = doc == null;
         doc ??= OpenDocument(job.SourceFile);
 
-        using var variables = PlotSystemVariables.Apply();
+        using var variables = PlotSystemVariables.Apply(settings.PlotTransparency);
         try
         {
             CadApp.DocumentManager.MdiActiveDocument = doc;
@@ -329,7 +329,8 @@ public static class PlotterService
                 window,
                 deviceName,
                 styleSheet,
-                settings.HideFrameBoundaryWhenPlotting);
+                settings.HideFrameBoundaryWhenPlotting,
+                settings.PlotTransparency);
 
             PrepareOutputFile(job.OutputPath);
             RunPlot(plot.Info, documentName, job.OutputPath, job.DrawingNumber);
@@ -349,17 +350,18 @@ public static class PlotterService
         Extents2d window,
         string deviceName,
         string styleSheet,
-        bool hideOuterFrame)
+        bool hideOuterFrame,
+        bool plotTransparency)
     {
         try
         {
-            return CreateValidatedPlotCore(layout, job, window, deviceName, styleSheet, hideOuterFrame);
+            return CreateValidatedPlotCore(layout, job, window, deviceName, styleSheet, hideOuterFrame, plotTransparency);
         }
         catch (CachedMediaCatalogException)
         {
             // PC3/PMP 可能在 CAD 会话中被更新；仅当缓存目录失效时清缓存并完整读取一次。
             InvalidateMediaCatalog(deviceName);
-            return CreateValidatedPlotCore(layout, job, window, deviceName, styleSheet, hideOuterFrame);
+            return CreateValidatedPlotCore(layout, job, window, deviceName, styleSheet, hideOuterFrame, plotTransparency);
         }
     }
 
@@ -369,7 +371,8 @@ public static class PlotterService
         Extents2d window,
         string deviceName,
         string styleSheet,
-        bool hideOuterFrame)
+        bool hideOuterFrame,
+        bool plotTransparency)
     {
         var validator = PlotSettingsValidator.Current;
         var media = ChooseMedia(validator, layout, deviceName, job, window, out var usedCachedCatalog);
@@ -392,7 +395,8 @@ public static class PlotterService
                     rotation,
                     window,
                     job,
-                    hideOuterFrame);
+                    hideOuterFrame,
+                    plotTransparency);
 
                 var info = new PlotInfo
                 {
@@ -458,7 +462,8 @@ public static class PlotterService
         PlotRotation rotation,
         Extents2d window,
         PlotJob job,
-        bool hideOuterFrame)
+        bool hideOuterFrame,
+        bool plotTransparency)
     {
         try
         {
@@ -505,6 +510,8 @@ public static class PlotterService
         {
             TryApplyHiddenFrameWindow(validator, settings, window, job, deviceName);
         }
+
+        settings.PlotTransparency = plotTransparency;
     }
 
     private static void ConfigurePlotScale(
@@ -1353,7 +1360,8 @@ public static class PlotterService
                 window,
                 deviceName,
                 styleSheet,
-                settings.HideFrameBoundaryWhenPlotting);
+                settings.HideFrameBoundaryWhenPlotting,
+                settings.PlotTransparency);
             RunPreview(plot.Info, documentName);
             tr.Commit();
             WaitForPlotIdle();
@@ -1705,12 +1713,14 @@ public static class PlotterService
         private readonly List<(string Name, object? Value)> _oldValues = new();
         private bool _disposed;
 
-        public static PlotSystemVariables Apply()
+        public static PlotSystemVariables Apply(bool plotTransparency)
         {
             var variables = new PlotSystemVariables();
             variables.Set("BACKGROUNDPLOT", 0);
             variables.Set("PUBLISHCOLLATE", 0);
             variables.Set("PDFSHX", 0);
+            // 2=打印透明度，1=不打印；避免页面设置或 PLOTTRANSPARENCYOVERRIDE 覆盖本次选项。
+            variables.Set("PLOTTRANSPARENCYOVERRIDE", plotTransparency ? 2 : 1);
             return variables;
         }
 

@@ -48,6 +48,7 @@ public static class PlotterService
         var oldActive = CadApp.DocumentManager.MdiActiveDocument;
 
         EnsureTextGeometryMode(deviceName, settings.ConvertTextToGeometryWhenPlotting);
+        using var transparency = PlotTransparencyOverride.Apply(settings.PlotTransparency);
         try
         {
             foreach (var group in jobs.GroupBy(job => GetPlotGroupKey(job, currentDocument, settings)))
@@ -97,6 +98,7 @@ public static class PlotterService
     public static void Plot(PlotJob job, string deviceName, string styleSheet, Document currentDocument, AppSettings settings)
     {
         EnsureTextGeometryMode(deviceName, settings.ConvertTextToGeometryWhenPlotting);
+        using var transparency = PlotTransparencyOverride.Apply(settings.PlotTransparency);
         if (IsCurrentDocumentJob(job, currentDocument))
         {
             using (currentDocument.LockDocument())
@@ -126,6 +128,7 @@ public static class PlotterService
     {
         var settings = AppSettingsStore.Load();
         EnsureTextGeometryMode(deviceName, settings.ConvertTextToGeometryWhenPlotting);
+        using var transparency = PlotTransparencyOverride.Apply(settings.PlotTransparency);
         var oldActive = CadApp.DocumentManager.MdiActiveDocument;
         var doc = IsCurrentDocumentJob(job, currentDocument) ? currentDocument : FindOpenDocument(job.SourceFile);
         var shouldClose = doc == null;
@@ -477,6 +480,8 @@ public static class PlotterService
             {
                 TryApplyHiddenFrameWindow(validator, plotSettings, plotWindow, job);
             }
+
+            plotSettings.PlotTransparency = settings.PlotTransparency;
 
             var plotInfo = new PlotInfo
             {
@@ -860,6 +865,8 @@ public static class PlotterService
             {
                 TryApplyHiddenFrameWindow(validator, plotSettings, plotWindow, job);
             }
+
+            plotSettings.PlotTransparency = singleSettings.PlotTransparency;
 
             var plotInfo = new PlotInfo
             {
@@ -1376,5 +1383,52 @@ public static class PlotterService
         return paperRotation == PlotRotation.Degrees090
             ? PlotRotation.Degrees000
             : PlotRotation.Degrees090;
+    }
+
+    /// <summary>
+    /// 按本次设置覆盖 CAD 的打印透明度系统变量，打印结束后还原。
+    /// 0=跟随页面设置，1=不打印透明度，2=打印透明度。
+    /// </summary>
+    private sealed class PlotTransparencyOverride : IDisposable
+    {
+        private readonly object? _oldValue;
+        private readonly bool _restore;
+        private bool _disposed;
+
+        /// <param name="enabled">是否打印对象透明度。</param>
+        public static PlotTransparencyOverride Apply(bool enabled)
+        {
+            return new PlotTransparencyOverride(enabled);
+        }
+
+        private PlotTransparencyOverride(bool enabled)
+        {
+            try
+            {
+                _oldValue = CadApp.GetSystemVariable("PLOTTRANSPARENCYOVERRIDE");
+                CadApp.SetSystemVariable("PLOTTRANSPARENCYOVERRIDE", enabled ? 2 : 1);
+                _restore = true;
+            }
+            catch
+            {
+            }
+        }
+
+        public void Dispose()
+        {
+            if (_disposed || !_restore)
+            {
+                return;
+            }
+
+            _disposed = true;
+            try
+            {
+                CadApp.SetSystemVariable("PLOTTRANSPARENCYOVERRIDE", _oldValue);
+            }
+            catch
+            {
+            }
+        }
     }
 }
