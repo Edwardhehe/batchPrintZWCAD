@@ -40,6 +40,10 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
             return;
         }
 
+#if ACAD_CORE
+        PluginAssemblyResolver.Register();
+#endif
+
         AcadPlotterInstaller.InstallBundledPlotter();
         // 新用户首次加载时生成软件自有的栅格绘图器，并立即刷新当前 CAD 会话的设备缓存。
         AcadPlotterInstaller.InstallPngPlotter();
@@ -200,7 +204,7 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
         {
             var roots = AutoloadManager.Install();
             MessageBox.Show(
-                "已安装自动加载。\n\n下次启动AutoCAD会自动加载批量打印插件。\n\n写入位置:\n" + string.Join("\n", roots),
+                "已安装自动加载。\n\n仅对当前这套CAD生效，其它版本不会自动加载。\n下次启动当前CAD后会自动加载批量打印插件。\n\n写入位置:\n" + string.Join("\n", roots),
                 "批量打印",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information);
@@ -222,7 +226,7 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
             var removed = AutoloadManager.Uninstall();
             MessageBox.Show(
                 removed > 0
-                    ? "已卸载自动加载。\n\n当前已加载的插件会在本次CAD会话继续可用，关闭CAD后不会再自动加载。"
+                    ? "已卸载自动加载。\n\n仅取消了当前这套CAD的自动加载。当前已加载的插件会在本次会话继续可用，关闭CAD后不会再自动加载。"
                     : "没有找到已安装的自动加载项。",
                 "批量打印",
                 MessageBoxButtons.OK,

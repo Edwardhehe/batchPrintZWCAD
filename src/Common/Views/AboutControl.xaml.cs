@@ -35,6 +35,19 @@ public sealed partial class AboutControl : UserControl
 
     private sealed class AboutViewModel
     {
-        public string VersionText => "V" + typeof(AboutControl).Assembly.GetName().Version?.ToString(3) ?? "";
+        public string VersionText
+        {
+            get
+            {
+                var version = typeof(AboutControl).Assembly.GetName().Version;
+                if (version == null)
+                {
+                    return "";
+                }
+
+                // 修订号为 0 时显示三段，例如 V1.15.6；补丁号显示四段，例如 V1.15.6.1。
+                return version.Revision > 0 ? "V" + version.ToString(4) : "V" + version.ToString(3);
+            }
+        }
     }
 }

@@ -1,4 +1,4 @@
-AutoCAD 批量打印插件 v1.15.6
+﻿AutoCAD 批量打印插件 v1.15.6.1
 
 支持版本：
 - AcadBatchPlot.dll：AutoCAD 2015 ~ 2024，共用同一个 DLL（.NET Framework 4.8）。
@@ -11,8 +11,8 @@ AutoCAD 批量打印插件 v1.15.6
 - 清单预览使用当前选择的输出格式；DWG 拆图不提供打印预览。
 
 安装：
-1. 关闭 AutoCAD。
-2. 解压完整发布包，不要只单独复制 DLL。
+1. 关闭 AutoCAD（任务管理器中确认没有 acad 进程）。
+2. 解压完整发布包，不要只单独复制 DLL。不要用“以管理员身份运行”。
 3. 双击“安装.cmd”。
 4. 重新打开 AutoCAD。
 5. 插件会自动加载，用户以后不需要每次 NETLOAD。
@@ -22,7 +22,7 @@ AutoCAD 批量打印插件 v1.15.6
 卸载：
 1. 关闭 AutoCAD。
 2. 双击“卸载.cmd”。
-3. 卸载只删除自动加载配置和插件文件，不删除图框库、设置和日志。
+3. 卸载会删除注册表自加载、%LOCALAPPDATA%\AcadBatchPlot\Plugin，以及 AutoCAD 2025+ 的 ApplicationPlugins Bundle。不删除图框库、设置和日志。
 
 手动加载：
 仅开发测试或临时试用时才需要 NETLOAD。AutoCAD 2015 ~ 2024 加载 AcadBatchPlot.dll；AutoCAD 2025 ~ 2027 加载 AcadBatchPlot.Core.dll。

@@ -29,6 +29,13 @@ public static class TitleBlockLibraryStore
             }
             catch (Exception primaryError)
             {
+                if (IsJsonAssemblyLoadError(primaryError))
+                {
+                    throw new InvalidOperationException(
+                        "无法加载 Newtonsoft.Json。请确认插件目录中有 Newtonsoft.Json.dll，并关闭天正等可能占用该组件的插件后重试。",
+                        primaryError);
+                }
+
                 var backupPath = path + ".bak";
                 if (File.Exists(backupPath))
                 {
@@ -130,6 +137,29 @@ public static class TitleBlockLibraryStore
     {
         return Math.Abs(region.MaxX - region.MinX) > 1e-6
             && Math.Abs(region.MaxY - region.MinY) > 1e-6;
+    }
+
+    /// <summary>
+    /// 判断异常是否由 Newtonsoft.Json 程序集加载失败引起，避免把缺 DLL / 版本冲突误报成图框库损坏。
+    /// </summary>
+    private static bool IsJsonAssemblyLoadError(Exception error)
+    {
+        for (var current = error; current != null; current = current.InnerException)
+        {
+            var fileName = current is FileLoadException loadError
+                ? loadError.FileName
+                : current is FileNotFoundException missingError
+                    ? missingError.FileName
+                    : null;
+            var text = fileName ?? current.Message;
+            if (!string.IsNullOrWhiteSpace(text)
+                && text.IndexOf("Newtonsoft.Json", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static TitleBlockLibrary Deserialize(string path)

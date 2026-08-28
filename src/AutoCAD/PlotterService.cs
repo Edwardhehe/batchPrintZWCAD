@@ -385,7 +385,7 @@ public static class PlotterService
             var settings = new PlotSettings(layout.ModelType);
             try
             {
-                settings.CopyFrom(layout);
+                // 不 CopyFrom 布局：图纸里保存的系统打印机/Windows 默认机会在拷贝时被 AutoCAD 连接。
                 ConfigurePlotSettings(
                     validator,
                     settings,
@@ -465,16 +465,11 @@ public static class PlotterService
         bool hideOuterFrame,
         bool plotTransparency)
     {
-        try
-        {
-            validator.SetPlotConfigurationName(settings, deviceName, media.UseClosestBySize ? null : media.Name);
-        }
-        catch
-        {
-            validator.SetPlotConfigurationName(settings, deviceName, null);
-        }
-
-        validator.RefreshLists(settings);
+        BindOverridePlotDevice(
+            validator,
+            settings,
+            deviceName,
+            media.UseClosestBySize ? null : media.Name);
         var paperUnit = IsRasterPlotDevice(deviceName)
             ? PlotPaperUnit.Pixels
             : PlotPaperUnit.Millimeters;
@@ -503,6 +498,7 @@ public static class PlotterService
         if (!string.IsNullOrWhiteSpace(styleSheet))
         {
             validator.SetCurrentStyleSheet(settings, styleSheet);
+            settings.PlotPlotStyles = true;
         }
 
         // 比例和留白已按原窗口写入；内退只替换打印窗口，避免 ScaleToFit 把裁切后的内容重新铺满纸面。
@@ -512,6 +508,54 @@ public static class PlotterService
         }
 
         settings.PlotTransparency = plotTransparency;
+    }
+
+    /// <summary>
+    /// 把独立 PlotSettings 绑到插件指定的绘图仪，不读取布局或 Windows 默认打印机。
+    /// unbindFirst 只用于 PMP 刚更新、必须丢掉旧设备缓存的场景。
+    /// </summary>
+    private static void BindOverridePlotDevice(
+        PlotSettingsValidator validator,
+        PlotSettings settings,
+        string deviceName,
+        string? mediaName = null,
+        bool unbindFirst = false)
+    {
+        if (unbindFirst)
+        {
+            TryUnbindPlotDevice(validator, settings);
+        }
+
+        try
+        {
+            validator.SetPlotConfigurationName(settings, deviceName, mediaName);
+        }
+        catch
+        {
+            if (string.IsNullOrWhiteSpace(mediaName))
+            {
+                throw;
+            }
+
+            validator.SetPlotConfigurationName(settings, deviceName, null);
+        }
+
+        validator.RefreshLists(settings);
+    }
+
+    /// <summary>
+    /// 解绑当前 PlotSettings 上的绘图仪。部分 AutoCAD 版本不允许设为 None，失败时由调用方继续绑定目标设备。
+    /// </summary>
+    private static void TryUnbindPlotDevice(PlotSettingsValidator validator, PlotSettings settings)
+    {
+        try
+        {
+            validator.SetPlotConfigurationName(settings, "None", null);
+            validator.RefreshLists(settings);
+        }
+        catch
+        {
+        }
     }
 
     private static void ConfigurePlotScale(
@@ -631,7 +675,7 @@ public static class PlotterService
 
     private static void ResetAndCenterPlot(PlotSettingsValidator validator, PlotSettings settings)
     {
-        // CopyFrom(layout) 可能带入旧偏移；旋转、比例和窗口全部确定后再清零并居中。
+        // PlotInfo 校验可能改写单位和原点；旋转、比例和窗口全部确定后再清零并居中。
         validator.SetPlotCentered(settings, false);
         validator.SetPlotOrigin(settings, Point2d.Origin);
         validator.SetPlotCentered(settings, true);
@@ -792,22 +836,7 @@ public static class PlotterService
 
         usedCache = false;
         using var settings = new PlotSettings(layout.ModelType);
-        settings.CopyFrom(layout);
-        if (forceDeviceReload)
-        {
-            try
-            {
-                validator.SetPlotConfigurationName(settings, "None", null);
-                validator.RefreshLists(settings);
-            }
-            catch
-            {
-                // 某些 AutoCAD 版本不允许对当前布局设置 None；下面仍会重新绑定目标设备。
-            }
-        }
-
-        validator.SetPlotConfigurationName(settings, deviceName, null);
-        validator.RefreshLists(settings);
+        BindOverridePlotDevice(validator, settings, deviceName, unbindFirst: forceDeviceReload);
         var isRaster = IsRasterPlotDevice(deviceName);
         var paperUnit = isRaster ? PlotPaperUnit.Pixels : PlotPaperUnit.Millimeters;
         var dpi = isRaster ? AcadPlotterInstaller.GetRasterDpi(deviceName) : (X: 100d, Y: 100d);

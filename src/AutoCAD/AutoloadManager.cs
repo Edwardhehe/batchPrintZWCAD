@@ -4,15 +4,16 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Security;
+using Autodesk.AutoCAD.DatabaseServices;
 using Microsoft.Win32;
 
 namespace ZwcadBatchPlot;
 
 /// <summary>
-/// AutoCAD 自动加载管理器 — 通过注册表或 Bundle 机制实现插件随 AutoCAD 启动自动加载。
-/// 支持两种模式：
-///   ACAD_CORE（AutoCAD 2025-2027）：通过 ApplicationPlugins Bundle 机制自动加载；
-///   传统 AutoCAD：通过 HKCU\Software\Autodesk\AutoCAD\...\Applications 注册表键实现按需加载。
+/// AutoCAD 自动加载管理器。
+/// 菜单安装/卸载对齐 IFoxCAD：只写入当前正在运行的 AutoCAD 的
+/// <c>UserRegistryProductRootKey\Applications</c>，不扫其它版本。
+/// AutoCAD 2025+ 安装器仍可使用 ApplicationPlugins Bundle；菜单不再写 Bundle，避免 2025-2027 互相加载。
 /// </summary>
 public static class AutoloadManager
 {
@@ -20,133 +21,87 @@ public static class AutoloadManager
     private const string AppKeyName = "AcadBatchPlot";
     /// <summary>注册表中显示的应用描述</summary>
     private const string AppDescription = "AutoCAD批量打印插件";
+#if ACAD_CORE
     /// <summary>AutoCAD 注册表根路径</summary>
     private const string AcadRoot = @"Software\Autodesk\AutoCAD";
     /// <summary>ApplicationPlugins Bundle 目录名</summary>
     private const string BundleName = "AcadBatchPlot.bundle";
+#endif
 
     /// <summary>当前 DLL 的完整路径</summary>
     public static string CurrentDllPath => Assembly.GetExecutingAssembly().Location;
 
     /// <summary>
-    /// 安装自动加载。
-    /// 传统模式：在注册表 Applications 下写入 LOADER / LOADCTRLS / MANAGED 等键值；
-    /// Core 模式：将 DLL 及依赖复制到 %AppData%/Autodesk/ApplicationPlugins/ 下的 Bundle 目录。
+    /// 安装自动加载：仅对当前正在运行的 AutoCAD 写入 LOADER / LOADCTRLS / MANAGED。
     /// </summary>
     /// <param name="dllPath">可选，指定要注册的 DLL 路径；为空则使用当前程序集路径</param>
     /// <returns>注册到的 Applications 根路径列表</returns>
     public static IReadOnlyList<string> Install(string? dllPath = null)
     {
-#if ACAD_CORE
-        // AutoCAD 2025-2027 Core 模式：通过 Bundle 机制安装
-        var bundlePath = InstallCoreBundle(dllPath);
-        return new[] { bundlePath };
-#else
-        // 传统 AutoCAD：通过注册表 Applications 键实现自加载
         dllPath = string.IsNullOrWhiteSpace(dllPath) ? CurrentDllPath : Path.GetFullPath(dllPath);
-        // 扫描所有 AutoCAD 版本的 Applications 注册表路径
-        var roots = GetApplicationRoots().ToList();
-        if (roots.Count == 0)
+        var applicationsRoot = GetCurrentCadApplicationsRoot(createIfMissing: true)
+            ?? throw new InvalidOperationException("未找到当前AutoCAD自加载注册表位置。请先启动一次AutoCAD。");
+
+        if (!WriteAutoloadKey(applicationsRoot, dllPath))
         {
-            throw new InvalidOperationException("未找到AutoCAD自加载注册表位置。请先启动一次AutoCAD。");
+            throw new InvalidOperationException("无法写入当前AutoCAD的自动加载注册表项。");
         }
 
-        // 在每个版本的 Applications 下写入自加载注册表项
-        foreach (var applicationsRoot in roots)
-        {
-            using var key = Registry.CurrentUser.CreateSubKey(applicationsRoot + "\\" + AppKeyName);
-            if (key == null)
-            {
-                continue;
-            }
-
-            // DESCRIPTION: 插件描述
-            key.SetValue("DESCRIPTION", AppDescription, RegistryValueKind.String);
-            // LOADCTRLS: 2 = 在 AutoCAD 启动时加载
-            key.SetValue("LOADCTRLS", 2, RegistryValueKind.DWord);
-            // LOADER: 要加载的 DLL 路径
-            key.SetValue("LOADER", dllPath, RegistryValueKind.String);
-            // MANAGED: 1 = .NET 托管程序集
-            key.SetValue("MANAGED", 1, RegistryValueKind.DWord);
-        }
-
-        return roots;
-#endif
+        return new[] { applicationsRoot };
     }
 
     /// <summary>
-    /// 卸载自动加载。
-    /// Core 模式：删除 Bundle 目录下的 PackageContents.xml 并清理整个 Bundle；
-    /// 传统模式：遍历所有 AutoCAD 版本，删除 Applications 下的注册表子键。
+    /// 卸载自动加载：仅删除当前正在运行的 AutoCAD 下的注册表子键。
     /// </summary>
-    /// <returns>成功清理的注册表项或文件数量</returns>
+    /// <returns>成功清理的注册表项数量</returns>
     public static int Uninstall()
     {
-#if ACAD_CORE
-        var removed = 0;
-        var bundlePath = GetBundlePath();
-        if (Directory.Exists(bundlePath))
+        var applicationsRoot = GetCurrentCadApplicationsRoot(createIfMissing: false);
+        if (applicationsRoot == null)
         {
-            removed += DisableAndDeleteCoreBundle(bundlePath);
+            return 0;
         }
 
-        // 同时清理可能残留的传统注册表项
-        removed += RemoveRegistryAutoloadEntries();
-        return removed;
-#else
-        // 遍历所有 AutoCAD 版本的 Applications 路径，删除自加载子键
-        var removed = 0;
-        foreach (var applicationsRoot in GetApplicationRoots())
+        using var parent = Registry.CurrentUser.OpenSubKey(applicationsRoot, writable: true);
+        if (parent == null)
         {
-            using var parent = Registry.CurrentUser.OpenSubKey(applicationsRoot, writable: true);
-            if (parent == null)
-            {
-                continue;
-            }
-
-            try
-            {
-                parent.DeleteSubKeyTree(AppKeyName, throwOnMissingSubKey: false);
-                removed++;
-            }
-            catch
-            {
-            }
+            return 0;
         }
 
-        return removed;
-#endif
+        try
+        {
+            parent.DeleteSubKeyTree(AppKeyName, throwOnMissingSubKey: false);
+            return 1;
+        }
+        catch
+        {
+            return 0;
+        }
     }
 
     /// <summary>
-    /// 检测自动加载是否已安装。
-    /// Core 模式：检查 Bundle 目录下是否存在 PackageContents.xml；
-    /// 传统模式：检查注册表 Applications 下是否存在 LOADER 值。
+    /// 检测当前 AutoCAD 是否已安装自动加载。
     /// </summary>
     /// <param name="dllPath">输出已注册的 DLL 路径</param>
     /// <returns>是否已安装自动加载</returns>
     public static bool IsInstalled(out string dllPath)
     {
-#if ACAD_CORE
-        var bundlePath = GetBundlePath();
-        var packageContents = Path.Combine(bundlePath, "PackageContents.xml");
-        dllPath = packageContents;
-        return File.Exists(packageContents);
-#else
         dllPath = "";
-        foreach (var applicationsRoot in GetApplicationRoots())
+        var applicationsRoot = GetCurrentCadApplicationsRoot(createIfMissing: false);
+        if (applicationsRoot == null)
         {
-            using var key = Registry.CurrentUser.OpenSubKey(applicationsRoot + "\\" + AppKeyName);
-            var loader = key?.GetValue("LOADER")?.ToString() ?? "";
-            if (!string.IsNullOrWhiteSpace(loader))
-            {
-                dllPath = loader;
-                return true;
-            }
+            return false;
         }
 
-        return false;
-#endif
+        using var key = Registry.CurrentUser.OpenSubKey(applicationsRoot + "\\" + AppKeyName);
+        var loader = key?.GetValue("LOADER")?.ToString() ?? "";
+        if (string.IsNullOrWhiteSpace(loader))
+        {
+            return false;
+        }
+
+        dllPath = loader;
+        return true;
     }
 
 #if ACAD_CORE
@@ -247,7 +202,7 @@ public static class AutoloadManager
     {
         var escapedInstallFolderName = SecurityElement.Escape(installFolderName);
         return $@"<?xml version=""1.0"" encoding=""utf-8""?>
-<ApplicationPackage SchemaVersion=""1.0"" AutodeskProduct=""AutoCAD"" Name=""LA批量打印"" AppVersion=""1.15.6"" ProductCode=""{{7f2f2f2d-78d1-4df0-8c5d-acadba7c0011}}"" Description=""AutoCAD批量打印插件"">
+<ApplicationPackage SchemaVersion=""1.0"" AutodeskProduct=""AutoCAD"" Name=""LA批量打印"" AppVersion=""1.15.6.1"" ProductCode=""{{7f2f2f2d-78d1-4df0-8c5d-acadba7c0011}}"" Description=""AutoCAD批量打印插件"">
   <CompanyDetails Name=""lihao"" />
   <Components>
     <ComponentEntry AppName=""AcadBatchPlot"" AppType="".Net"" ModuleName=""./Contents/{escapedInstallFolderName}/{SecurityElement.Escape(dllName)}"" LoadOnAutoCADStartup=""True"" LoadOnCommandInvocation=""True"">
@@ -429,46 +384,70 @@ ID_ZBP_RELOAD_MENU [刷新菜单]ZBP_RELOAD_MENU
 #endif
 
     /// <summary>
-    /// 枚举所有已安装 AutoCAD 版本的 Applications 注册表路径。
-    /// 注册表结构：HKCU\Software\Autodesk\AutoCAD\R{version}\ACAD-{product}:{locale}\Applications
+    /// 获取当前正在运行的 AutoCAD 的 Applications 路径（IFoxCAD <c>GetAcAppKey</c> 写法）。
     /// </summary>
-    private static IEnumerable<string> GetApplicationRoots()
+    /// <param name="createIfMissing">为 true 时创建尚不存在的 Applications</param>
+    /// <returns>HKCU 相对路径；无法定位当前 CAD 时返回 null</returns>
+    private static string? GetCurrentCadApplicationsRoot(bool createIfMissing)
     {
-        using var root = Registry.CurrentUser.OpenSubKey(AcadRoot);
-        if (root == null)
+        var productRoot = HostApplicationServices.Current?.UserRegistryProductRootKey;
+        if (string.IsNullOrWhiteSpace(productRoot))
         {
-            yield break;
+            return null;
         }
 
-        // 注册表结构：
-        // HKCU\Software\Autodesk\AutoCAD\R{版本号}\ACAD-{产品}:{语言}\Applications
-        foreach (var version in root.GetSubKeyNames().OrderByDescending(x => x, StringComparer.OrdinalIgnoreCase))
+        productRoot = NormalizeHkcuRelativePath(productRoot!);
+        if (string.IsNullOrWhiteSpace(productRoot))
         {
-            if (!version.StartsWith("R", StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            using var versionKey = root.OpenSubKey(version);
-            if (versionKey == null)
-            {
-                continue;
-            }
-
-            foreach (var profile in versionKey.GetSubKeyNames().OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
-            {
-                if (!profile.StartsWith("ACAD-", StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                var applicationsPath = AcadRoot + "\\" + version + "\\" + profile + "\\Applications";
-                using var applications = Registry.CurrentUser.OpenSubKey(applicationsPath);
-                if (applications != null)
-                {
-                    yield return applicationsPath;
-                }
-            }
+            return null;
         }
+
+        var applicationsPath = productRoot + "\\Applications";
+        if (createIfMissing)
+        {
+            using var created = Registry.CurrentUser.CreateSubKey(applicationsPath);
+            return created != null ? applicationsPath : null;
+        }
+
+        using var existing = Registry.CurrentUser.OpenSubKey(applicationsPath);
+        return existing != null ? applicationsPath : null;
+    }
+
+    /// <summary>
+    /// 在指定 Applications 根下写入当前插件的 DemandLoad 键值。
+    /// </summary>
+    /// <param name="applicationsRoot">Applications 注册表路径</param>
+    /// <param name="dllPath">LOADER 指向的 DLL</param>
+    /// <returns>是否写入成功</returns>
+    private static bool WriteAutoloadKey(string applicationsRoot, string dllPath)
+    {
+        using var key = Registry.CurrentUser.CreateSubKey(applicationsRoot + "\\" + AppKeyName);
+        if (key == null)
+        {
+            return false;
+        }
+
+        key.SetValue("DESCRIPTION", AppDescription, RegistryValueKind.String);
+        key.SetValue("LOADCTRLS", 2, RegistryValueKind.DWord);
+        key.SetValue("LOADER", dllPath, RegistryValueKind.String);
+        key.SetValue("MANAGED", 1, RegistryValueKind.DWord);
+        return true;
+    }
+
+    /// <summary>
+    /// 将 <c>UserRegistryProductRootKey</c> 规范为 HKCU 相对路径。
+    /// </summary>
+    /// <param name="path">CAD 返回的产品根路径</param>
+    /// <returns>不含 HKCU 前缀的相对路径</returns>
+    private static string NormalizeHkcuRelativePath(string path)
+    {
+        var normalized = path.Replace('/', '\\').Trim('\\');
+        const string hkcuPrefix = @"HKEY_CURRENT_USER\";
+        if (normalized.StartsWith(hkcuPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = normalized.Substring(hkcuPrefix.Length).Trim('\\');
+        }
+
+        return normalized;
     }
 }
