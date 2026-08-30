@@ -6,10 +6,10 @@
   AutoCAD2015-2024\       — AutoCAD 2015-2024 x64，共用 AcadBatchPlot.dll
   AutoCAD2025-2027\       — AutoCAD 2025-2027 x64，共用 AcadBatchPlot.Core.dll
 
-安装：
-  1. 关闭 CAD，解压完整发布包。
-  2. 双击包内“安装.cmd”。
-  3. 重新打开 CAD，使用“批量打印”菜单；也可通过 NETLOAD 手动加载对应 DLL。
+安装（官方推荐）：
+  1. 解压完整发布包到固定目录，不要删除或移动。
+  2. 打开 CAD，执行 NETLOAD，选择对应 DLL。
+  3. 点击菜单“批量打印”→“安装自动加载”。以后启动当前这套 CAD 会自动加载。
 
 主要功能：
 

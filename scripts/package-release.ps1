@@ -92,10 +92,10 @@ function Add-ReleasePackage {
     $packageRoot = Join-Path $stagingRoot $FolderName
     Copy-ReleaseTree -Source $BuildOutput -Destination $packageRoot
 
-    foreach ($fileName in @('install.ps1', 'uninstall.ps1', '安装.cmd', '卸载.cmd', '使用说明.txt')) {
+    foreach ($fileName in @('使用说明.txt')) {
         $sourceFile = Join-Path $InstallerSource $fileName
         if (-not (Test-Path -LiteralPath $sourceFile)) {
-            throw "Installer file was not found: $sourceFile"
+            throw "Package notes file was not found: $sourceFile"
         }
         Copy-Item -LiteralPath $sourceFile -Destination (Join-Path $packageRoot $fileName) -Force
     }

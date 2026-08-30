@@ -43,7 +43,7 @@ AutoCAD 2015 ~ 2024 全系列共用同一个 `AcadBatchPlot.dll`，使用 .NET F
 - 不打印外边框：正式打印时按纸面四边各内退 1mm 裁切内容，不把图框临时移到不打印层。
 - 图框库去重：删除图框后自动记录已删除块名，防止从 ZWCAD 图框库重新导入。
 - 快捷键设置：为常用命令设置简化命令别名（如把"批量打印(选图框块)"简化为 `ZBP`），写入 CAD 的 PGP 文件，执行 REINIT 或重启 CAD 后生效，启动时自动恢复。
-- 自动加载：可安装为中望 CAD 启动自动加载，也支持卸载。
+- 自动加载：NETLOAD 后可通过菜单为当前这套 CAD 安装启动自动加载，也支持卸载。
 - 菜单栏集成：插件只创建"批量打印"菜单栏入口，不再创建浮动小工具栏。
 - 文字转图形：常规设置可选择把 PDF/DWF 中的 TrueType 文字按图形输出，避免接收方缺少字体；默认关闭且不修改 DWG 文字。
 - 日志总开关：所有打印、拆图、扫描和图框诊断日志统一受“生成打印日志”控制，默认关闭。
@@ -51,28 +51,22 @@ AutoCAD 2015 ~ 2024 全系列共用同一个 `AcadBatchPlot.dll`，使用 .NET F
 
 ## 使用方式
 
-### 方式一：使用发布包
+官方推荐：解压后用 `NETLOAD` 加载，再点击菜单「安装自动加载」。
 
-1. 下载 Release 里对应 CAD 版本的 zip 包。
-2. 解压后关闭 CAD。
-3. 双击 `安装.cmd`。
-4. 重新打开 CAD，菜单栏会出现"批量打印"。
-
-卸载时关闭 CAD，双击 `卸载.cmd`。
-
-### 方式二：手动加载
-
-在 CAD 中执行 `NETLOAD`，选择编译后的 DLL：
-
-- 中望 CAD：`BatchPlotter.dll`
-- AutoCAD 2015 ~ 2024：`AcadBatchPlot.dll`
-- AutoCAD 2025 ~ 2027：`AcadBatchPlot.Core.dll`
+1. 下载 Release 里对应 CAD 版本的 zip 包，解压到固定目录，不要删除或移动。
+2. 打开 CAD，执行 `NETLOAD`，选择对应 DLL：
+   - 中望 CAD：`BatchPlotter.dll`
+   - AutoCAD 2015 ~ 2024：`AcadBatchPlot.dll`
+   - AutoCAD 2025 ~ 2027：`AcadBatchPlot.Core.dll`
+3. 点击菜单「批量打印」→「安装自动加载」。以后启动当前这套 CAD 会自动加载，无需再 `NETLOAD`。
 
 如果已经加载过旧版本，建议重启 CAD 后再加载新 DLL；菜单会随插件加载自动重建。
 
+卸载时打开 CAD，点击菜单「批量打印」→「卸载自动加载」。当前会话插件仍可用，关闭 CAD 后不再自动加载；解压目录可自行删除。
+
 ### AutoCAD 发布包
 
-AutoCAD 版本请下载与本机 AutoCAD 年份对应的发布包，解压后关闭 AutoCAD，双击 `安装.cmd`。安装脚本会复制插件文件、写入自动加载注册表项，并保留 `卸载.cmd` 供以后卸载。安装成功后用户以后不需要每次 `NETLOAD`。
+AutoCAD 版本请下载与本机 AutoCAD 年份对应的发布包，解压后 `NETLOAD` 对应 DLL，再点击「安装自动加载」。
 
 - AutoCAD 2015 ~ 2024：使用 `LA批打印-AutoCAD2015-2024-*.zip`。
 - AutoCAD 2025 ~ 2027：使用 `LA批打印-AutoCAD2025-2027-*.zip`。

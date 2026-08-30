@@ -10,25 +10,20 @@
 - PNG/JPG 使用插件自有 LA_png / LA_jpg 设备，不使用 AutoCAD 自带设备兜底。
 - 清单预览使用当前选择的输出格式；DWG 拆图不提供打印预览。
 
-安装：
-1. 关闭 AutoCAD（任务管理器中确认没有 acad 进程）。
-2. 解压完整发布包，不要只单独复制 DLL。不要用“以管理员身份运行”。
-3. 双击“安装.cmd”。
-4. 重新打开 AutoCAD。
-5. 插件会自动加载，用户以后不需要每次 NETLOAD。
-6. 菜单栏通常会出现“批量打印”；如果未显示，可执行 ZBP_SHOW_PANEL 打开主界面。
+安装（官方推荐）：
+1. 把本目录解压到固定位置，不要删除或移动。
+2. 打开 AutoCAD，命令行输入 NETLOAD。
+3. AutoCAD 2015 ~ 2024 选择 AcadBatchPlot.dll；AutoCAD 2025 ~ 2027 选择 AcadBatchPlot.Core.dll。
+4. 点击菜单「批量打印」→「安装自动加载」。
+5. 以后启动当前这套 AutoCAD 会自动加载，无需再 NETLOAD。
+6. 菜单栏通常会出现「批量打印」；如果未显示，可执行 ZBP_SHOW_PANEL 打开主界面。
 7. 首次打开批量打印窗口时，插件会自动安装或修复 LA_pdf、LA_png、LA_jpg、LA_dwf 绘图仪。
 
 卸载：
-1. 关闭 AutoCAD。
-2. 双击“卸载.cmd”。
-3. 卸载会删除注册表自加载、%LOCALAPPDATA%\AcadBatchPlot\Plugin，以及 AutoCAD 2025+ 的 ApplicationPlugins Bundle。不删除图框库、设置和日志。
-
-手动加载：
-仅开发测试或临时试用时才需要 NETLOAD。AutoCAD 2015 ~ 2024 加载 AcadBatchPlot.dll；AutoCAD 2025 ~ 2027 加载 AcadBatchPlot.Core.dll。
+1. 打开 AutoCAD。
+2. 点击菜单「批量打印」→「卸载自动加载」。
+3. 当前会话插件仍可用；关闭 CAD 后不再自动加载。解压目录可自行删除。
+4. 卸载不会删除图框库、设置和日志。
 
 用户数据位置：
 %APPDATA%\AcadBatchPlot
-
-插件安装位置：
-%LOCALAPPDATA%\AcadBatchPlot\Plugin

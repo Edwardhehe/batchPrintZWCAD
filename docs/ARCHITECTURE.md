@@ -985,14 +985,10 @@ LA批量打印/
 │   ├── package-release.ps1          ← 本地发布目录与 ZIP 打包
 │   └── generate-zwcad-plotter.ps1   ← ZWCAD 绘图仪配置生成
 │
-├── installer/                       ← ZWCAD 用户安装包
-│   ├── install.ps1 / uninstall.ps1
-│   ├── 安装.cmd / 卸载.cmd
+├── installer/                       ← ZWCAD 发布包说明（NETLOAD 后菜单安装自动加载）
 │   └── 使用说明.txt
 │
-├── installer_acad/                  ← AutoCAD 用户安装包
-│   ├── install.ps1 / uninstall.ps1
-│   ├── 安装.cmd / 卸载.cmd
+├── installer_acad/                  ← AutoCAD 发布包说明（NETLOAD 后菜单安装自动加载）
 │   └── 使用说明.txt
 │
 ├── release/                         ← 本地发布目录（不纳入 Git）
