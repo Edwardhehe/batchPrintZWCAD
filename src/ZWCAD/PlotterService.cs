@@ -433,6 +433,7 @@ public static class PlotterService
             using var tr = db.TransactionManager.StartTransaction();
             var layout = FindLayoutForJob(tr, db, job);
             using var plotSettings = new PlotSettings(layout.ModelType);
+            plotSettings.CopyFrom(layout);
             var plotWindow = GetPlotWindow(job, plotDocument);
 
             var validator = PlotSettingsValidator.Current;
@@ -443,12 +444,14 @@ public static class PlotterService
             if (media == null && HasCachedMediaNames(deviceName, layout.ModelType))
             {
                 // 已有同一 PC5/PMP 的纸张目录时，只绑定设备，不再卸载设备和刷新全部列表。
-                BindOverridePlotDevice(validator, plotSettings, deviceName, unbindFirst: false, refreshLists: false);
+                validator.SetPlotConfigurationName(plotSettings, deviceName, null);
             }
             else if (media == null)
             {
                 // 首次使用或配置文件变化后强制重新读取 PMP，随后缓存纸张目录。
-                BindOverridePlotDevice(validator, plotSettings, deviceName, unbindFirst: true, refreshLists: true);
+                validator.SetPlotConfigurationName(plotSettings, "None", null);
+                validator.SetPlotConfigurationName(plotSettings, deviceName, null);
+                validator.RefreshLists(plotSettings);
             }
             TrySetPlotPaperUnits(validator, plotSettings, PlotPaperUnit.Millimeters);
 
@@ -463,7 +466,10 @@ public static class PlotterService
 
             validator.SetCanonicalMediaName(plotSettings, media.Name);
             EnsureExactMediaSize(plotSettings, job);
-            ApplyStyleSheet(validator, plotSettings, styleSheet);
+            if (!string.IsNullOrWhiteSpace(styleSheet))
+            {
+                validator.SetCurrentStyleSheet(plotSettings, styleSheet);
+            }
 
             validator.SetPlotWindowArea(plotSettings, plotWindow);
             validator.SetPlotType(plotSettings, ZwSoft.ZwCAD.DatabaseServices.PlotType.Window);
@@ -523,46 +529,6 @@ public static class PlotterService
 
         throw new InvalidOperationException(
             $"未找到目标布局“{job.SpaceName}”。可用布局: {string.Join(", ", availableLayouts)}。请重新扫描图纸。");
-    }
-
-    /// <summary>
-    /// 把独立 PlotSettings 绑到插件指定的绘图仪，不 CopyFrom 布局页面设置，
-    /// 避免连接图纸里保存的系统打印机或 Windows 默认打印机。
-    /// </summary>
-    private static void BindOverridePlotDevice(
-        PlotSettingsValidator validator,
-        PlotSettings settings,
-        string deviceName,
-        bool unbindFirst,
-        bool refreshLists)
-    {
-        if (unbindFirst)
-        {
-            validator.SetPlotConfigurationName(settings, "None", null);
-        }
-
-        validator.SetPlotConfigurationName(settings, deviceName, null);
-        if (refreshLists)
-        {
-            validator.RefreshLists(settings);
-        }
-    }
-
-    /// <summary>
-    /// 写入打印样式表。独立 PlotSettings 默认不启用按样式打印，必须显式打开，否则 CTB 不生效。
-    /// </summary>
-    private static void ApplyStyleSheet(
-        PlotSettingsValidator validator,
-        PlotSettings settings,
-        string styleSheet)
-    {
-        if (string.IsNullOrWhiteSpace(styleSheet))
-        {
-            return;
-        }
-
-        validator.SetCurrentStyleSheet(settings, styleSheet);
-        settings.PlotPlotStyles = true;
     }
 
     private static void ConfigurePlotScale(
@@ -855,6 +821,7 @@ public static class PlotterService
             var singleSettings = AppSettingsStore.Load();
             var layout = FindLayoutForJob(tr, db, job);
             using var plotSettings = new PlotSettings(layout.ModelType);
+            plotSettings.CopyFrom(layout);
             var plotWindow = GetPlotWindow(job, plotDocument);
 
             var validator = PlotSettingsValidator.Current;
@@ -865,12 +832,14 @@ public static class PlotterService
             if (media == null && HasCachedMediaNames(deviceName, layout.ModelType))
             {
                 // 已有同一 PC5/PMP 的纸张目录时，只绑定设备，不再卸载设备和刷新全部列表。
-                BindOverridePlotDevice(validator, plotSettings, deviceName, unbindFirst: false, refreshLists: false);
+                validator.SetPlotConfigurationName(plotSettings, deviceName, null);
             }
             else if (media == null)
             {
                 // 首次使用或配置文件变化后强制重新读取 PMP，随后缓存纸张目录。
-                BindOverridePlotDevice(validator, plotSettings, deviceName, unbindFirst: true, refreshLists: true);
+                validator.SetPlotConfigurationName(plotSettings, "None", null);
+                validator.SetPlotConfigurationName(plotSettings, deviceName, null);
+                validator.RefreshLists(plotSettings);
             }
             TrySetPlotPaperUnits(validator, plotSettings, PlotPaperUnit.Millimeters);
 
@@ -882,7 +851,10 @@ public static class PlotterService
 
             validator.SetCanonicalMediaName(plotSettings, media.Name);
             EnsureExactMediaSize(plotSettings, job);
-            ApplyStyleSheet(validator, plotSettings, styleSheet);
+            if (!string.IsNullOrWhiteSpace(styleSheet))
+            {
+                validator.SetCurrentStyleSheet(plotSettings, styleSheet);
+            }
 
             validator.SetPlotWindowArea(plotSettings, plotWindow);
             validator.SetPlotType(plotSettings, ZwSoft.ZwCAD.DatabaseServices.PlotType.Window);
@@ -1193,12 +1165,10 @@ public static class PlotterService
         bool modelType)
     {
         // 先只重绑设备并读取当前列表；只有新 PMP 尚未可见时，调用方才回退到完整 RefreshLists。
-        BindOverridePlotDevice(
-            validator,
-            plotSettings,
-            deviceName,
-            unbindFirst: job.CustomPaperWasAdded,
-            refreshLists: false);
+        if (job.CustomPaperWasAdded)
+            validator.SetPlotConfigurationName(plotSettings, "None", null);
+
+        validator.SetPlotConfigurationName(plotSettings, deviceName, null);
         TrySetPlotPaperUnits(validator, plotSettings, PlotPaperUnit.Millimeters);
         var names = validator.GetCanonicalMediaNameList(plotSettings).Cast<string>().ToList();
         var media = SelectMediaFromNames(names, job, settings, deviceName);

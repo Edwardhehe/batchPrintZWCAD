@@ -385,7 +385,7 @@ public static class PlotterService
             var settings = new PlotSettings(layout.ModelType);
             try
             {
-                // 不 CopyFrom 布局：图纸里保存的系统打印机/Windows 默认机会在拷贝时被 AutoCAD 连接。
+                settings.CopyFrom(layout);
                 ConfigurePlotSettings(
                     validator,
                     settings,
@@ -409,9 +409,20 @@ public static class PlotterService
                     MediaMatchingPolicy = MatchingPolicy.MatchEnabled
                 }.Validate(info);
 
-                if (job.RequireExactPaperSize
+                if (IsRasterPlotDevice(deviceName))
+                {
+                    // 窗口与 PDF 相同；问题在校验阶段：MatchEnabled 常把 PNG/JPG 的「布满图纸」
+                    // 改成错误自定义比例（对话框可见 1 pixel = 25.4），结果大白纸上内容极小。
+                    // 这里在校验后强制恢复 Window + 比例，再校验一次写入 ValidatedSettings。
+                    ReassertRasterFitSettings(
+                        validator, settings, window, job, deviceName, hideOuterFrame);
+                    new PlotInfoValidator
+                    {
+                        MediaMatchingPolicy = MatchingPolicy.MatchEnabled
+                    }.Validate(info);
+                }
+                else if (job.RequireExactPaperSize
                     && job.UseExactWindowScale
-                    && !IsRasterPlotDevice(deviceName)
                     && settings.PlotPaperUnits == PlotPaperUnit.Inches)
                 {
                     // AutoCAD 2024 会在 PlotInfo 校验阶段把部分毫米自定义介质重新匹配为英寸介质。
@@ -465,11 +476,16 @@ public static class PlotterService
         bool hideOuterFrame,
         bool plotTransparency)
     {
-        BindOverridePlotDevice(
-            validator,
-            settings,
-            deviceName,
-            media.UseClosestBySize ? null : media.Name);
+        try
+        {
+            validator.SetPlotConfigurationName(settings, deviceName, media.UseClosestBySize ? null : media.Name);
+        }
+        catch
+        {
+            validator.SetPlotConfigurationName(settings, deviceName, null);
+        }
+
+        validator.RefreshLists(settings);
         var paperUnit = IsRasterPlotDevice(deviceName)
             ? PlotPaperUnit.Pixels
             : PlotPaperUnit.Millimeters;
@@ -498,7 +514,6 @@ public static class PlotterService
         if (!string.IsNullOrWhiteSpace(styleSheet))
         {
             validator.SetCurrentStyleSheet(settings, styleSheet);
-            settings.PlotPlotStyles = true;
         }
 
         // 比例和留白已按原窗口写入；内退只替换打印窗口，避免 ScaleToFit 把裁切后的内容重新铺满纸面。
@@ -508,50 +523,44 @@ public static class PlotterService
         }
 
         settings.PlotTransparency = plotTransparency;
+        if (IsRasterPlotDevice(deviceName))
+        {
+            // CopyFrom(layout) 会带入「按显示」着色；栅格驱动按显示投影时，轴测画面会打成倾斜小图。
+            // PDF 矢量输出不受此影响。PNG/JPG 固定线框，与窗口正交打印一致。
+            try
+            {
+                settings.ShadePlot = PlotSettingsShadePlotType.Wireframe;
+            }
+            catch
+            {
+            }
+        }
     }
 
     /// <summary>
-    /// 把独立 PlotSettings 绑到插件指定的绘图仪，不读取布局或 Windows 默认打印机。
-    /// unbindFirst 只用于 PMP 刚更新、必须丢掉旧设备缓存的场景。
+    /// 栅格设备在 PlotInfo 校验后重申 Window 与比例，避免 ValidatedSettings 丢掉「布满图纸」。
     /// </summary>
-    private static void BindOverridePlotDevice(
+    private static void ReassertRasterFitSettings(
         PlotSettingsValidator validator,
         PlotSettings settings,
+        Extents2d window,
+        PlotJob job,
         string deviceName,
-        string? mediaName = null,
-        bool unbindFirst = false)
+        bool hideOuterFrame)
     {
-        if (unbindFirst)
+        validator.SetPlotPaperUnits(settings, PlotPaperUnit.Pixels);
+        validator.SetPlotWindowArea(settings, window);
+        validator.SetPlotType(settings, Autodesk.AutoCAD.DatabaseServices.PlotType.Window);
+        ConfigurePlotScale(validator, settings, window, job, deviceName, hideOuterFrame);
+        if (hideOuterFrame)
         {
-            TryUnbindPlotDevice(validator, settings);
+            TryApplyHiddenFrameWindow(validator, settings, window, job, deviceName);
         }
 
+        ResetAndCenterPlot(validator, settings);
         try
         {
-            validator.SetPlotConfigurationName(settings, deviceName, mediaName);
-        }
-        catch
-        {
-            if (string.IsNullOrWhiteSpace(mediaName))
-            {
-                throw;
-            }
-
-            validator.SetPlotConfigurationName(settings, deviceName, null);
-        }
-
-        validator.RefreshLists(settings);
-    }
-
-    /// <summary>
-    /// 解绑当前 PlotSettings 上的绘图仪。部分 AutoCAD 版本不允许设为 None，失败时由调用方继续绑定目标设备。
-    /// </summary>
-    private static void TryUnbindPlotDevice(PlotSettingsValidator validator, PlotSettings settings)
-    {
-        try
-        {
-            validator.SetPlotConfigurationName(settings, "None", null);
-            validator.RefreshLists(settings);
+            settings.ShadePlot = PlotSettingsShadePlotType.Wireframe;
         }
         catch
         {
@@ -595,7 +604,8 @@ public static class PlotterService
                 throw new InvalidOperationException("纸张或打印窗口尺寸无效，无法计算扩大纸张留白比例。");
             var scale = originalShortMm / windowShortSide;
             validator.SetUseStandardScale(settings, false);
-            validator.SetCustomPrintScale(settings, new CustomScale(ToPlotPaperUnitScale(settings, scale), 1d));
+            validator.SetCustomPrintScale(
+                settings, new CustomScale(ToPlotPaperUnitScale(settings, scale, deviceName), 1d));
             return;
         }
 
@@ -612,7 +622,8 @@ public static class PlotterService
         // 保持原图框窗口不变，只缩小打印比例。扩大窗口会把图框外的相邻对象带入 PDF。
         var scaleReduced = usableShortSide / windowShort;
         validator.SetUseStandardScale(settings, false);
-        validator.SetCustomPrintScale(settings, new CustomScale(ToPlotPaperUnitScale(settings, scaleReduced), 1d));
+        validator.SetCustomPrintScale(
+            settings, new CustomScale(ToPlotPaperUnitScale(settings, scaleReduced, deviceName), 1d));
     }
 
     private static void SetExactWindowScale(
@@ -633,7 +644,8 @@ public static class PlotterService
 
         var scale = Math.Min(paperLong / windowLong, paperShort / windowShort);
         validator.SetUseStandardScale(settings, false);
-        validator.SetCustomPrintScale(settings, new CustomScale(ToPlotPaperUnitScale(settings, scale), 1d));
+        validator.SetCustomPrintScale(
+            settings, new CustomScale(ToPlotPaperUnitScale(settings, scale, deviceName), 1d));
     }
 
     /// <summary>
@@ -665,17 +677,38 @@ public static class PlotterService
         validator.SetPlotWindowArea(settings, insetWindow);
     }
 
-    private static double ToPlotPaperUnitScale(PlotSettings settings, double millimetersPerDrawingUnit)
+    /// <summary>
+    /// 把「每图面单位对应的毫米」换成当前 PlotPaperUnits 下 CustomScale 的分子。
+    /// Pixels 必须按 DPI 换成 px/图面单位，不能把毫米数直接当像素用。
+    /// </summary>
+    private static double ToPlotPaperUnitScale(
+        PlotSettings settings,
+        double millimetersPerDrawingUnit,
+        string deviceName)
     {
-        // CustomScale 分子服从最终 PlotPaperUnits。部分自定义 PC3 虽显示毫米尺寸，AutoCAD 校验后仍使用 Inches。
-        return settings.PlotPaperUnits == PlotPaperUnit.Inches
-            ? millimetersPerDrawingUnit / 25.4d
-            : millimetersPerDrawingUnit;
+        if (settings.PlotPaperUnits == PlotPaperUnit.Inches)
+        {
+            return millimetersPerDrawingUnit / 25.4d;
+        }
+
+        if (settings.PlotPaperUnits == PlotPaperUnit.Pixels)
+        {
+            var dpi = AcadPlotterInstaller.GetRasterDpi(deviceName);
+            var dpiValue = Math.Max(dpi.X, dpi.Y);
+            if (dpiValue <= 0d)
+            {
+                dpiValue = 100d;
+            }
+
+            return millimetersPerDrawingUnit * dpiValue / 25.4d;
+        }
+
+        return millimetersPerDrawingUnit;
     }
 
     private static void ResetAndCenterPlot(PlotSettingsValidator validator, PlotSettings settings)
     {
-        // PlotInfo 校验可能改写单位和原点；旋转、比例和窗口全部确定后再清零并居中。
+        // CopyFrom(layout) 可能带入旧偏移；旋转、比例和窗口全部确定后再清零并居中。
         validator.SetPlotCentered(settings, false);
         validator.SetPlotOrigin(settings, Point2d.Origin);
         validator.SetPlotCentered(settings, true);
@@ -722,16 +755,8 @@ public static class PlotterService
             };
         }).ToList();
 
-        if (IsRasterPlotDevice(deviceName))
-        {
-            var windowWidth = Math.Abs(window.MaxPoint.X - window.MinPoint.X);
-            var windowHeight = Math.Abs(window.MaxPoint.Y - window.MinPoint.Y);
-            RasterPlotOrientation.GetDcsOrientedPaperSize(
-                job, windowWidth, windowHeight, out var rasterWidth, out var rasterHeight);
-            return BestRasterMedia(choices, rasterWidth, rasterHeight)
-                   ?? throw new InvalidOperationException($"栅格输出设备没有可用像素介质: {deviceName}");
-        }
-
+        // PNG/JPG 与 PDF 同一套选纸：目标毫米尺寸来自前端；目录项已把像素换算成毫米。
+        // 仅在毫米匹配失败时才按长宽比兜底选像素画布（见下方 BestRasterMedia）。
         var matchTolerance = job.RequireExactPaperSize ? ExactMediaToleranceMm : MediaMatchToleranceMm;
         var exact = choices
             .Where(x => x.Error <= matchTolerance)
@@ -748,6 +773,14 @@ public static class PlotterService
 
         if (job.RequireExactPaperSize)
         {
+            if (IsRasterPlotDevice(deviceName))
+            {
+                return BestRasterMedia(choices, targetWidth, targetHeight)
+                       ?? throw new InvalidOperationException(
+                           $"AutoCAD 的 {deviceName} 未加载精确任意纸张 {targetWidth:0.######} x {targetHeight:0.######} mm；"
+                           + "已停止打印，禁止回退到相近或同名纸张。");
+            }
+
             var nearest = string.Join(", ", choices
                 .OrderBy(x => x.Error)
                 .Take(5)
@@ -768,6 +801,12 @@ public static class PlotterService
         if (exact != null)
         {
             return exact;
+        }
+
+        if (IsRasterPlotDevice(deviceName))
+        {
+            return BestRasterMedia(choices, targetWidth, targetHeight)
+                   ?? throw new InvalidOperationException($"栅格输出设备没有可用像素介质: {deviceName}");
         }
 
         if (IsLongPaperName(job.PaperName ?? "") && targetWidth > 0 && targetHeight > 0)
@@ -836,7 +875,22 @@ public static class PlotterService
 
         usedCache = false;
         using var settings = new PlotSettings(layout.ModelType);
-        BindOverridePlotDevice(validator, settings, deviceName, unbindFirst: forceDeviceReload);
+        settings.CopyFrom(layout);
+        if (forceDeviceReload)
+        {
+            try
+            {
+                validator.SetPlotConfigurationName(settings, "None", null);
+                validator.RefreshLists(settings);
+            }
+            catch
+            {
+                // 某些 AutoCAD 版本不允许对当前布局设置 None；下面仍会重新绑定目标设备。
+            }
+        }
+
+        validator.SetPlotConfigurationName(settings, deviceName, null);
+        validator.RefreshLists(settings);
         var isRaster = IsRasterPlotDevice(deviceName);
         var paperUnit = isRaster ? PlotPaperUnit.Pixels : PlotPaperUnit.Millimeters;
         var dpi = isRaster ? AcadPlotterInstaller.GetRasterDpi(deviceName) : (X: 100d, Y: 100d);
@@ -941,14 +995,12 @@ public static class PlotterService
         }
 
         var targetAspect = Math.Max(targetWidth, targetHeight) / Math.Min(targetWidth, targetHeight);
-        // PublishToWeb PNG/JPG 的纸张本质是像素画布，毫米尺寸不会与 A 系列图幅相等。
-        // 优先匹配长宽比，再选较大画布，避免用毫米绝对差错误地选到低质量或畸变介质。
+        // 与 PDF 选纸失败后的兜底：按长宽比找像素画布，横竖与目标纸张一致时不旋转。
         return choices
             .Where(choice => choice.WidthMm > 0d && choice.HeightMm > 0d)
             .OrderBy(choice => Math.Abs(Math.Log(
                 (Math.Max(choice.WidthMm, choice.HeightMm)
                  / Math.Min(choice.WidthMm, choice.HeightMm)) / targetAspect)))
-            // 相同长宽比通常同时存在横版和竖版；先选与 DCS 窗口同方向的像素画布。
             .ThenBy(choice => (choice.WidthMm >= choice.HeightMm) == (targetWidth >= targetHeight) ? 0 : 1)
             .ThenByDescending(choice => choice.WidthMm * choice.HeightMm)
             .Select(choice =>
@@ -1325,12 +1377,8 @@ public static class PlotterService
         PlotJob job,
         Extents2d window)
     {
-        if (IsRasterPlotDevice(deviceName))
-        {
-            // 栅格介质已按 DCS 窗口方向选择；这里只保留设备缺少对应方向时的兜底旋转。
-            return paperRotation;
-        }
-
+        // PNG/JPG 与 PDF 同一套旋转判断：介质 PreferredRotation + 窗口横竖兜底。
+        _ = deviceName;
         return ResolveWindowRotation(paperRotation, job, window);
     }
 
@@ -1403,8 +1451,7 @@ public static class PlotterService
 
     private static void PrepareEditorViewForPlot(Document doc, PlotJob job)
     {
-        // 图纸空间无视图概念，跳过；已生成 DCS 的任务必须保留生成时视图。
-        // UCS 任务则依赖下方恢复扫描时的 UCS 方向后再计算最终 DCS 窗口。
+        // 与 PDF 相同：图纸空间跳过；前端已生成 DCS 窗口时保留当前视图，不再二次改视线。
         if (job.IsPaperSpace || job.IsDcsWindow)
         {
             return;
@@ -1425,19 +1472,11 @@ public static class PlotterService
                 : Math.Max(Math.Abs(job.MaxY - job.MinY), 1);
 
             using var view = doc.Editor.GetCurrentView();
-            if (job.UsesUserCoordinateSystem)
-            {
-                var xAxis = new Vector3d(job.UcsXAxisX, job.UcsXAxisY, job.UcsXAxisZ).GetNormal();
-                var yAxis = new Vector3d(job.UcsYAxisX, job.UcsYAxisY, job.UcsYAxisZ).GetNormal();
-                view.ViewDirection = xAxis.CrossProduct(yAxis).GetNormal();
-                view.ViewTwist = -Math.Atan2(xAxis.Y, xAxis.X);
-            }
-            else
-            {
-                view.ViewDirection = Vector3d.ZAxis;
-                view.ViewTwist = 0;
-            }
-
+            // 平面图始终俯视；UCS 只反映为 ViewTwist，不把视线拧成轴测。
+            view.ViewDirection = Vector3d.ZAxis;
+            view.ViewTwist = job.UsesUserCoordinateSystem
+                ? -Math.Atan2(job.UcsXAxisY, job.UcsXAxisX)
+                : 0;
             view.Target = center;
             view.CenterPoint = Point2d.Origin;
             view.Width = width * 1.05;
