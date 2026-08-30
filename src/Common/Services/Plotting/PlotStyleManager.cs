@@ -33,6 +33,134 @@ internal static class PlotStyleManager
             .ToList();
     }
 
+    /// <summary>
+    /// 取出 CTB 文件名（去掉路径），便于比较 CAD 列表与设置里保存的值。
+    /// </summary>
+    public static string NormalizeStyleName(string? styleSheet)
+    {
+        var name = (styleSheet ?? "").Trim();
+        if (string.IsNullOrEmpty(name))
+        {
+            return "";
+        }
+
+        try
+        {
+            name = Path.GetFileName(name);
+        }
+        catch
+        {
+            // 含非法路径字符时仍用原始文本比较。
+        }
+
+        return name.Trim();
+    }
+
+    /// <summary>
+    /// 判断两个打印样式是否为同一份 CTB，忽略路径、扩展名和大小写。
+    /// </summary>
+    public static bool StyleNamesEqual(string? left, string? right)
+    {
+        var a = NormalizeStyleName(left);
+        var b = NormalizeStyleName(right);
+        if (string.IsNullOrEmpty(a) || string.IsNullOrEmpty(b))
+        {
+            return false;
+        }
+
+        if (string.Equals(a, b, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return string.Equals(
+            Path.GetFileNameWithoutExtension(a),
+            Path.GetFileNameWithoutExtension(b),
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// 在 CAD 当前可用的 CTB 列表中查找与上次保存值相同的项。
+    /// </summary>
+    public static string? FindSavedStyle(IEnumerable<string> styles, string? savedStyleSheet)
+    {
+        var saved = NormalizeStyleName(savedStyleSheet);
+        if (string.IsNullOrEmpty(saved))
+        {
+            return null;
+        }
+
+        return styles.FirstOrDefault(value => StyleNamesEqual(value, saved));
+    }
+
+    /// <summary>
+    /// 把上次保存的 CTB 选回下拉框。已保存过时绝不回落到 monochrome，避免把用户选择冲掉。
+    /// 列表里暂时没有该文件时，把保存值插到第一项，保证界面仍显示用户上次的选择。
+    /// </summary>
+    public static void RestoreSavedStyle(ComboBox combo, string? savedStyleSheet)
+    {
+        var saved = NormalizeStyleName(savedStyleSheet);
+        if (TrySelectStyle(combo, saved))
+        {
+            return;
+        }
+
+        if (!string.IsNullOrEmpty(saved))
+        {
+            combo.Items.Insert(0, saved);
+            combo.SelectedIndex = 0;
+            return;
+        }
+
+        if (TrySelectStyle(combo, "monochrome.ctb") || TrySelectContaining(combo, "monochrome"))
+        {
+            return;
+        }
+
+        if (combo.Items.Count > 0)
+        {
+            combo.SelectedIndex = 0;
+        }
+    }
+
+    private static bool TrySelectStyle(ComboBox combo, string saved)
+    {
+        if (string.IsNullOrEmpty(saved))
+        {
+            return false;
+        }
+
+        for (var i = 0; i < combo.Items.Count; i++)
+        {
+            if (StyleNamesEqual(combo.Items[i]?.ToString(), saved))
+            {
+                combo.SelectedIndex = i;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TrySelectContaining(ComboBox combo, string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        for (var i = 0; i < combo.Items.Count; i++)
+        {
+            if (combo.Items[i]?.ToString()?.IndexOf(value, StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                combo.SelectedIndex = i;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public static void EditSelectedStyle(IWin32Window owner, string? styleSheet)
     {
         var selectedStyle = styleSheet ?? "";

@@ -197,7 +197,7 @@ public sealed class SinglePlotForm : Form
         _styleCombo.DropDownStyle = ComboBoxStyle.DropDownList;
         _styleCombo.Margin = new Padding(0, UiLayout.Scale(5), UiLayout.Scale(8), UiLayout.Scale(5));
         _styleCombo.Items.AddRange(styles.Cast<object>().ToArray());
-        SelectExactOrContaining(_styleCombo, selectedStyle, "monochrome");
+        PlotStyleManager.RestoreSavedStyle(_styleCombo, selectedStyle);
         _styleSettingsButton = UiLayout.CreateButton("设置", 56);
         _styleSettingsButton.Dock = DockStyle.Fill;
         _styleSettingsButton.Margin = new Padding(0, UiLayout.Scale(4), 0, UiLayout.Scale(4));
@@ -254,28 +254,6 @@ public sealed class SinglePlotForm : Form
         AcceptButton = printButton;
         CancelButton = cancel;
         Controls.Add(root);
-    }
-
-    private static void SelectExactOrContaining(ComboBox combo, params string[] preferred)
-    {
-        foreach (var expected in preferred.Where(value => !string.IsNullOrWhiteSpace(value)))
-        {
-            for (var i = 0; i < combo.Items.Count; i++)
-            {
-                var value = combo.Items[i]?.ToString() ?? "";
-                if (string.Equals(value, expected, StringComparison.OrdinalIgnoreCase)
-                    || value.IndexOf(expected, StringComparison.OrdinalIgnoreCase) >= 0)
-                {
-                    combo.SelectedIndex = i;
-                    return;
-                }
-            }
-        }
-
-        if (combo.Items.Count > 0)
-        {
-            combo.SelectedIndex = 0;
-        }
     }
 
     private static string BuildDefaultPath(string sourceFile)

@@ -37,7 +37,6 @@ public sealed class RectangleBatchPlotForm : Form
         public string FileName { get; set; } = "";
         public string PaperChoice { get; set; } = "";
         public string Scale => Job.ScaleText;
-        public string GraphicSize => Job.SizeText;
     }
 
     private readonly Document _document;
@@ -70,6 +69,9 @@ public sealed class RectangleBatchPlotForm : Form
     private string _pngPlotDevice = "";
     private string _jpgPlotDevice = "";
     private string _dwfPlotDevice = "";
+    private bool _styleSelectionReady;
+    private List<(PlotJob Job, string DrawingNumber)>? _lastOverlayRebuildKey;
+    private bool _overlayPainted;
 
     public RectangleBatchPlotForm(Document document)
     {
@@ -82,7 +84,7 @@ public sealed class RectangleBatchPlotForm : Form
 
     private void InitializeComponents()
     {
-        Text = "LA矩形框批量打印 V1.15.6.1";
+        Text = "LA矩形框批量打印 V1.15.6.2";
         FormBorderStyle = System.Windows.Forms.FormBorderStyle.Sizable;
         ClientSize = new Size(UiLayout.Scale(900), UiLayout.Scale(520));
         MinimumSize = new Size(UiLayout.Scale(720), UiLayout.Scale(460));
@@ -235,11 +237,14 @@ public sealed class RectangleBatchPlotForm : Form
         _style.Height = UiLayout.ButtonHeight();
         _style.Dock = DockStyle.Fill;
         _style.Margin = new Padding(0, UiLayout.Scale(3), UiLayout.Scale(4), 0);
-        // 用户手动切换 CTB 后立即写入设置，图框块/矩形框/单张打印都会读取同一份上次选择。
-        _style.SelectionChangeCommitted += (_, _) =>
+        // 用 SelectedIndexChanged：键盘、滚轮和部分 CAD 宿主里下拉确认都可能不触发 SelectionChangeCommitted。
+        _style.SelectedIndexChanged += (_, _) =>
         {
-            SaveCurrentPlotOptions();
             _styleSettingsButton.Enabled = _style.SelectedIndex >= 0 && !IsDwgOutput;
+            if (_styleSelectionReady)
+            {
+                SaveCurrentPlotOptions();
+            }
         };
         _styleSettingsButton = UiLayout.CreateButton("设置", 56);
         // 保留统一按钮高度并只横向拉伸，避免紧凑行在不同 DPI 下把文字区域压扁。
@@ -322,11 +327,6 @@ public sealed class RectangleBatchPlotForm : Form
         _grid.Columns.Add(new DataGridViewTextBoxColumn
         {
             DataPropertyName = nameof(Row.Scale), HeaderText = "比例", ReadOnly = true, Width = UiLayout.Scale(86)
-        });
-        _grid.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            DataPropertyName = nameof(Row.GraphicSize), HeaderText = "图形尺寸", ReadOnly = true,
-            AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill, FillWeight = 22, MinimumWidth = UiLayout.Scale(130)
         });
         foreach (DataGridViewColumn column in _grid.Columns)
         {
@@ -696,6 +696,7 @@ public sealed class RectangleBatchPlotForm : Form
             _viewSortedByHeader = false;
             _viewSortColumnIndex = -1;
             RefreshDisplayRows();
+            UpdateVisuals();
             return;
         }
 
@@ -716,6 +717,7 @@ public sealed class RectangleBatchPlotForm : Form
         }
         ConfigurePaperCells();
         _grid.Refresh();
+        UpdateVisuals();
     }
 
     private string GetHeaderSortValue(Row row, int columnIndex)
@@ -739,11 +741,6 @@ public sealed class RectangleBatchPlotForm : Form
         if (column.DataPropertyName == nameof(Row.Scale))
         {
             return row.Scale;
-        }
-
-        if (column.DataPropertyName == nameof(Row.GraphicSize))
-        {
-            return row.GraphicSize;
         }
 
         // 编号列按真实打印顺序排序；预览按钮列保持原始顺序。
@@ -1523,8 +1520,9 @@ public sealed class RectangleBatchPlotForm : Form
         {
             _style.Items.Add(style);
         }
-        SelectOption(_style, _settings.LastStyleSheet, "monochrome");
+        PlotStyleManager.RestoreSavedStyle(_style, _settings.LastStyleSheet);
         UpdateOutputFormatUi();
+        _styleSelectionReady = true;
     }
 
     private static string FindPlotDevice(
@@ -1548,25 +1546,6 @@ public sealed class RectangleBatchPlotForm : Form
         return devices.FirstOrDefault(fallbackPredicate) ?? "";
     }
 
-    private static void SelectOption(ComboBox combo, params string[] preferred)
-    {
-        foreach (var expected in preferred.Where(value => !string.IsNullOrWhiteSpace(value)))
-        {
-            for (var i = 0; i < combo.Items.Count; i++)
-            {
-                if ((combo.Items[i]?.ToString() ?? "").IndexOf(expected, StringComparison.OrdinalIgnoreCase) >= 0)
-                {
-                    combo.SelectedIndex = i;
-                    return;
-                }
-            }
-        }
-        if (combo.Items.Count > 0)
-        {
-            combo.SelectedIndex = 0;
-        }
-    }
-
     private void SetAll(bool selected)
     {
         foreach (var row in _rows)
@@ -1583,6 +1562,68 @@ public sealed class RectangleBatchPlotForm : Form
         var selected = _rows.Count(row => row.Selected);
         var order = _settings.SortOrderHorizontalFirst ? "左→右、上→下" : "上→下、左→右";
         _status.Text = $"识别 {_rows.Count} 个矩形框  |  已选 {selected} 个  |  格式：{SelectedOutputFormat}  |  顺序：{order}  |  输出：{_outputDirectory.Text}";
+        ScheduleOverlayIfRebuildNeeded();
+    }
+
+    /// <summary>
+    /// 当前会画到 CAD 上的清单快照：顺序代表打印序号。
+    /// </summary>
+    private List<(PlotJob Job, string DrawingNumber)> CaptureOverlayRebuildKey()
+    {
+        var keys = new List<(PlotJob Job, string DrawingNumber)>();
+        foreach (var row in _displayRows)
+        {
+            if (!row.Selected)
+            {
+                continue;
+            }
+
+            keys.Add((row.Job, row.Job.DrawingNumber ?? ""));
+        }
+
+        return keys;
+    }
+
+    /// <summary>
+    /// 打印顺序（同一 Job 引用的先后）或图号任一变化，才需要整批 Show 红框。
+    /// </summary>
+    private static bool OverlayRebuildKeysEqual(
+        IReadOnlyList<(PlotJob Job, string DrawingNumber)>? left,
+        IReadOnlyList<(PlotJob Job, string DrawingNumber)>? right)
+    {
+        if (left == null || right == null)
+        {
+            return left == null && right == null;
+        }
+
+        if (left.Count != right.Count)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < left.Count; i++)
+        {
+            if (!ReferenceEquals(left[i].Job, right[i].Job)
+                || !string.Equals(left[i].DrawingNumber, right[i].DrawingNumber, StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// 改纸张、切格式、刷状态栏时不要重建红框；只有框集合或序号变了才 Show。
+    /// </summary>
+    private void ScheduleOverlayIfRebuildNeeded()
+    {
+        var key = CaptureOverlayRebuildKey();
+        if (_overlayPainted && OverlayRebuildKeysEqual(_lastOverlayRebuildKey, key))
+        {
+            return;
+        }
+
         ScheduleOverlayRefresh();
     }
 
@@ -1623,10 +1664,14 @@ public sealed class RectangleBatchPlotForm : Form
                 ? _rows[_highlightedJobIndex].Job
                 : null;
             _overlay.Show(selectedJobs, highlightJob);
+            _lastOverlayRebuildKey = CaptureOverlayRebuildKey();
+            _overlayPainted = true;
         }
         catch
         {
             _overlay.Clear(repaint: false);
+            _lastOverlayRebuildKey = null;
+            _overlayPainted = false;
         }
     }
 
@@ -1768,7 +1813,11 @@ public sealed class RectangleBatchPlotForm : Form
     private void SaveCurrentPlotOptions()
     {
         _settings.LastPlotDevice = AcadPlotterInstaller.PreferredPdfPlotter;
-        _settings.LastStyleSheet = SelectedStyle();
+        var style = PlotStyleManager.NormalizeStyleName(SelectedStyle());
+        if (!string.IsNullOrEmpty(style))
+        {
+            _settings.LastStyleSheet = style;
+        }
         _settings.MergePdf = _mergePdf.Checked;
         _settings.LeavePaperMargin = _leaveMargin.Checked;
         _settings.PaperMarginMm = BatchPlotForm.ReadMarginValue(_marginInput);

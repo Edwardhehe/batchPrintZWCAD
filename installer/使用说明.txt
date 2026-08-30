@@ -1,4 +1,4 @@
-﻿ZWCAD 批量打印插件 v1.15.6.1
+﻿ZWCAD 批量打印插件 v1.15.6.2
 
 支持输出：PDF、PNG、JPG、DWF、DWG。
 PNG/JPG 使用插件自有 LA_png / LA_jpg 设备，预览与所选输出格式一致。

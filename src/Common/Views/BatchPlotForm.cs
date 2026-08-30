@@ -67,6 +67,7 @@ public sealed class BatchPlotForm : Form
     private int _indexColumnIndex = -1;
     private HashSet<string> _duplicateDrawingNumbers = new(StringComparer.OrdinalIgnoreCase);
     private HashSet<string> _duplicateTitles = new(StringComparer.OrdinalIgnoreCase);
+    private bool _styleSelectionReady;
     public bool HasPendingPrint { get; private set; }
 
     public BatchPlotForm(Document currentDocument)
@@ -82,9 +83,9 @@ public sealed class BatchPlotForm : Form
     private void InitializeComponents()
     {
 #if AUTOCAD
-        Text = "LA图框块批量打印 V1.15.6.1";
+        Text = "LA图框块批量打印 V1.15.6.2";
 #else
-        Text = "LA图框块批量打印 V1.15.6.1";
+        Text = "LA图框块批量打印 V1.15.6.2";
 #endif
         FormBorderStyle = System.Windows.Forms.FormBorderStyle.Sizable;
         ClientSize = new Size(UiLayout.Scale(900), UiLayout.Scale(520));
@@ -174,7 +175,7 @@ public sealed class BatchPlotForm : Form
         var scanWindowButton = MakeButton("框选扫描", 92);
         scanWindowButton.Click += (_, _) => ScanSelectedWindow();
 
-        var addFilesButton = MakeButton("添加DWG", 92);
+        var addFilesButton = MakeButton("多文件批打", 108);
         addFilesButton.Click += (_, _) => AddDwgFiles();
 
         var clearButton = MakeButton("清空清单", 92);
@@ -182,9 +183,6 @@ public sealed class BatchPlotForm : Form
 
         var renumberButton = MakeButton("图号重排", 92);
         renumberButton.Click += (_, _) => RenumberDrawingNumbers();
-
-        var checkIdentityButton = MakeButton("图号图名检查", 108);
-        checkIdentityButton.Click += (_, _) => CheckDrawingNumberAndTitle();
 
         var generateDirectoryButton = MakeButton("生成目录", 92);
         generateDirectoryButton.Click += (_, _) => GenerateDrawingDirectory();
@@ -208,10 +206,9 @@ public sealed class BatchPlotForm : Form
 
         SetTip(scanButton, "扫描当前打开图纸中的全部匹配图框。");
         SetTip(scanWindowButton, "回到 CAD 框选区域，只识别框内图框。");
-        SetTip(addFilesButton, "选择一个或多个 DWG，加入批量打印清单。");
+        SetTip(addFilesButton, "选择一个或多个 DWG，加入当前批量打印清单。");
         SetTip(clearButton, "清空当前清单，不影响 CAD 文件和图框库。");
         SetTip(renumberButton, "按空间位置重新排序图框，按顺序分配前缀+递增图号。");
-        SetTip(checkIdentityButton, "检查清单中重复的图号和图名，重复项会显示为红色。");
         SetTip(generateDirectoryButton, "在当前 CAD 指定基点，生成图纸目录表。");
         SetTip(chooseOutputButton, "手动选择输出目录。");
 
@@ -233,11 +230,14 @@ public sealed class BatchPlotForm : Form
         _styleCombo.Dock = DockStyle.Fill;
         _styleCombo.Margin = new Padding(0, UiLayout.Scale(3), UiLayout.Scale(4), UiLayout.Scale(8));
         _styleCombo.DropDownStyle = ComboBoxStyle.DropDownList;
-        // 用户手动切换 CTB 后立即保存，保证其它打印入口下次默认沿用上一次选择。
-        _styleCombo.SelectionChangeCommitted += (_, _) =>
+        // 用 SelectedIndexChanged：键盘、滚轮和部分 CAD 宿主里下拉确认都可能不触发 SelectionChangeCommitted。
+        _styleCombo.SelectedIndexChanged += (_, _) =>
         {
-            SaveCurrentSettings();
             _styleSettingsButton.Enabled = _styleCombo.SelectedIndex >= 0 && !IsDwgOutput;
+            if (_styleSelectionReady)
+            {
+                SaveCurrentSettings();
+            }
         };
         _styleSettingsButton = UiLayout.CreateButton("设置", 56);
         _styleSettingsButton.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
@@ -295,7 +295,6 @@ public sealed class BatchPlotForm : Form
         actionRow.Controls.Add(clearButton);
         actionRow.Controls.Add(MakeSeparator());
         actionRow.Controls.Add(renumberButton);
-        actionRow.Controls.Add(checkIdentityButton);
         actionRow.Controls.Add(generateDirectoryButton);
         settingsRow.Controls.Add(MakeLabel("输出:"), 0, 0);
         settingsRow.Controls.Add(_outputDirectory, 1, 0);
@@ -444,8 +443,6 @@ public sealed class BatchPlotForm : Form
         _grid.Columns.Add(titleColumn);
         _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.PaperName), "图幅", 82));
         _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.ScaleText), "比例", 82));
-        _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.SizeText), "实际尺寸", 150));
-        _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.PaperSizeText), "输出纸张", 150));
         _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.Date), "日期", 90));
         _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.Revision), "版次", 70));
         _grid.Columns.Add(MakeTextColumn(nameof(PlotJob.Phase), "设计阶段", 90));
@@ -494,11 +491,7 @@ public sealed class BatchPlotForm : Form
                 _styleCombo.Items.Add(style);
             }
 
-            SelectExactOrContaining(_styleCombo, _settings.LastStyleSheet, "monochrome");
-            if (_styleCombo.SelectedIndex < 0 && _styleCombo.Items.Count > 0)
-            {
-                _styleCombo.SelectedIndex = 0;
-            }
+            PlotStyleManager.RestoreSavedStyle(_styleCombo, _settings.LastStyleSheet);
         }
         catch (Exception ex)
         {
@@ -506,6 +499,8 @@ public sealed class BatchPlotForm : Form
         }
 
         UpdateOutputFormatUi();
+        SaveCurrentSettings();
+        _styleSelectionReady = true;
     }
 
     private static string FindPngPlotDevice(IReadOnlyList<string> devices, string installedPlotter)
@@ -569,62 +564,6 @@ public sealed class BatchPlotForm : Form
         return devices.FirstOrDefault(value => value.IndexOf("DWF", StringComparison.OrdinalIgnoreCase) >= 0
                                                && value.IndexOf("DWFx", StringComparison.OrdinalIgnoreCase) < 0)
                ?? installedPlotter;
-    }
-
-    private static void SelectExactOrContaining(ComboBox combo, string exactValue, string fallbackContains)
-    {
-        if (TrySelectExactOrContaining(combo, exactValue))
-        {
-            return;
-        }
-
-        if (TrySelectContaining(combo, fallbackContains))
-        {
-            return;
-        }
-
-        if (combo.Items.Count > 0)
-        {
-            combo.SelectedIndex = 0;
-        }
-    }
-
-    private static bool TrySelectExactOrContaining(ComboBox combo, string value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return false;
-        }
-
-        for (var i = 0; i < combo.Items.Count; i++)
-        {
-            if (string.Equals(combo.Items[i]?.ToString(), value, StringComparison.OrdinalIgnoreCase))
-            {
-                combo.SelectedIndex = i;
-                return true;
-            }
-        }
-
-        return TrySelectContaining(combo, value);
-    }
-
-    private static bool TrySelectContaining(ComboBox combo, string value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return false;
-        }
-
-        for (var i = 0; i < combo.Items.Count; i++)
-        {
-            if (combo.Items[i]?.ToString()?.IndexOf(value, StringComparison.OrdinalIgnoreCase) >= 0)
-            {
-                combo.SelectedIndex = i;
-                return true;
-            }
-        }
-
-        return false;
     }
 
     private TitleBlockScanScope? PromptScanScope() => BatchPlotCommands.PromptScanScope(this);
@@ -776,7 +715,7 @@ public sealed class BatchPlotForm : Form
         {
             Filter = "DWG 文件 (*.dwg)|*.dwg",
             Multiselect = true,
-            Title = "选择需要批量打印的 DWG"
+            Title = "选择要批量打印的 DWG"
         };
 
         if (dialog.ShowDialog(this) != DialogResult.OK)
@@ -1989,6 +1928,7 @@ public sealed class BatchPlotForm : Form
         _settings.LongPaperSnapToleranceMm = updated.LongPaperSnapToleranceMm;
         _settings.TitleBlockBatchSortMode = updated.TitleBlockBatchSortMode;
         _settings.SortOrderHorizontalFirst = updated.SortOrderHorizontalFirst;
+        _settings.LastStyleSheet = updated.LastStyleSheet;
         _mergePdfCheckBox.Checked = updated.MergePdf;
     }
 
@@ -2774,34 +2714,6 @@ public sealed class BatchPlotForm : Form
     }
 
     /// <summary>
-    /// 检查当前清单中的重复图号、图名：重复项标红，并弹出检查结果。
-    /// </summary>
-    private void CheckDrawingNumberAndTitle()
-    {
-        RebuildDuplicateIdentitySets();
-
-        if (_jobs.Count == 0)
-        {
-            MessageBox.Show("当前没有可检查的图纸。", "图号图名检查", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            return;
-        }
-
-        var duplicateNumberCount = _jobs.Count(job => IsDuplicateIdentity(job.DrawingNumber, _duplicateDrawingNumbers));
-        var duplicateTitleCount = _jobs.Count(job => IsDuplicateIdentity(job.Title, _duplicateTitles));
-        if (duplicateNumberCount == 0 && duplicateTitleCount == 0)
-        {
-            MessageBox.Show("未发现重复图号或图名。", "图号图名检查", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            return;
-        }
-
-        MessageBox.Show(
-            $"发现重复图号 {_duplicateDrawingNumbers.Count} 组（{duplicateNumberCount} 张），重复图名 {_duplicateTitles.Count} 组（{duplicateTitleCount} 张）。\n重复项已在清单中标红。",
-            "图号图名检查",
-            MessageBoxButtons.OK,
-            MessageBoxIcon.Warning);
-    }
-
-    /// <summary>
     /// 根据当前清单重建重复图号、图名集合，供表格把重复项标红。
     /// 空白图号/图名不参与检查，避免未识别字段全部被当成重复。
     /// </summary>
@@ -2962,7 +2874,11 @@ public sealed class BatchPlotForm : Form
     private void SaveCurrentSettings()
     {
         _settings.LastPlotDevice = AcadPlotterInstaller.PreferredPdfPlotter;
-        _settings.LastStyleSheet = _styleCombo.SelectedItem?.ToString() ?? "";
+        var style = PlotStyleManager.NormalizeStyleName(_styleCombo.SelectedItem?.ToString());
+        if (!string.IsNullOrEmpty(style))
+        {
+            _settings.LastStyleSheet = style;
+        }
         _settings.MergePdf = _mergePdfCheckBox.Checked;
         _settings.LeavePaperMargin = _leaveMarginCheckBox.Checked;
         _settings.PaperMarginMm = ReadMarginValue(_marginInput);

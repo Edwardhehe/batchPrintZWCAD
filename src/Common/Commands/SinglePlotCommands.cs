@@ -272,7 +272,7 @@ public sealed partial class BatchPlotCommands
 
     /// <summary>
     /// 选择单张打印使用的 PDF 打印机和打印样式表。
-    /// 优先使用捆绑的 LA_pdf 打印机和 monochrome.ctb 样式。
+    /// 优先沿用用户上次选择的 CTB；仅在从未保存过时才回落到 monochrome。
     /// </summary>
     private static (string DeviceName, string StyleSheet) ResolveSinglePlotOptions(
         AppSettings settings,
@@ -290,7 +290,9 @@ public sealed partial class BatchPlotCommands
             ?? devices.FirstOrDefault(value => value.IndexOf("PDF", StringComparison.OrdinalIgnoreCase) >= 0)
             ?? throw new InvalidOperationException("没有找到可用的 PDF 打印机。");
 
-        var style = FindPlotOption(styles, settings.LastStyleSheet)
+        var savedStyle = PlotStyleManager.NormalizeStyleName(settings.LastStyleSheet);
+        var style = PlotStyleManager.FindSavedStyle(styles, savedStyle)
+            ?? (!string.IsNullOrEmpty(savedStyle) ? savedStyle : null)
             ?? styles.FirstOrDefault(value => value.IndexOf("monochrome", StringComparison.OrdinalIgnoreCase) >= 0)
             ?? "";
         return (device, style);
@@ -299,8 +301,12 @@ public sealed partial class BatchPlotCommands
     private static void SaveLastPlotOptions(AppSettings settings, string deviceName, string styleSheet)
     {
         // 单张打印选中的 CTB 与其它打印入口共用一份设置，下次打开任意打印窗口都会默认沿用。
+        var style = PlotStyleManager.NormalizeStyleName(styleSheet);
         settings.LastPlotDevice = deviceName;
-        settings.LastStyleSheet = styleSheet;
+        if (!string.IsNullOrEmpty(style))
+        {
+            settings.LastStyleSheet = style;
+        }
         AppSettingsStore.Save(settings);
     }
 
