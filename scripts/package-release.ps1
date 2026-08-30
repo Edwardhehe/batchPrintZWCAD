@@ -100,6 +100,14 @@ function Add-ReleasePackage {
         Copy-Item -LiteralPath $sourceFile -Destination (Join-Path $packageRoot $fileName) -Force
     }
 
+    # 发布压缩包只带 NETLOAD 说明和使用必读，不再附带安装/卸载 cmd。
+    $guideDoc = Get-ChildItem -LiteralPath (Join-Path $root 'docs') -File -Filter 'LA批量打印 使用方法【使用必读】*.docx' |
+        Select-Object -First 1
+    if ($null -eq $guideDoc) {
+        throw "User guide document was not found under docs\: LA批量打印 使用方法【使用必读】*.docx"
+    }
+    Copy-Item -LiteralPath $guideDoc.FullName -Destination (Join-Path $packageRoot $guideDoc.Name) -Force
+
     $archivePath = Join-Path $stagingRoot $ArchiveName
     Compress-Archive -Path (Join-Path $packageRoot '*') -DestinationPath $archivePath -CompressionLevel Optimal
 }
