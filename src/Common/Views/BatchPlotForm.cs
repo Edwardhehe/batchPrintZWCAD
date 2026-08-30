@@ -64,6 +64,9 @@ public sealed class BatchPlotForm : Form
     private string _jpgPlotDevice = "";
     private string _dwfPlotDevice = "";
     private long _nextSortPriority;
+    private int _indexColumnIndex = -1;
+    private HashSet<string> _duplicateDrawingNumbers = new(StringComparer.OrdinalIgnoreCase);
+    private HashSet<string> _duplicateTitles = new(StringComparer.OrdinalIgnoreCase);
     public bool HasPendingPrint { get; private set; }
 
     public BatchPlotForm(Document currentDocument)
@@ -180,6 +183,9 @@ public sealed class BatchPlotForm : Form
         var renumberButton = MakeButton("图号重排", 92);
         renumberButton.Click += (_, _) => RenumberDrawingNumbers();
 
+        var checkIdentityButton = MakeButton("图号图名检查", 108);
+        checkIdentityButton.Click += (_, _) => CheckDrawingNumberAndTitle();
+
         var generateDirectoryButton = MakeButton("生成目录", 92);
         generateDirectoryButton.Click += (_, _) => GenerateDrawingDirectory();
 
@@ -205,7 +211,7 @@ public sealed class BatchPlotForm : Form
         SetTip(addFilesButton, "选择一个或多个 DWG，加入批量打印清单。");
         SetTip(clearButton, "清空当前清单，不影响 CAD 文件和图框库。");
         SetTip(renumberButton, "按空间位置重新排序图框，按顺序分配前缀+递增图号。");
-        SetTip(chooseOutputButton, "手动选择输出目录。");
+        SetTip(checkIdentityButton, "检查清单中重复的图号和图名，重复项会显示为红色。");
         SetTip(generateDirectoryButton, "在当前 CAD 指定基点，生成图纸目录表。");
         SetTip(chooseOutputButton, "手动选择输出目录。");
 
@@ -289,6 +295,7 @@ public sealed class BatchPlotForm : Form
         actionRow.Controls.Add(clearButton);
         actionRow.Controls.Add(MakeSeparator());
         actionRow.Controls.Add(renumberButton);
+        actionRow.Controls.Add(checkIdentityButton);
         actionRow.Controls.Add(generateDirectoryButton);
         settingsRow.Controls.Add(MakeLabel("输出:"), 0, 0);
         settingsRow.Controls.Add(_outputDirectory, 1, 0);
@@ -416,11 +423,8 @@ public sealed class BatchPlotForm : Form
         // 编号列（无绑定，CellFormatting 时显示行号）
         var indexCol = new DataGridViewTextBoxColumn { HeaderText = "编号", Width = UiLayout.Scale(52), ReadOnly = true };
         _grid.Columns.Add(indexCol);
-        _grid.CellFormatting += (_, e) =>
-        {
-            if (e.ColumnIndex == indexCol.Index && e.RowIndex >= 0)
-                e.Value = (e.RowIndex + 1).ToString();
-        };
+        _indexColumnIndex = indexCol.Index;
+        _grid.CellFormatting += GridCellFormatting;
 
         _grid.Columns.Add(new DataGridViewButtonColumn
         {
@@ -651,9 +655,7 @@ public sealed class BatchPlotForm : Form
 
         // 扫描结果坐标是 WCS，转为 DCS 后打印（和矩形框批量打印同理）
         TransformScannedJobsToDcs(scannedJobs);
-        ReplaceBindingListContents(_jobs, scannedJobs);
-
-        SortAndRefreshOutputPaths();
+        SortAndRefreshOutputPaths(scannedJobs);
         ScheduleSequenceOverlayForCurrentJobs();
         AppendLog("INFO", $"扫描当前图完成，识别 {_jobs.Count} 张。");
     }
@@ -701,9 +703,7 @@ public sealed class BatchPlotForm : Form
 
             // 扫描结果坐标是 WCS，转为 DCS 后打印
             TransformScannedJobsToDcs(scannedJobs);
-            ReplaceBindingListContents(_jobs, scannedJobs);
-
-            SortAndRefreshOutputPaths();
+            SortAndRefreshOutputPaths(scannedJobs);
             ScheduleSequenceOverlayForCurrentJobs();
             AppendLog("INFO", $"框选扫描当前图完成，识别 {_jobs.Count} 张。");
         }
@@ -817,11 +817,12 @@ public sealed class BatchPlotForm : Form
 
         if (added.Count > 0)
         {
-            var merged = _jobs.Concat(added).ToList();
-            ReplaceBindingListContents(_jobs, merged);
+            SortAndRefreshOutputPaths(_jobs.Concat(added).ToList());
         }
-
-        SortAndRefreshOutputPaths();
+        else
+        {
+            SortAndRefreshOutputPaths();
+        }
         if (_jobs.Count > 0 && _jobs.All(IsCurrentDocumentJob))
         {
             ScheduleSequenceOverlayForCurrentJobs();
@@ -861,15 +862,23 @@ public sealed class BatchPlotForm : Form
             _settings.PaperMatchToleranceMm);
     }
 
-    private void SortAndRefreshOutputPaths()
+    /// <summary>
+    /// 先排序并重算文件名，再一次性绑到表格。
+    /// 扫描等入口应传入新清单，避免先绑未排序结果再绑一次。
+    /// CAD 红框仅在图号或打印顺序变化时整批重建。
+    /// </summary>
+    /// <param name="sourceJobs">新清单；为空则对当前表格数据排序后重绑。</param>
+    private void SortAndRefreshOutputPaths(IReadOnlyList<PlotJob>? sourceJobs = null)
     {
         if (!_outputDirectoryIsCustom)
         {
             UpdateAutomaticOutputDirectory();
         }
 
+        var overlayKeyBefore = CaptureOverlayRebuildKey();
+
         // 所有会改变清单的入口最终都回到这里，确保表格、红框序号、输出文件名和打印顺序使用同一结果。
-        var sorted = SortTitleBlockJobs(_jobs.ToList());
+        var sorted = SortTitleBlockJobs(sourceJobs == null ? _jobs.ToList() : sourceJobs.ToList());
 
         var sequenceDigits = FileNameSanitizer.ResolveSequenceDigits(
             _settings.AutoFileNameSequenceDigits,
@@ -913,8 +922,10 @@ public sealed class BatchPlotForm : Form
             _grid.ResumeLayout();
         }
 
+        RebuildDuplicateIdentitySets();
         RefreshStatus();
-        if (_sequenceOverlayFollowsCurrentJobs)
+        if (_sequenceOverlayFollowsCurrentJobs
+            && !OverlayRebuildKeysEqual(overlayKeyBefore, CaptureOverlayRebuildKey()))
         {
             ScheduleSequenceOverlayForCurrentJobs();
         }
@@ -1041,6 +1052,7 @@ public sealed class BatchPlotForm : Form
 
     /// <summary>
     /// 清单刷新完成后再绘制 CAD 红框，避免识别与 Regen 挤在同一次 UI 消息里。
+    /// 仅扫描、图号变化或打印顺序变化时调用；改图名或重复标红不要走这里。
     /// </summary>
     private void ScheduleSequenceOverlayForCurrentJobs()
     {
@@ -1128,6 +1140,49 @@ public sealed class BatchPlotForm : Form
         }
 
         return string.Equals(source, _currentDocument.Name, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// 当前会画到 CAD 上的清单快照：顺序代表打印序号，图号用于判断是否要整批重建红框。
+    /// </summary>
+    private List<(PlotJob Job, string DrawingNumber)> CaptureOverlayRebuildKey()
+    {
+        var keys = new List<(PlotJob Job, string DrawingNumber)>();
+        foreach (var job in _jobs)
+        {
+            if (!job.Selected || !IsCurrentDocumentJob(job))
+            {
+                continue;
+            }
+
+            keys.Add((job, job.DrawingNumber ?? ""));
+        }
+
+        return keys;
+    }
+
+    /// <summary>
+    /// 打印顺序（同一 Job 引用的先后）或图号任一变化，才需要整批 Show 红框。
+    /// </summary>
+    private static bool OverlayRebuildKeysEqual(
+        IReadOnlyList<(PlotJob Job, string DrawingNumber)> left,
+        IReadOnlyList<(PlotJob Job, string DrawingNumber)> right)
+    {
+        if (left.Count != right.Count)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < left.Count; i++)
+        {
+            if (!ReferenceEquals(left[i].Job, right[i].Job)
+                || !string.Equals(left[i].DrawingNumber, right[i].DrawingNumber, StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private void MarkHighlightedJobsNotPrint()
@@ -1297,6 +1352,7 @@ public sealed class BatchPlotForm : Form
 
         var sorted = SortRenumberJobsByLayout(_renumberCurrentJobs, _renumberDialog.HorizontalFirst);
         ApplyRenumbering(sorted, _renumberDialog.Prefix, _renumberDialog.Suffix, _renumberDialog.StartNumber, _renumberDialog.Digits);
+        RebuildDuplicateIdentitySets();
         _grid.Refresh();
         ShowRenumberPreviewOverlay(sorted);
     }
@@ -1568,6 +1624,7 @@ public sealed class BatchPlotForm : Form
 
         _jobs.Clear();
         _selectedDwgFiles.Clear();
+        RebuildDuplicateIdentitySets();
         ClearSequenceOverlay();
         if (!_outputDirectoryIsCustom)
         {
@@ -2714,6 +2771,122 @@ public sealed class BatchPlotForm : Form
             // CellBeginEdit 在 BeginEdit 内同步触发，离开后立即收回授权，后续单击仍不能进入编辑。
             _allowDoubleClickTextEdit = false;
         }
+    }
+
+    /// <summary>
+    /// 检查当前清单中的重复图号、图名：重复项标红，并弹出检查结果。
+    /// </summary>
+    private void CheckDrawingNumberAndTitle()
+    {
+        RebuildDuplicateIdentitySets();
+
+        if (_jobs.Count == 0)
+        {
+            MessageBox.Show("当前没有可检查的图纸。", "图号图名检查", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        var duplicateNumberCount = _jobs.Count(job => IsDuplicateIdentity(job.DrawingNumber, _duplicateDrawingNumbers));
+        var duplicateTitleCount = _jobs.Count(job => IsDuplicateIdentity(job.Title, _duplicateTitles));
+        if (duplicateNumberCount == 0 && duplicateTitleCount == 0)
+        {
+            MessageBox.Show("未发现重复图号或图名。", "图号图名检查", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        MessageBox.Show(
+            $"发现重复图号 {_duplicateDrawingNumbers.Count} 组（{duplicateNumberCount} 张），重复图名 {_duplicateTitles.Count} 组（{duplicateTitleCount} 张）。\n重复项已在清单中标红。",
+            "图号图名检查",
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Warning);
+    }
+
+    /// <summary>
+    /// 根据当前清单重建重复图号、图名集合，供表格把重复项标红。
+    /// 空白图号/图名不参与检查，避免未识别字段全部被当成重复。
+    /// </summary>
+    private void RebuildDuplicateIdentitySets()
+    {
+        _duplicateDrawingNumbers = FindDuplicateIdentityKeys(_jobs.Select(job => job.DrawingNumber));
+        _duplicateTitles = FindDuplicateIdentityKeys(_jobs.Select(job => job.Title));
+        _grid.Invalidate();
+    }
+
+    /// <summary>
+    /// 找出出现超过一次的图号或图名（忽略大小写和首尾空白）。
+    /// </summary>
+    /// <param name="values">待检查的图号或图名</param>
+    /// <returns>重复项的规范化键集合</returns>
+    private static HashSet<string> FindDuplicateIdentityKeys(IEnumerable<string> values)
+    {
+        var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var value in values)
+        {
+            var key = NormalizeIdentityText(value);
+            if (key.Length == 0)
+            {
+                continue;
+            }
+
+            counts[key] = counts.TryGetValue(key, out var count) ? count + 1 : 1;
+        }
+
+        return new HashSet<string>(
+            counts.Where(pair => pair.Value > 1).Select(pair => pair.Key),
+            StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// 判断图号或图名是否属于重复项。
+    /// </summary>
+    private static bool IsDuplicateIdentity(string? value, HashSet<string> duplicates)
+    {
+        var key = NormalizeIdentityText(value);
+        return key.Length > 0 && duplicates.Contains(key);
+    }
+
+    /// <summary>
+    /// 规范化图号/图名后再比较，忽略首尾空白。
+    /// </summary>
+    private static string NormalizeIdentityText(string? value)
+    {
+        return (value ?? string.Empty).Trim();
+    }
+
+    /// <summary>
+    /// 显示行号，并把重复图号、图名的单元格文字标红。
+    /// </summary>
+    private void GridCellFormatting(object? sender, DataGridViewCellFormattingEventArgs e)
+    {
+        if (e.RowIndex < 0 || e.ColumnIndex < 0 || e.ColumnIndex >= _grid.Columns.Count)
+        {
+            return;
+        }
+
+        if (e.ColumnIndex == _indexColumnIndex)
+        {
+            e.Value = (e.RowIndex + 1).ToString();
+        }
+
+        if (_grid.Rows[e.RowIndex].DataBoundItem is not PlotJob job || e.CellStyle is null)
+        {
+            return;
+        }
+
+        var property = _grid.Columns[e.ColumnIndex].DataPropertyName;
+        var isDuplicate = property == nameof(PlotJob.DrawingNumber)
+            ? IsDuplicateIdentity(job.DrawingNumber, _duplicateDrawingNumbers)
+            : property == nameof(PlotJob.Title) && IsDuplicateIdentity(job.Title, _duplicateTitles);
+        if (!isDuplicate)
+        {
+            return;
+        }
+
+        e.CellStyle = new DataGridViewCellStyle(e.CellStyle)
+        {
+            ForeColor = Color.Red,
+            SelectionForeColor = Color.Red
+        };
     }
 
     private bool IsDrawingIdentityColumn(int columnIndex)
