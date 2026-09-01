@@ -1,5 +1,5 @@
 ﻿param(
-    [string]$Version = "1.15.6.3",
+    [string]$Version = "1.15.6.4",
     [string]$ZwcadOutput,
     [string]$LegacyAcadOutput,
     [string]$CoreAcadOutput
@@ -8,7 +8,7 @@
 $ErrorActionPreference = "Stop"
 
 if ($Version -notmatch '^\d+\.\d+(?:\.\d+){0,2}$') {
-    throw "Version must look like 1.15.6.3, 1.15.6 or 1.16."
+    throw "Version must look like 1.15.6.4, 1.15.6 or 1.16."
 }
 
 $root = Split-Path -Parent $PSScriptRoot
