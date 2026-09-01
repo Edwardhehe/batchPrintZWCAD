@@ -462,6 +462,7 @@ PlotterService.PlotMany(Jobs, deviceName, styleSheet, settings)
 - PNG/JPG 必须枚举到插件自有的 `LA_png` / `LA_jpg`；如果配置安装失败或 CAD 尚未识别，直接给出明确错误，不回退到 `PublishToWeb PNG/JPG` 等自带设备。
 - 安装器只创建、覆盖或修复 `LA_*` 文件，不修改用户已有的其他 PC3/PC5/PMP 配置。
 - AutoCAD 与中望对齐思路：**完好配置不重复覆盖**；设备列表按会话按需刷新，避免每次开窗强制重写 PC3/PMP。
+- **中望打印机目录**：读取选项完整 `PrinterConfigPath`（及 `PrinterConfigDir` 回退），优先写入仍在搜索路径中的 `ROAMABLEROOTPREFIX\Plotters`（建筑版为 `ZwArch`/`ZWCADA` 等产品根下的 Plotters），不再只认单一 `PrinterConfigDir` 第一项；PMP 落在该目录的 `PMP Files`，并由 PC5 的 `pmp_filepath` 绝对路径附着。`PrinterDescPath`/`PrinterDescDir` 可读取用于对齐说明文件搜索路径。
 
 #### AutoCAD 栅格设备
 
@@ -834,6 +835,7 @@ AutoCAD Core 版本额外使用 `#if ACAD_CORE` 子条件处理 `CadApp.ShowModa
 |------|---------|-------|
 | 命名空间 | `Autodesk.AutoCAD.*` | `ZwSoft.ZwCAD.*` |
 | 绘图仪配置 | 插件自有 `LA_pdf/LA_png/LA_jpg/LA_dwf.pc3` | 插件自有 `LA_pdf/LA_png/LA_jpg/LA_dwf.pc5`（基于模板改写 PMP 路径） |
+| 打印机目录解析 | 完整 `PrinterConfigPath`，优先默认 `ROAMABLE\Plotters` | 完整 `PrinterConfigPath`/`PrinterConfigDir`，优先当前产品 `ROAMABLE\Plotters`（含建筑版） |
 | PNG/JPG 设备策略 | 只使用 `LA_png/LA_jpg`，CAD 自带设备仅用于生成配置 | 只使用 `LA_png/LA_jpg`，CAD 自带设备仅作为 PC5 驱动模板 |
 | 栅格纸张来源 | 固定 PIA2 模板，毫米规格转换为像素介质 | 使用插件随包 PMP 纸张表并关联到插件自有 PC5 |
 | 栅格纸张单位 | `Pixels`；根据设备 DPI 与毫米互换 | `Millimeters`；业务层按毫米选择规格 |
@@ -968,7 +970,7 @@ LA批量打印/
 │   │
 │   └── ZWCAD/                       ← ZWCAD 专用实现（接口同名，平台适配）
 │       ├── PlotterService.cs        ← 多格式输出、简化纸张匹配、结果签名验证
-│       ├── AcadPlotterInstaller.cs  ← 安装 LA_pdf/png/jpg/dwf.pc5，模板改写自有 PMP 路径
+│       ├── AcadPlotterInstaller.cs  ← 多路径解析 Plotters，安装 LA_* .pc5 并附着自有 PMP
 │       ├── AutoloadManager.cs       ← 注册表路径: ZWSOFT\ZWCAD
 │       └── Properties/
 │           └── AssemblyInfo.cs

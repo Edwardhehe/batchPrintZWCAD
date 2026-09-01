@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using System.Linq;
@@ -70,11 +71,15 @@ public static class AcadPlotterInstaller
             var targetPc5 = Path.Combine(targetRoot, PreferredPdfPlotter);
             var targetPmp = Path.Combine(targetPmpDir, PreferredPmp);
 
-            // PMP 可能包含用户或本插件动态注册的纸张，已有有效配置时不得覆盖。
+            // PMP 可能包含用户或本插件动态注册的纸张，已有有效配置时不得覆盖；仅校正 PC5↔PMP 关联。
             if (IsUsableFile(targetPc5) && IsUsableFile(targetPmp))
             {
+                var linked = EnsurePc5PmpAttachment(targetPc5, targetPmp, forceRewrite: false);
                 result.Installed = true;
-                result.Message = "LA_pdf 打印机配置已存在，已保留现有 PC5/PMP。";
+                result.Written = linked;
+                result.Message = linked
+                    ? "LA_pdf 已可用，已修正 PC5↔PMP 关联。"
+                    : "LA_pdf 打印机配置已存在，已保留现有 PC5/PMP。";
                 return result;
             }
 
@@ -194,7 +199,10 @@ public static class AcadPlotterInstaller
             File.Copy(bundledPmp, targetPmp, overwrite: true);
             var encoding = System.Text.Encoding.GetEncoding(936);
             var text = File.ReadAllText(sourcePc5, encoding);
-            text = Regex.Replace(text, @"(?im)^pmp_filepath=.*$", "pmp_filepath=" + targetPmp);
+            var fullPmpPath = Path.GetFullPath(targetPmp);
+            text = Regex.Replace(text, @"(?im)^pmp_filepath=.*$", "pmp_filepath=" + fullPmpPath);
+            if (!Regex.IsMatch(text, @"(?im)^pmp_filepath="))
+                text = text.TrimEnd() + "\r\npmp_filepath=" + fullPmpPath + "\r\n";
             File.WriteAllText(targetPc5, text, encoding);
             result.SourceFound = true;
             result.Installed = IsUsableFile(targetPc5) && IsUsableFile(targetPmp);
@@ -322,8 +330,12 @@ public static class AcadPlotterInstaller
             // DWF 正留白会向 LA_dwf.pmp 注册扩大纸张；重复打开窗口时不能再用 LA_pdf.pmp 覆盖。
             if (IsUsableFile(targetPc5) && IsUsableFile(targetPmp))
             {
+                var linked = EnsurePc5PmpAttachment(targetPc5, targetPmp, forceRewrite: false);
                 result.Installed = true;
-                result.Message = "LA_dwf 已存在，已保留现有 PC5/PMP。";
+                result.Written = linked;
+                result.Message = linked
+                    ? "LA_dwf 已可用，已修正 PC5↔PMP 关联。"
+                    : "LA_dwf 已存在，已保留现有 PC5/PMP。";
                 return result;
             }
 
@@ -354,7 +366,10 @@ public static class AcadPlotterInstaller
 
             var encoding = System.Text.Encoding.GetEncoding(936);
             var text = File.ReadAllText(sourcePc5, encoding);
-            text = Regex.Replace(text, @"(?im)^pmp_filepath=.*$", "pmp_filepath=" + targetPmp);
+            var fullPmpPath = Path.GetFullPath(targetPmp);
+            text = Regex.Replace(text, @"(?im)^pmp_filepath=.*$", "pmp_filepath=" + fullPmpPath);
+            if (!Regex.IsMatch(text, @"(?im)^pmp_filepath="))
+                text = text.TrimEnd() + "\r\npmp_filepath=" + fullPmpPath + "\r\n";
             File.WriteAllText(targetPc5, text, encoding);
             result.Installed = File.Exists(targetPc5) && File.Exists(targetPmp);
             result.Written = result.Installed;
@@ -407,21 +422,219 @@ public static class AcadPlotterInstaller
 
     public static string GetPlottersDirectory() => GetAutoCadPlotterDirectory();
 
+    /// <summary>
+    /// 解析插件应写入的 Plotters 目录。
+    /// 读取选项中的全部打印机配置搜索路径（及系统变量回退），不要求必须是第一项；
+    /// 优先使用仍存在的默认 <c>ROAMABLEROOTPREFIX\Plotters</c>（覆盖建筑版 ZwArch/ZWCADA 等产品根），
+    /// 再回退到列表中其它存在的目录。
+    /// </summary>
     private static string GetAutoCadPlotterDirectory()
     {
-        var printerConfigDir = GetSystemVariableString("PrinterConfigDir");
-        if (!string.IsNullOrWhiteSpace(printerConfigDir))
+        var configuredDirectories = GetExistingPrinterConfigDirectories();
+        var roamableRoot = GetSystemVariableString("ROAMABLEROOTPREFIX");
+        var preferredPlotters = string.IsNullOrWhiteSpace(roamableRoot)
+            ? ""
+            : Path.Combine(roamableRoot, "Plotters");
+
+        if (!string.IsNullOrWhiteSpace(preferredPlotters))
         {
-            return printerConfigDir;
+            foreach (var directory in configuredDirectories)
+            {
+                if (PathsEqual(directory, preferredPlotters))
+                    return Path.GetFullPath(directory);
+            }
+
+            foreach (var directory in configuredDirectories)
+            {
+                if (IsPathInsideDirectory(directory, roamableRoot))
+                    return directory;
+            }
         }
 
-        var roamableRoot = GetSystemVariableString("ROAMABLEROOTPREFIX");
-        if (!string.IsNullOrWhiteSpace(roamableRoot))
-        {
-            return Path.Combine(roamableRoot, "Plotters");
-        }
+        if (configuredDirectories.Count > 0)
+            return configuredDirectories[0];
+
+        if (!string.IsNullOrWhiteSpace(preferredPlotters) && Directory.Exists(preferredPlotters))
+            return Path.GetFullPath(preferredPlotters);
 
         return "";
+    }
+
+    /// <summary>
+    /// 枚举选项/系统变量里已配置且磁盘上存在的打印机配置搜索路径，保留设定顺序。
+    /// </summary>
+    private static IReadOnlyList<string> GetExistingPrinterConfigDirectories()
+    {
+        var directories = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var rawPaths in new[]
+                 {
+                     ReadPreferenceFilesPath("PrinterConfigPath"),
+                     GetSystemVariableString("PrinterConfigDir")
+                 })
+        {
+            foreach (var configuredPath in ExpandSupportPaths(rawPaths))
+            {
+                if (!Directory.Exists(configuredPath))
+                    continue;
+
+                try
+                {
+                    var fullPath = Path.GetFullPath(configuredPath);
+                    if (seen.Add(fullPath))
+                        directories.Add(fullPath);
+                }
+                catch
+                {
+                    // 单个无效路径不影响检查其余搜索目录。
+                }
+            }
+        }
+
+        return directories;
+    }
+
+    /// <summary>
+    /// 枚举打印机说明文件（PMP）搜索路径；当前安装仍写入 Plotters\PMP Files，
+    /// 并以 PC5 内绝对 <c>pmp_filepath</c> 完成附着，此列表用于诊断与后续扩展。
+    /// </summary>
+    public static IReadOnlyList<string> GetExistingPrinterDescDirectories()
+    {
+        var directories = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var rawPaths in new[]
+                 {
+                     ReadPreferenceFilesPath("PrinterDescPath"),
+                     GetSystemVariableString("PrinterDescDir")
+                 })
+        {
+            foreach (var configuredPath in ExpandSupportPaths(rawPaths))
+            {
+                if (!Directory.Exists(configuredPath))
+                    continue;
+
+                try
+                {
+                    var fullPath = Path.GetFullPath(configuredPath);
+                    if (seen.Add(fullPath))
+                        directories.Add(fullPath);
+                }
+                catch
+                {
+                    // 忽略单个无效路径。
+                }
+            }
+        }
+
+        return directories;
+    }
+
+    /// <summary>
+    /// 通过 COM Preferences.Files 读取打印机支持路径；失败时返回空串，由系统变量回退。
+    /// </summary>
+    private static string ReadPreferenceFilesPath(string propertyName)
+    {
+        try
+        {
+            var acadApplication = typeof(CadApp).InvokeMember(
+                "AcadApplication",
+                BindingFlags.GetProperty | BindingFlags.Static | BindingFlags.Public,
+                null,
+                null,
+                null);
+            if (acadApplication == null)
+                return "";
+
+            var preferences = acadApplication.GetType().InvokeMember(
+                "Preferences",
+                BindingFlags.GetProperty,
+                null,
+                acadApplication,
+                null);
+            if (preferences == null)
+                return "";
+
+            var files = preferences.GetType().InvokeMember(
+                "Files",
+                BindingFlags.GetProperty,
+                null,
+                preferences,
+                null);
+            if (files == null)
+                return "";
+
+            return files.GetType().InvokeMember(
+                       propertyName,
+                       BindingFlags.GetProperty,
+                       null,
+                       files,
+                       null)?.ToString()
+                   ?? "";
+        }
+        catch
+        {
+            return "";
+        }
+    }
+
+    private static IEnumerable<string> ExpandSupportPaths(string configuredPaths)
+    {
+        if (string.IsNullOrWhiteSpace(configuredPaths))
+            yield break;
+
+        var roamableRoot = GetSystemVariableString("ROAMABLEROOTPREFIX");
+        foreach (var raw in configuredPaths.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var path = raw.Trim().Trim('"');
+            if (!string.IsNullOrWhiteSpace(roamableRoot))
+            {
+                path = Regex.Replace(
+                    path,
+                    "%RoamableRootFolder%",
+                    _ => roamableRoot,
+                    RegexOptions.IgnoreCase);
+            }
+
+            path = Environment.ExpandEnvironmentVariables(path);
+            if (!string.IsNullOrWhiteSpace(path))
+                yield return path;
+        }
+    }
+
+    private static bool PathsEqual(string left, string right)
+    {
+        try
+        {
+            return string.Equals(
+                Path.GetFullPath(left),
+                Path.GetFullPath(right),
+                StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool IsPathInsideDirectory(string path, string directory)
+    {
+        if (string.IsNullOrWhiteSpace(path) || string.IsNullOrWhiteSpace(directory))
+            return false;
+
+        try
+        {
+            var fullPath = Path.GetFullPath(path);
+            var fullDirectory = Path.GetFullPath(directory)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                + Path.DirectorySeparatorChar;
+            return fullPath.StartsWith(fullDirectory, StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static string GetSystemVariableString(string name)
@@ -436,27 +649,50 @@ public static class AcadPlotterInstaller
         }
     }
 
-    private static bool CopyIfDifferent(string source, string target)
+    /// <summary>
+    /// 确保 PC5 的 <c>pmp_filepath</c> 指向目标 PMP；已正确则返回 false。
+    /// </summary>
+    private static bool EnsurePc5PmpAttachment(string pc5Path, string pmpPath, bool forceRewrite)
     {
-        if (File.Exists(target))
+        if (!IsUsableFile(pc5Path) || !IsUsableFile(pmpPath))
+            return false;
+
+        var encoding = System.Text.Encoding.GetEncoding(936);
+        var original = File.ReadAllText(pc5Path, encoding);
+        var fullPmpPath = Path.GetFullPath(pmpPath);
+        var match = Regex.Match(original, @"(?im)^pmp_filepath=(.*)$");
+        if (match.Success
+            && !forceRewrite
+            && PathsEqual(match.Groups[1].Value.Trim(), fullPmpPath))
         {
-            var sourceInfo = new FileInfo(source);
-            var targetInfo = new FileInfo(target);
-            if (sourceInfo.Length == targetInfo.Length
-                && sourceInfo.LastWriteTimeUtc <= targetInfo.LastWriteTimeUtc.AddSeconds(1))
-            {
-                return false;
-            }
+            return false;
         }
 
-        File.Copy(source, target, overwrite: true);
+        string updated;
+        if (match.Success)
+        {
+            updated = Regex.Replace(
+                original,
+                @"(?im)^pmp_filepath=.*$",
+                "pmp_filepath=" + fullPmpPath);
+        }
+        else
+        {
+            updated = original.TrimEnd() + "\r\npmp_filepath=" + fullPmpPath + "\r\n";
+        }
+
+        if (string.Equals(original, updated, StringComparison.Ordinal))
+            return false;
+
+        File.WriteAllText(pc5Path, updated, encoding);
         return true;
     }
 
     private static void InstallPc5(string source, string target, string targetPmp)
     {
         var encoding = System.Text.Encoding.GetEncoding(936);
-        var text = File.ReadAllText(source, encoding).Replace("{PMP_PATH}", targetPmp);
+        var fullPmpPath = Path.GetFullPath(targetPmp);
+        var text = File.ReadAllText(source, encoding).Replace("{PMP_PATH}", fullPmpPath);
         Directory.CreateDirectory(Path.GetDirectoryName(target) ?? "");
         File.WriteAllText(target, text, encoding);
     }
