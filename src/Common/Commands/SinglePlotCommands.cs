@@ -290,11 +290,7 @@ public sealed partial class BatchPlotCommands
             ?? devices.FirstOrDefault(value => value.IndexOf("PDF", StringComparison.OrdinalIgnoreCase) >= 0)
             ?? throw new InvalidOperationException("没有找到可用的 PDF 打印机。");
 
-        var savedStyle = PlotStyleManager.NormalizeStyleName(settings.LastStyleSheet);
-        var style = PlotStyleManager.FindSavedStyle(styles, savedStyle)
-            ?? (!string.IsNullOrEmpty(savedStyle) ? savedStyle : null)
-            ?? styles.FirstOrDefault(value => value.IndexOf("monochrome", StringComparison.OrdinalIgnoreCase) >= 0)
-            ?? "";
+        var style = PlotStyleManager.ResolvePreferredStyle(styles, settings.LastStyleSheet);
         return (device, style);
     }
 

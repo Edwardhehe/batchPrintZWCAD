@@ -338,10 +338,9 @@ public static class AcadPlotterInstaller
 
         try
         {
-            var plottersDirectory = GetAutoCadPlotterDirectory();
             var pc3Path = ResolveActivePlotterPath(fileName);
             if (!IsValidPlotterFile(pc3Path)
-                || !IsPathInsideDirectory(pc3Path, plottersDirectory)
+                || !IsAllowedLaPlotterPath(pc3Path)
                 || !string.Equals(Path.GetFileName(pc3Path), fileName, StringComparison.OrdinalIgnoreCase))
             {
                 result.Message = "拒绝修改非插件目录或无效的绘图仪配置：" + pc3Path;
@@ -351,7 +350,7 @@ public static class AcadPlotterInstaller
             var attachedPmp = ReadAttachedPmpPath(pc3Path);
             result.Changed = ApplyTextGeometryToPiaFile(pc3Path, convertToGeometry, updateAllAsGeometry: true);
             if (IsValidPlotterFile(attachedPmp)
-                && IsPathInsideDirectory(attachedPmp, plottersDirectory)
+                && IsAllowedLaPlotterPath(attachedPmp)
                 && Path.GetFileNameWithoutExtension(attachedPmp).StartsWith("LA_", StringComparison.OrdinalIgnoreCase))
             {
                 result.Changed |= ApplyTextGeometryToPiaFile(attachedPmp, convertToGeometry, updateAllAsGeometry: false);
@@ -449,7 +448,7 @@ public static class AcadPlotterInstaller
 
     /// <summary>
     /// 同时修正程序维护的 PC3 与 AutoCAD 实际解析到的同名 PC3。
-    /// 只允许修改当前 CAD 用户配置根目录内、文件名为 LA_pdf.pc3 的插件自有配置，
+    /// 只允许修改打印机配置搜索路径内或当前 CAD 用户配置根目录内、文件名为 LA_pdf.pc3 的插件自有配置，
     /// 不删除重复文件，也不改 PrinterConfigPath 等用户全局设置。
     /// </summary>
     public static PmpAttachmentResult EnsureActivePdfPmpAttachment(
@@ -488,7 +487,6 @@ public static class AcadPlotterInstaller
                 return result;
             }
 
-            var currentCadRoot = GetSystemVariableString("ROAMABLEROOTPREFIX");
             foreach (var target in targets)
             {
                 if (!string.Equals(
@@ -500,9 +498,11 @@ public static class AcadPlotterInstaller
                     return result;
                 }
 
-                if (!IsPathInsideDirectory(target, currentCadRoot))
+                if (!IsAllowedLaPlotterPath(target))
                 {
-                    result.Message = "AutoCAD 实际加载的 LA_pdf.pc3 不在当前 CAD 用户配置目录，已停止修改: " + target;
+                    result.Message =
+                        "AutoCAD 实际加载的 LA_pdf.pc3 不在打印机配置搜索路径或当前 CAD 用户配置目录内，已停止修改: "
+                        + target;
                     return result;
                 }
 
@@ -1780,24 +1780,92 @@ public static class AcadPlotterInstaller
 
     public static string GetPlottersDirectory() => GetAutoCadPlotterDirectory();
 
+    /// <summary>
+    /// 解析插件应写入的 Plotters 目录。
+    /// 读取选项中的全部打印机配置搜索路径，不要求目标必须是第一项；
+    /// 优先使用仍存在的默认 <c>ROAMABLEROOTPREFIX\Plotters</c>，再回退到列表中其它存在的目录。
+    /// </summary>
     private static string GetAutoCadPlotterDirectory()
     {
-        // AutoCAD 的打印机目录来自“选项→文件→打印机配置搜索路径”，不是系统变量。
-        // 通过只读 COM 首选项获取，不写回、不改变用户搜索路径；Core Console 无 COM 时再回退。
+        var configuredDirectories = GetExistingPrinterConfigDirectories();
+        var roamableRoot = GetSystemVariableString("ROAMABLEROOTPREFIX");
+        var preferredPlotters = string.IsNullOrWhiteSpace(roamableRoot)
+            ? ""
+            : Path.Combine(roamableRoot, "Plotters");
+
+        if (!string.IsNullOrWhiteSpace(preferredPlotters))
+        {
+            foreach (var directory in configuredDirectories)
+            {
+                if (PathsEqual(directory, preferredPlotters))
+                    return Path.GetFullPath(directory);
+            }
+
+            foreach (var directory in configuredDirectories)
+            {
+                if (IsPathInsideDirectory(directory, roamableRoot))
+                    return directory;
+            }
+        }
+
+        if (configuredDirectories.Count > 0)
+            return configuredDirectories[0];
+
+        // Core Console 无 COM，或搜索路径暂时读不到时，回退到当前 CAD 用户默认 Plotters。
+        if (!string.IsNullOrWhiteSpace(preferredPlotters) && Directory.Exists(preferredPlotters))
+            return Path.GetFullPath(preferredPlotters);
+
+        return "";
+    }
+
+    /// <summary>
+    /// 枚举选项里已配置且磁盘上存在的打印机配置搜索路径，保留用户设定顺序。
+    /// </summary>
+    private static IReadOnlyList<string> GetExistingPrinterConfigDirectories()
+    {
+        var directories = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var printerConfigPath = ReadPrinterConfigPathFromPreferences();
         foreach (var configuredPath in ExpandPrinterConfigPaths(printerConfigPath))
         {
-            if (Directory.Exists(configuredPath))
-                return configuredPath;
+            if (!Directory.Exists(configuredPath))
+                continue;
+
+            try
+            {
+                var fullPath = Path.GetFullPath(configuredPath);
+                if (seen.Add(fullPath))
+                    directories.Add(fullPath);
+            }
+            catch
+            {
+                // 单个无效路径不影响检查其余搜索目录。
+            }
         }
 
-        var roamableRoot = GetSystemVariableString("ROAMABLEROOTPREFIX");
-        if (!string.IsNullOrWhiteSpace(roamableRoot))
+        return directories;
+    }
+
+    /// <summary>
+    /// 判断 LA 绘图仪文件是否允许由插件修改：位于用户配置的任一打印机搜索目录内，
+    /// 或位于当前 CAD 用户配置根目录内即可，不要求必须是搜索路径第一项。
+    /// </summary>
+    private static bool IsAllowedLaPlotterPath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return false;
+
+        var currentCadRoot = GetSystemVariableString("ROAMABLEROOTPREFIX");
+        if (IsPathInsideDirectory(path, currentCadRoot))
+            return true;
+
+        foreach (var directory in GetExistingPrinterConfigDirectories())
         {
-            return Path.Combine(roamableRoot, "Plotters");
+            if (IsPathInsideDirectory(path, directory))
+                return true;
         }
 
-        return "";
+        return false;
     }
 
     private static string ReadPrinterConfigPathFromPreferences()

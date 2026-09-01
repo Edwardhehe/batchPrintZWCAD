@@ -6,10 +6,10 @@
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <PlatformTarget>x64</PlatformTarget>
-    <Version>1.15.6.2</Version>
-    <AssemblyVersion>1.15.6.2</AssemblyVersion>
-    <FileVersion>1.15.6.2</FileVersion>
-    <InformationalVersion>1.15.6.2</InformationalVersion>
+    <Version>1.15.6.3</Version>
+    <AssemblyVersion>1.15.6.3</AssemblyVersion>
+    <FileVersion>1.15.6.3</FileVersion>
+    <InformationalVersion>1.15.6.3</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <AssemblyName>AcadBatchPlot</AssemblyName>
     <RootNamespace>ZwcadBatchPlot</RootNamespace>

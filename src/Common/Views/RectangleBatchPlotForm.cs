@@ -84,7 +84,7 @@ public sealed class RectangleBatchPlotForm : Form
 
     private void InitializeComponents()
     {
-        Text = "LA矩形框批量打印 V1.15.6.2";
+        Text = "LA矩形框批量打印 V1.15.6.3";
         FormBorderStyle = System.Windows.Forms.FormBorderStyle.Sizable;
         ClientSize = new Size(UiLayout.Scale(900), UiLayout.Scale(520));
         MinimumSize = new Size(UiLayout.Scale(720), UiLayout.Scale(460));
@@ -1521,6 +1521,8 @@ public sealed class RectangleBatchPlotForm : Form
             _style.Items.Add(style);
         }
         PlotStyleManager.RestoreSavedStyle(_style, _settings.LastStyleSheet);
+        // 上次样式在当前 CAD 不可用时已回退；立刻写回设置，避免下次仍记住失效 CTB。
+        SaveCurrentPlotOptions();
         UpdateOutputFormatUi();
         _styleSelectionReady = true;
     }

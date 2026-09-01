@@ -94,33 +94,57 @@ internal static class PlotStyleManager
     }
 
     /// <summary>
-    /// 把上次保存的 CTB 选回下拉框。已保存过时绝不回落到 monochrome，避免把用户选择冲掉。
-    /// 列表里暂时没有该文件时，把保存值插到第一项，保证界面仍显示用户上次的选择。
+    /// 在可用 CTB 列表中解析应使用的样式：优先上次保存值；找不到则回退 monochrome，再回退第一项。
+    /// 用于下拉框恢复与无 UI 的单张打印默认值，避免删掉样式或换 CAD 版本后仍记住失效 CTB。
     /// </summary>
-    public static void RestoreSavedStyle(ComboBox combo, string? savedStyleSheet)
+    public static string ResolvePreferredStyle(IEnumerable<string> styles, string? savedStyleSheet)
     {
-        var saved = NormalizeStyleName(savedStyleSheet);
-        if (TrySelectStyle(combo, saved))
+        var list = styles as IList<string> ?? styles.ToList();
+        var matched = FindSavedStyle(list, savedStyleSheet);
+        if (!string.IsNullOrEmpty(matched))
         {
-            return;
+            return matched!;
         }
 
-        if (!string.IsNullOrEmpty(saved))
+        var monochrome = list.FirstOrDefault(value =>
+            value.IndexOf("monochrome", StringComparison.OrdinalIgnoreCase) >= 0);
+        if (!string.IsNullOrEmpty(monochrome))
         {
-            combo.Items.Insert(0, saved);
-            combo.SelectedIndex = 0;
-            return;
+            return monochrome!;
         }
 
-        if (TrySelectStyle(combo, "monochrome.ctb") || TrySelectContaining(combo, "monochrome"))
+        return list.FirstOrDefault() ?? "";
+    }
+
+    /// <summary>
+    /// 把上次保存的 CTB 选回下拉框；当前 CAD 列表中不存在时，改选已有可用样式（优先 monochrome）。
+    /// </summary>
+    /// <returns>实际选中的样式名；无可用项时为空。</returns>
+    public static string RestoreSavedStyle(ComboBox combo, string? savedStyleSheet)
+    {
+        var available = combo.Items
+            .Cast<object>()
+            .Select(item => item?.ToString() ?? "")
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .ToList();
+        var preferred = ResolvePreferredStyle(available, savedStyleSheet);
+        if (string.IsNullOrEmpty(preferred))
         {
-            return;
+            return "";
+        }
+
+        if (TrySelectStyle(combo, preferred))
+        {
+            return combo.SelectedItem?.ToString() ?? preferred;
         }
 
         if (combo.Items.Count > 0)
         {
             combo.SelectedIndex = 0;
+            return combo.SelectedItem?.ToString() ?? "";
         }
+
+        return "";
     }
 
     private static bool TrySelectStyle(ComboBox combo, string saved)
@@ -133,25 +157,6 @@ internal static class PlotStyleManager
         for (var i = 0; i < combo.Items.Count; i++)
         {
             if (StyleNamesEqual(combo.Items[i]?.ToString(), saved))
-            {
-                combo.SelectedIndex = i;
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private static bool TrySelectContaining(ComboBox combo, string value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return false;
-        }
-
-        for (var i = 0; i < combo.Items.Count; i++)
-        {
-            if (combo.Items[i]?.ToString()?.IndexOf(value, StringComparison.OrdinalIgnoreCase) >= 0)
             {
                 combo.SelectedIndex = i;
                 return true;
