@@ -472,20 +472,21 @@ public sealed class BatchPlotForm : Form
 
         try
         {
-            AcadPlotterInstaller.InstallBundledPlotter();
-            var installedPngPlotter = AcadPlotterInstaller.InstallPngPlotter();
-            var installedJpgPlotter = AcadPlotterInstaller.InstallJpgPlotter();
-            var installedDwfPlotter = AcadPlotterInstaller.InstallDwfPlotter();
-            AcadPlotterInstaller.RefreshPlotterDevices();
+            var pdfInstall = AcadPlotterInstaller.InstallBundledPlotter();
+            var pngInstall = AcadPlotterInstaller.InstallPngPlotter();
+            var jpgInstall = AcadPlotterInstaller.InstallJpgPlotter();
+            var dwfInstall = AcadPlotterInstaller.InstallDwfPlotter();
+            AcadPlotterInstaller.RefreshPlotterDevicesIfNeeded(
+                pdfInstall.Written || pngInstall.Written || jpgInstall.Written || dwfInstall.Written);
             var validator = PlotSettingsValidator.Current;
             var devices = validator.GetPlotDeviceList()
                 .Cast<object>()
                 .Select(item => item?.ToString() ?? "")
                 .Where(value => !string.IsNullOrWhiteSpace(value))
                 .ToList();
-            _pngPlotDevice = FindPngPlotDevice(devices, installedPngPlotter);
-            _jpgPlotDevice = FindJpgPlotDevice(devices, installedJpgPlotter);
-            _dwfPlotDevice = FindDwfPlotDevice(devices, installedDwfPlotter);
+            _pngPlotDevice = FindPngPlotDevice(devices, pngInstall.DeviceName);
+            _jpgPlotDevice = FindJpgPlotDevice(devices, jpgInstall.DeviceName);
+            _dwfPlotDevice = FindDwfPlotDevice(devices, dwfInstall.DeviceName);
             foreach (var style in PlotStyleManager.GetAvailableCtbStyles())
             {
                 _styleCombo.Items.Add(style);

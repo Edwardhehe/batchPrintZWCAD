@@ -98,9 +98,18 @@ public static class CustomPaperBatchPreparer
             if (isDwfDevice)
             {
                 var installedDevice = AcadPlotterInstaller.InstallDwfPlotter();
-                if (!string.Equals(installedDevice, preferredPlotter, StringComparison.OrdinalIgnoreCase))
+                if (!installedDevice.Installed
+                    || !string.Equals(
+                        installedDevice.DeviceName,
+                        preferredPlotter,
+                        StringComparison.OrdinalIgnoreCase))
                 {
                     throw new InvalidOperationException("LA_dwf 打印机配置不完整，无法注册 DWF 正负留白纸张。");
+                }
+
+                if (installedDevice.Written)
+                {
+                    AcadPlotterInstaller.RefreshPlotterDevicesIfNeeded(true);
                 }
             }
             else
@@ -109,6 +118,11 @@ public static class CustomPaperBatchPreparer
                 if (!installResult.Installed)
                 {
                     throw new InvalidOperationException("LA_pdf 打印机配置不完整: " + installResult.Message);
+                }
+
+                if (installResult.Written)
+                {
+                    AcadPlotterInstaller.RefreshPlotterDevicesIfNeeded(true);
                 }
             }
 
@@ -135,21 +149,15 @@ public static class CustomPaperBatchPreparer
         var registrations = PmpCustomPaper.RegisterCustomPapers(installedPmp, requests)
             ?? throw new InvalidOperationException(
                 $"{pmpFileName} 批量注册 {outputKind} 正负留白纸张失败，已停止打印，避免回退到错误纸张。");
-        var forceDeviceReload = registrations.Any(registration => registration.WasAdded);
+        // 本批需要自定义纸：一次写 PMP 后刷新一次介质（含复用已有尺寸），不按张、不按 CAD 版本分支。
+        var forceDeviceReload = customJobs.Count > 0;
         var attachmentMessage = "";
 
 #if AUTOCAD
-        // AutoCAD 会在会话内缓存设备介质目录。即使纸张已存在于 PMP，也必须让每批首张重新加载设备，
-        // 否则换图或换批次复用自定义纸时可能继续使用旧目录。中望保留原来的“仅新增时刷新”逻辑。
-        forceDeviceReload = registrations.Count > 0;
-        // PDF 的跨版本 PC3 需要现有兼容层修正 PMP 关联。DWF PC3 继承其原生驱动，
+        // PDF 的跨版本 PC3 需要兼容层修正 PMP 关联。DWF PC3 继承其原生驱动，
         // 不能套用 DWG To PDF 的驱动路径；它只需保持安装时建立的 LA_dwf.pmp 关联。
         if (isPdfDevice)
         {
-            // 2027 即使复用 PMP 中已有尺寸，也必须让实际被 AutoCAD 解析到的同名 PC3
-            // 指向本版本 PMP；否则迁移目录中的旧 PC3 会继续读取 AutoCAD 2024 的纸张。
-            forceDeviceReload |=
-                AcadPlotterInstaller.RequiresRefreshForReusedCustomPaper(installedPlotter);
             var attachment = AcadPlotterInstaller.EnsureActivePdfPmpAttachment(
                 installedPlotter,
                 installedPmp,
@@ -176,7 +184,6 @@ public static class CustomPaperBatchPreparer
         if (forceDeviceReload)
         {
             // 介质目录按模型/布局分别缓存；每类空间只让第一张触发一次重载。
-            // 除新增纸张外，2027 复用纸张和实际 PC3 关联被修正时也必须进入此路径。
             foreach (var firstJob in customJobs.GroupBy(job => job.IsPaperSpace).Select(group => group.First()))
             {
                 firstJob.CustomPaperWasAdded = true;

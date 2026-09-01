@@ -1485,11 +1485,12 @@ public sealed class RectangleBatchPlotForm : Form
         _outputFormatCombo.SelectedIndex = 0;
         RefreshSavePathModeOptions(preserveSelection: false);
 
-        AcadPlotterInstaller.InstallBundledPlotter();
-        var installedPngPlotter = AcadPlotterInstaller.InstallPngPlotter();
-        var installedJpgPlotter = AcadPlotterInstaller.InstallJpgPlotter();
-        var installedDwfPlotter = AcadPlotterInstaller.InstallDwfPlotter();
-        AcadPlotterInstaller.RefreshPlotterDevices();
+        var pdfInstall = AcadPlotterInstaller.InstallBundledPlotter();
+        var pngInstall = AcadPlotterInstaller.InstallPngPlotter();
+        var jpgInstall = AcadPlotterInstaller.InstallJpgPlotter();
+        var dwfInstall = AcadPlotterInstaller.InstallDwfPlotter();
+        AcadPlotterInstaller.RefreshPlotterDevicesIfNeeded(
+            pdfInstall.Written || pngInstall.Written || jpgInstall.Written || dwfInstall.Written);
         var validator = PlotSettingsValidator.Current;
         var devices = validator.GetPlotDeviceList()
             .Cast<object>()
@@ -1498,17 +1499,17 @@ public sealed class RectangleBatchPlotForm : Form
             .ToList();
         _pngPlotDevice = FindPlotDevice(
             devices,
-            installedPngPlotter,
+            pngInstall.DeviceName,
             _ => false,
             AcadPlotterInstaller.PreferredPngPlotter);
         _jpgPlotDevice = FindPlotDevice(
             devices,
-            installedJpgPlotter,
+            jpgInstall.DeviceName,
             _ => false,
             AcadPlotterInstaller.PreferredJpgPlotter);
         _dwfPlotDevice = FindPlotDevice(
             devices,
-            installedDwfPlotter,
+            dwfInstall.DeviceName,
             value => value.IndexOf("DWF", StringComparison.OrdinalIgnoreCase) >= 0
                      && value.IndexOf("DWFx", StringComparison.OrdinalIgnoreCase) < 0,
             AcadPlotterInstaller.PreferredDwfPlotter,

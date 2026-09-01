@@ -22,13 +22,21 @@ public static class AcadPlotterInstaller
     {
         public bool SourceFound { get; set; }
         public bool Installed { get; set; }
+        /// <summary>本轮是否写过 PC5/PMP；用于决定是否刷新设备列表。</summary>
+        public bool Written { get; set; }
+        public string DeviceName { get; set; } = "";
         public string TargetPlotterDirectory { get; set; } = "";
         public string Message { get; set; } = "";
     }
 
+    private static bool s_devicesRefreshedThisSession;
+
     public static InstallResult InstallBundledPlotter()
     {
-        var result = new InstallResult();
+        var result = new InstallResult
+        {
+            DeviceName = PreferredPdfPlotter
+        };
         try
         {
             var sourceRoot = FindBundledPlotterRoot();
@@ -74,6 +82,7 @@ public static class AcadPlotterInstaller
             InstallPc5(sourcePc5, targetPc5, targetPmp);
 
             result.Installed = File.Exists(targetPc5) && File.Exists(targetPmp);
+            result.Written = result.Installed;
             result.Message = result.Installed
                 ? "LA_pdf 打印机配置已可用。"
                 : "LA_pdf 打印机配置未复制。";
@@ -98,7 +107,7 @@ public static class AcadPlotterInstaller
         }
     }
 
-    public static string InstallPngPlotter()
+    public static InstallResult InstallPngPlotter()
     {
         return InstallRasterPlotter(
             PreferredPngPlotter,
@@ -108,7 +117,7 @@ public static class AcadPlotterInstaller
             PreferredPngPlotter);
     }
 
-    public static string InstallJpgPlotter()
+    public static InstallResult InstallJpgPlotter()
     {
         return InstallRasterPlotter(
             PreferredJpgPlotter,
@@ -119,28 +128,35 @@ public static class AcadPlotterInstaller
             PreferredJpgPlotter);
     }
 
-    private static string InstallRasterPlotter(
+    private static InstallResult InstallRasterPlotter(
         string targetPlotterName,
         string targetPmpName,
         string[] preferredNames,
         Func<string, bool> fallbackPredicate,
         string excludedGeneratedName)
     {
+        var result = new InstallResult
+        {
+            DeviceName = targetPlotterName
+        };
         try
         {
             var targetRoot = GetAutoCadPlotterDirectory();
             if (string.IsNullOrWhiteSpace(targetRoot))
             {
-                return "";
+                result.Message = "未能定位 ZWCAD Plotters 目录。";
+                return result;
             }
 
+            result.TargetPlotterDirectory = targetRoot;
             var bundledRoot = FindBundledPlotterRoot();
             var bundledPmp = string.IsNullOrWhiteSpace(bundledRoot)
                 ? ""
                 : Path.Combine(bundledRoot, "PMP Files", PreferredPmp);
             if (string.IsNullOrWhiteSpace(bundledPmp) || !IsUsableFile(bundledPmp))
             {
-                return "";
+                result.Message = "未找到随包 PMP。";
+                return result;
             }
 
             var targetPmpDirectory = Path.Combine(targetRoot, "PMP Files");
@@ -169,7 +185,8 @@ public static class AcadPlotterInstaller
             sourcePc5 ??= sources.FirstOrDefault(path => fallbackPredicate(Path.GetFileName(path)));
             if (string.IsNullOrWhiteSpace(sourcePc5))
             {
-                return "";
+                result.Message = "未找到可用的栅格绘图仪源 PC5。";
+                return result;
             }
 
             // 软件自有 PNG/JPG PC5 继承对应栅格驱动，但纸张始终来自随插件发布的独立 PMP。
@@ -179,16 +196,26 @@ public static class AcadPlotterInstaller
             var text = File.ReadAllText(sourcePc5, encoding);
             text = Regex.Replace(text, @"(?im)^pmp_filepath=.*$", "pmp_filepath=" + targetPmp);
             File.WriteAllText(targetPc5, text, encoding);
-            return IsUsableFile(targetPc5) && IsUsableFile(targetPmp) ? targetPlotterName : "";
+            result.SourceFound = true;
+            result.Installed = IsUsableFile(targetPc5) && IsUsableFile(targetPmp);
+            result.Written = result.Installed;
+            result.Message = result.Installed
+                ? targetPlotterName + " 已安装。"
+                : targetPlotterName + " 安装后不可用。";
+            return result;
         }
-        catch
+        catch (Exception ex)
         {
-            return "";
+            result.Message = ex.Message;
+            return result;
         }
     }
 
-    public static void RefreshPlotterDevices()
+    public static void RefreshPlotterDevices(bool force = false)
     {
+        if (!force && s_devicesRefreshedThisSession)
+            return;
+
         try
         {
             // ZWCAD 没有公开的全局 PC5 刷新入口，通过临时 PlotSettings 强制重读设备/纸张列表。
@@ -196,11 +223,20 @@ public static class AcadPlotterInstaller
             var validator = ZwSoft.ZwCAD.DatabaseServices.PlotSettingsValidator.Current;
             validator.SetPlotConfigurationName(settings, "None", null);
             validator.RefreshLists(settings);
+            s_devicesRefreshedThisSession = true;
         }
         catch
         {
             // 调用方会检查 LA_png/LA_jpg 是否出现在当前枚举中；失败时明确报错，不回退自带设备。
         }
+    }
+
+    /// <summary>
+    /// 本轮写过配置，或本会话尚未做过安装类刷新时，才刷新设备列表。
+    /// </summary>
+    public static void RefreshPlotterDevicesIfNeeded(bool configWritten)
+    {
+        RefreshPlotterDevices(force: configWritten || !s_devicesRefreshedThisSession);
     }
 
     /// <summary>
@@ -249,7 +285,7 @@ public static class AcadPlotterInstaller
             {
                 File.WriteAllText(pc5Path, updated, encoding);
                 result.Changed = true;
-                RefreshPlotterDevices();
+                RefreshPlotterDevices(force: true);
             }
 
             result.Success = true;
@@ -263,16 +299,22 @@ public static class AcadPlotterInstaller
         }
     }
 
-    public static string InstallDwfPlotter()
+    public static InstallResult InstallDwfPlotter()
     {
+        var result = new InstallResult
+        {
+            DeviceName = PreferredDwfPlotter
+        };
         try
         {
             var targetRoot = GetAutoCadPlotterDirectory();
             if (string.IsNullOrWhiteSpace(targetRoot))
             {
-                return "";
+                result.Message = "未能定位 ZWCAD Plotters 目录。";
+                return result;
             }
 
+            result.TargetPlotterDirectory = targetRoot;
             var targetPmpDir = Path.Combine(targetRoot, "PMP Files");
             var sourcePmp = Path.Combine(targetPmpDir, PreferredPmp);
             var targetPmp = Path.Combine(targetPmpDir, PreferredDwfPmp);
@@ -280,12 +322,15 @@ public static class AcadPlotterInstaller
             // DWF 正留白会向 LA_dwf.pmp 注册扩大纸张；重复打开窗口时不能再用 LA_pdf.pmp 覆盖。
             if (IsUsableFile(targetPc5) && IsUsableFile(targetPmp))
             {
-                return PreferredDwfPlotter;
+                result.Installed = true;
+                result.Message = "LA_dwf 已存在，已保留现有 PC5/PMP。";
+                return result;
             }
 
             if (!File.Exists(sourcePmp))
             {
-                return "";
+                result.Message = "缺少 LA_pdf.pmp，无法生成 LA_dwf。";
+                return result;
             }
 
             Directory.CreateDirectory(targetRoot);
@@ -299,18 +344,29 @@ public static class AcadPlotterInstaller
                                         && Path.GetFileName(path).IndexOf("DWFx", StringComparison.OrdinalIgnoreCase) < 0);
             if (string.IsNullOrWhiteSpace(sourcePc5))
             {
-                return File.Exists(targetPc5) ? PreferredDwfPlotter : "";
+                result.Installed = File.Exists(targetPc5);
+                result.Written = result.Installed;
+                result.Message = result.Installed
+                    ? "LA_dwf 已可用。"
+                    : "未找到 DWF 源 PC5。";
+                return result;
             }
 
             var encoding = System.Text.Encoding.GetEncoding(936);
             var text = File.ReadAllText(sourcePc5, encoding);
             text = Regex.Replace(text, @"(?im)^pmp_filepath=.*$", "pmp_filepath=" + targetPmp);
             File.WriteAllText(targetPc5, text, encoding);
-            return File.Exists(targetPc5) && File.Exists(targetPmp) ? PreferredDwfPlotter : "";
+            result.Installed = File.Exists(targetPc5) && File.Exists(targetPmp);
+            result.Written = result.Installed;
+            result.Message = result.Installed
+                ? "LA_dwf 已安装。"
+                : "LA_dwf 安装后不可用。";
+            return result;
         }
-        catch
+        catch (Exception ex)
         {
-            return "";
+            result.Message = ex.Message;
+            return result;
         }
     }
 

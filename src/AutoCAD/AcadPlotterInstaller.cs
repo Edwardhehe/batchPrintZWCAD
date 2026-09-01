@@ -31,6 +31,9 @@ public static class AcadPlotterInstaller
     {
         public bool SourceFound { get; set; }
         public bool Installed { get; set; }
+        /// <summary>本轮是否写过 PC3/PMP（含关联修正）；用于决定是否刷新设备列表。</summary>
+        public bool Written { get; set; }
+        public string DeviceName { get; set; } = "";
         public string TargetPlotterDirectory { get; set; } = "";
         public string Message { get; set; } = "";
     }
@@ -43,9 +46,14 @@ public static class AcadPlotterInstaller
         public string Message { get; set; } = "";
     }
 
+    private static bool s_devicesRefreshedThisSession;
+
     public static InstallResult InstallBundledPlotter()
     {
-        var result = new InstallResult();
+        var result = new InstallResult
+        {
+            DeviceName = PreferredPdfPlotter
+        };
         try
         {
             var targetRoot = GetAutoCadPlotterDirectory();
@@ -61,9 +69,24 @@ public static class AcadPlotterInstaller
             Directory.CreateDirectory(targetPmpDir);
             var targetPc3 = Path.Combine(targetRoot, PreferredPdfPlotter);
             var targetPmp = Path.Combine(targetPmpDir, PreferredPmp);
+            result.SourceFound = true;
 
-            // 不转换、不合并既有 LA PIA。每次都从随包 PIA2 基准重新生成，
-            // 只读取当前 CAD 自带绘图仪的驱动路径，并覆盖插件自有 LA_pdf。
+            // 完好则跳过模板覆盖，仅轻量修正实际加载 PC3 的 PMP 关联；损坏/不完整才重装。
+            if (IsLaPlotterPairUsable(PreferredPdfPlotter, targetPc3, targetPmp))
+            {
+                var keepAttachment = EnsureActivePdfPmpAttachment(
+                    targetPc3,
+                    targetPmp,
+                    forceRewrite: false);
+                result.Installed = keepAttachment.Success;
+                result.Written = keepAttachment.Changed;
+                result.Message = keepAttachment.Success
+                    ? "LA_pdf 已可用，已保留现有 PC3/PMP。"
+                      + (keepAttachment.Changed ? " " + keepAttachment.Message : "")
+                    : "LA_pdf 实际打印机关联失败: " + keepAttachment.Message;
+                return result;
+            }
+
             if (!TryInstallForcedPia2PdfPlotter(
                     targetRoot,
                     targetPc3,
@@ -73,9 +96,7 @@ public static class AcadPlotterInstaller
                 result.Message = installMessage;
                 return result;
             }
-            const bool pia2WasWritten = true;
 
-            result.SourceFound = true;
             if (!IsReadablePia2PlotterFile(targetPc3)
                 || !IsReadablePia2PlotterFile(targetPmp))
             {
@@ -86,7 +107,7 @@ public static class AcadPlotterInstaller
             if (!EnsurePmpAttachment(
                     targetPc3,
                     targetPmp,
-                    forceRewrite: pia2WasWritten,
+                    forceRewrite: true,
                     out var attachmentMessage))
             {
                 result.Message = "LA_pdf PIA2 关联失败: " + attachmentMessage;
@@ -96,8 +117,9 @@ public static class AcadPlotterInstaller
             var activeAttachment = EnsureActivePdfPmpAttachment(
                 targetPc3,
                 targetPmp,
-                forceRewrite: pia2WasWritten);
+                forceRewrite: true);
             result.Installed = activeAttachment.Success;
+            result.Written = activeAttachment.Success;
             result.Message = activeAttachment.Success
                 ? "LA_pdf 已由随包模板重新生成并固定为 PIA2；"
                   + activeAttachment.Message
@@ -111,62 +133,100 @@ public static class AcadPlotterInstaller
         }
     }
 
-    public static string InstallPngPlotter()
+    public static InstallResult InstallPngPlotter()
     {
         return InstallRasterPlotter(PreferredPngPlotter, PreferredPngPmp);
     }
 
-    public static string InstallJpgPlotter()
+    public static InstallResult InstallJpgPlotter()
     {
         return InstallRasterPlotter(PreferredJpgPlotter, PreferredJpgPmp);
     }
 
-    private static string InstallRasterPlotter(
+    private static InstallResult InstallRasterPlotter(
         string targetPlotterName,
         string targetPmpName)
     {
+        var result = new InstallResult
+        {
+            DeviceName = targetPlotterName
+        };
         try
         {
             var targetRoot = GetAutoCadPlotterDirectory();
             if (string.IsNullOrWhiteSpace(targetRoot))
             {
-                return "";
+                result.Message = "未能定位 AutoCAD Plotters 目录。";
+                return result;
             }
 
+            result.TargetPlotterDirectory = targetRoot;
             var targetPmpDirectory = Path.Combine(targetRoot, "PMP Files");
             Directory.CreateDirectory(targetRoot);
             Directory.CreateDirectory(targetPmpDirectory);
             var targetPc3 = Path.Combine(targetRoot, targetPlotterName);
             var targetPmp = Path.Combine(targetPmpDirectory, targetPmpName);
 
+            if (IsLaPlotterPairUsable(targetPlotterName, targetPc3, targetPmp))
+            {
+                result.SourceFound = true;
+                result.Installed = true;
+                result.Message = targetPlotterName + " 已可用，已保留现有 PC3/PMP。";
+                return result;
+            }
+
             var metadataSource = FindReadOnlyMetadataSource(targetRoot, targetPlotterName);
-            return TryWriteLaPia2PairFromTemplate(
-                       targetPlotterName,
-                       targetPc3,
-                       targetPmp,
-                       metadataSource,
-                       out _)
-                ? targetPlotterName
-                : "";
+            if (!TryWriteLaPia2PairFromTemplate(
+                    targetPlotterName,
+                    targetPc3,
+                    targetPmp,
+                    metadataSource,
+                    out var message))
+            {
+                result.Message = message;
+                return result;
+            }
+
+            result.SourceFound = true;
+            result.Installed = true;
+            result.Written = true;
+            result.Message = targetPlotterName + " 已由随包模板生成。";
+            return result;
         }
-        catch
+        catch (Exception ex)
         {
-            return "";
+            result.Message = ex.Message;
+            return result;
         }
     }
 
-    public static void RefreshPlotterDevices()
+    /// <summary>
+    /// 刷新全局 PC3 设备列表。默认受会话门闩约束；force 用于配置内容刚变更后必须重枚举。
+    /// </summary>
+    public static void RefreshPlotterDevices(bool force = false)
     {
+        if (!force && s_devicesRefreshedThisSession)
+            return;
+
         try
         {
             // 新用户首次安装时 PC3 在 CAD 启动后才生成，必须刷新全局设备列表才能在当前会话使用。
             Autodesk.AutoCAD.PlottingServices.PlotConfigManager.RefreshList(
                 Autodesk.AutoCAD.PlottingServices.RefreshCode.RefreshPC3DevicesList);
+            s_devicesRefreshedThisSession = true;
         }
         catch
         {
             // 调用方随后会按当前枚举结果校验；刷新失败时不得回退到 CAD 自带设备。
         }
+    }
+
+    /// <summary>
+    /// 本轮写过配置，或本会话尚未做过安装类刷新时，才刷新设备列表。
+    /// </summary>
+    public static void RefreshPlotterDevicesIfNeeded(bool configWritten)
+    {
+        RefreshPlotterDevices(force: configWritten || !s_devicesRefreshedThisSession);
     }
 
     public static (double X, double Y) GetRasterDpi(string deviceName)
@@ -197,36 +257,78 @@ public static class AcadPlotterInstaller
         }
     }
 
-    public static string InstallDwfPlotter()
+    public static InstallResult InstallDwfPlotter()
     {
+        var result = new InstallResult
+        {
+            DeviceName = PreferredDwfPlotter
+        };
         try
         {
             var targetRoot = GetAutoCadPlotterDirectory();
             if (string.IsNullOrWhiteSpace(targetRoot))
             {
-                return "";
+                result.Message = "未能定位 AutoCAD Plotters 目录。";
+                return result;
             }
 
+            result.TargetPlotterDirectory = targetRoot;
             var targetPc3 = Path.Combine(targetRoot, PreferredDwfPlotter);
             var targetPmpDir = Path.Combine(targetRoot, "PMP Files");
             var targetPmp = Path.Combine(targetPmpDir, PreferredDwfPmp);
             Directory.CreateDirectory(targetRoot);
             Directory.CreateDirectory(targetPmpDir);
 
+            if (IsLaPlotterPairUsable(PreferredDwfPlotter, targetPc3, targetPmp))
+            {
+                result.SourceFound = true;
+                result.Installed = true;
+                result.Message = "LA_dwf 已可用，已保留现有 PC3/PMP。";
+                return result;
+            }
+
             var sourcePc3 = FindReadOnlyMetadataSource(targetRoot, PreferredDwfPlotter);
-            return TryWriteLaPia2PairFromTemplate(
-                       PreferredDwfPlotter,
-                       targetPc3,
-                       targetPmp,
-                       sourcePc3,
-                       out _)
-                ? PreferredDwfPlotter
-                : "";
+            if (!TryWriteLaPia2PairFromTemplate(
+                    PreferredDwfPlotter,
+                    targetPc3,
+                    targetPmp,
+                    sourcePc3,
+                    out var message))
+            {
+                result.Message = message;
+                return result;
+            }
+
+            result.SourceFound = true;
+            result.Installed = true;
+            result.Written = true;
+            result.Message = "LA_dwf 已由随包模板生成。";
+            return result;
         }
-        catch
+        catch (Exception ex)
         {
-            return "";
+            result.Message = ex.Message;
+            return result;
         }
+    }
+
+    /// <summary>
+    /// 判定插件自有 LA PC3/PMP 是否可直接使用：PIA2 可读、基准介质完整、驱动与 PMP 关联有效。
+    /// 任一项失败则必须从随包模板重装（失败封闭）。
+    /// </summary>
+    private static bool IsLaPlotterPairUsable(string deviceName, string pc3Path, string pmpPath)
+    {
+        if (!IsSupportedLaPlotter(deviceName))
+            return false;
+        if (!IsReadablePia2PlotterFile(pc3Path) || !IsReadablePia2PlotterFile(pmpPath))
+            return false;
+        if (!HasCompleteBundledMediaCatalog(deviceName, pmpPath))
+            return false;
+        if (string.IsNullOrWhiteSpace(ReadDriverPath(pc3Path)))
+            return false;
+
+        var attachedPmp = ReadAttachedPmpPath(pc3Path);
+        return !string.IsNullOrWhiteSpace(attachedPmp) && PathsEqual(attachedPmp, pmpPath);
     }
 
     private static bool IsValidPlotterFile(string path)
@@ -262,29 +364,8 @@ public static class AcadPlotterInstaller
     }
 
     /// <summary>
-    /// AutoCAD 2027 的 PIA2 会长期缓存 PC3/PMP 的介质目录。
-    /// 单张打印复用 PMP 中已有的任意纸张时，即使文件没有新增节点，也必须重写关联并刷新设备；
-    /// 2019 虽然也是 PIA2，但不需要承担 2027 的额外刷新开销。
-    /// </summary>
-    public static bool RequiresRefreshForReusedCustomPaper(string pc3Path)
-    {
-        if (!IsPia2PlotterFile(pc3Path))
-            return false;
-
-        var acadVersion = GetSystemVariableString("ACADVER");
-        var match = System.Text.RegularExpressions.Regex.Match(acadVersion, @"(?<version>\d+(?:\.\d+)?)");
-        return match.Success
-               && double.TryParse(
-                   match.Groups["version"].Value,
-                   NumberStyles.Float,
-                   CultureInfo.InvariantCulture,
-                   out var release)
-               && release >= 26d;
-    }
-
-    /// <summary>
     /// 解析 AutoCAD 按设备名实际加载的 PC3 完整路径。
-    /// 2027 迁移旧配置后可能出现多个同名 LA_pdf.pc3；打印 API 只接收设备名时，
+    /// 迁移旧配置后可能出现多个同名 LA_pdf.pc3；打印 API 只接收设备名时，
     /// 不能再假设实际设备就是 ROAMABLEROOTPREFIX\Plotters 下的同名文件。
     /// </summary>
     public static string ResolveActivePlotterPath(string deviceName)
@@ -358,7 +439,7 @@ public static class AcadPlotterInstaller
 
             if (result.Changed)
             {
-                PlotConfigManager.RefreshList(RefreshCode.RefreshPC3DevicesList);
+                RefreshPlotterDevices(force: true);
             }
 
             result.Success = true;

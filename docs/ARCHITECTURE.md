@@ -355,7 +355,10 @@ SinglePlotCore() 中 candidates.Count == 0
 | 比例/图幅对话框 | CustomScaleForm — [CustomScaleForm.cs](src/Common/Views/CustomScaleForm.cs) |
 | 图框录入任意纸 | ArbitraryPaperPicker.DetectCandidatesOrPrompt — [ArbitraryPaperPicker.cs](src/Common/Services/Paper/ArbitraryPaperPicker.cs) |
 | PMP 注册/清理 | PmpCustomPaper — [PmpCustomPaper.cs](src/Common/Services/Paper/PmpCustomPaper.cs) |
+| 批打整批准备 | CustomPaperBatchPreparer — 扫描所得全量尺寸一次写 PMP；本批需要自定义纸则首张强制重载介质一次 |
 | PC3 关联刷新 | AcadPlotterInstaller.EnsureActivePdfPmpAttachment — 平台特有 |
+
+> 批打/预览不在扫描结束立刻改 PMP（避免扫了不打也改盘）；在打印或预览前 `Prepare` 用已知全量 job 一次写入。不按 CAD 版本特判刷新。
 
 > 图框录入侧与单张类似，但可自由拉伸动态块（IncludeGenericDynamicTitleBlockPaper=true）**禁止**长宽比套标准图幅，避免把拉伸长度当成任意比例。详见 [10.7](#107-任意纸张与长宽比选纸)。
 
@@ -445,9 +448,11 @@ PlotterService.PlotMany(Jobs, deviceName, styleSheet, settings)
 #### 设备安装、枚举与预览
 
 ```text
-插件初始化/批量打印窗体首次打开
-  ├─ 安装或修复插件自有 LA_pdf / LA_png / LA_jpg / LA_dwf 配置
-  ├─ 刷新 CAD 绘图仪设备列表
+插件初始化 / 打开批量窗体
+  ├─ 检查 LA_pdf / LA_png / LA_jpg / LA_dwf 是否可用
+  │     ├─ 可用 → 跳过写盘（关联若被轻量修正则计为 Written）
+  │     └─ 缺失/损坏/介质不完整 → 随包模板重装
+  ├─ 仅当本轮 Written 或本会话尚未刷新过 → Refresh 设备列表
   └─ 按当前输出格式解析设备
        ├─ 预览 → SelectedPlotDevice
        └─ 打印 → SelectedPlotDevice
@@ -456,10 +461,11 @@ PlotterService.PlotMany(Jobs, deviceName, styleSheet, settings)
 - 选择什么格式，就使用该格式的设备进行预览和正式打印，避免预览仍固定走 PDF 设备。
 - PNG/JPG 必须枚举到插件自有的 `LA_png` / `LA_jpg`；如果配置安装失败或 CAD 尚未识别，直接给出明确错误，不回退到 `PublishToWeb PNG/JPG` 等自带设备。
 - 安装器只创建、覆盖或修复 `LA_*` 文件，不修改用户已有的其他 PC3/PC5/PMP 配置。
+- AutoCAD 与中望对齐思路：**完好配置不重复覆盖**；设备列表按会话按需刷新，避免每次开窗强制重写 PC3/PMP。
 
 #### AutoCAD 栅格设备
 
-AutoCAD 的 `PublishToWeb PNG.pc3` / `PublishToWeb JPG.pc3` 只读，仅提供当前 CAD 的驱动路径。安装器始终以随包、已验证的 PIA2 模板生成插件自有的 `LA_png.pc3` / `LA_jpg.pc3` 及 PIA2 PMP。标准 A4～A0 及加长规格共有 85 个毫米规格，每个规格写入横、竖两个像素介质，共 170 个介质项。
+AutoCAD 的 `PublishToWeb PNG.pc3` / `PublishToWeb JPG.pc3` 只读，仅提供当前 CAD 的驱动路径。缺失或损坏时，安装器以随包、已验证的 PIA2 模板生成插件自有的 `LA_png.pc3` / `LA_jpg.pc3` 及 PIA2 PMP；已可用则保留。标准 A4～A0 及加长规格共有 85 个毫米规格，每个规格写入横、竖两个像素介质，共 170 个介质项。
 
 AutoCAD 栅格驱动要求 `PlotPaperUnit.Pixels`。业务层仍以毫米识别图框和纸张，`PlotterService` 读取设备 DPI 后执行双向换算：
 

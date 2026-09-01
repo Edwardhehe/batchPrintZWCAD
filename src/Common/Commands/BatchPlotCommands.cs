@@ -44,11 +44,12 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
         PluginAssemblyResolver.Register();
 #endif
 
-        AcadPlotterInstaller.InstallBundledPlotter();
-        // 新用户首次加载时生成软件自有的栅格绘图器，并立即刷新当前 CAD 会话的设备缓存。
-        AcadPlotterInstaller.InstallPngPlotter();
-        AcadPlotterInstaller.InstallJpgPlotter();
-        AcadPlotterInstaller.RefreshPlotterDevices();
+        var pdfInstall = AcadPlotterInstaller.InstallBundledPlotter();
+        // 新用户首次加载时生成软件自有的栅格绘图器，并按需刷新当前 CAD 会话的设备缓存。
+        var pngInstall = AcadPlotterInstaller.InstallPngPlotter();
+        var jpgInstall = AcadPlotterInstaller.InstallJpgPlotter();
+        AcadPlotterInstaller.RefreshPlotterDevicesIfNeeded(
+            pdfInstall.Written || pngInstall.Written || jpgInstall.Written);
         CadMenuInstaller.Install();
         // 每次加载时恢复用户设置的简化命令到 PGP 文件（Power 等重置 PGP 后自动修复）。
         CommandAliasManager.Apply(AppSettingsStore.Load().CommandAliases, out _);

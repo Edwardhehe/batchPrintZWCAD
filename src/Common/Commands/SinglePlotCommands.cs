@@ -139,16 +139,13 @@ public sealed partial class BatchPlotCommands
 
                         customPaperRegistration = PmpCustomPaper.RegisterCustomPaper(customPmpPath, paperW, paperH)
                             ?? throw new InvalidOperationException("LA_pdf.pmp 注册任意纸张失败。");
-                        forceCustomPaperReload = customPaperRegistration.WasAdded;
+                        // 需要自定义纸时刷新一次介质；不按 CAD 版本分支。
+                        forceCustomPaperReload = true;
 #if AUTOCAD
-                        // AutoCAD 2027 的 PIA2 会缓存设备介质。已有同尺寸纸张返回 WasAdded=false，
-                        // 但当前会话仍可能没有枚举到它；单张打印必须照样重写关联并强制刷新。
-                        forceCustomPaperReload |=
-                            AcadPlotterInstaller.RequiresRefreshForReusedCustomPaper(installedPlotter);
                         var attachment = AcadPlotterInstaller.EnsureActivePdfPmpAttachment(
                             installedPlotter,
                             customPmpPath,
-                            forceRewrite: forceCustomPaperReload);
+                            forceRewrite: true);
                         if (!attachment.Success)
                         {
                             throw new InvalidOperationException("LA_pdf.pc3 关联当前 PMP 失败：" + attachment.Message);
