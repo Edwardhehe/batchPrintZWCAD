@@ -1,5 +1,9 @@
 <Project>
   <PropertyGroup>
+    <!-- 仓库根目录（本文件所在目录）。项目文件位于 src\<项目名>\ 下，
+         需要据此定位输出目录与 resources\ 等共享资源。 -->
+    <RepoRoot>$(MSBuildThisFileDirectory)</RepoRoot>
+    <!-- 中间产物按项目各自存放于其项目目录内 -->
     <BaseIntermediateOutputPath>obj\$(MSBuildProjectName)\</BaseIntermediateOutputPath>
   </PropertyGroup>
 </Project>

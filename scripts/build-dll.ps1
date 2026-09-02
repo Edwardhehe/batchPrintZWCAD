@@ -12,19 +12,20 @@ $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
 
+# 项目文件位于 src\<项目名>\ 下；输出目录仍统一在仓库根目录。
 $projects = [ordered]@{
     Zwcad = @{
-        Project = "BatchPlotter.csproj"
+        Project = "src\BatchPlotter\BatchPlotter.csproj"
         Output = "bin"
         Dll = "BatchPlotter.dll"
     }
     AutoCAD = @{
-        Project = "AcadBatchPlot.csproj"
+        Project = "src\AcadBatchPlot\AcadBatchPlot.csproj"
         Output = "bin-acad"
         Dll = "AcadBatchPlot.dll"
     }
     AutoCAD2025 = @{
-        Project = "AcadBatchPlot.Core.csproj"
+        Project = "src\AcadBatchPlot.Core\AcadBatchPlot.Core.csproj"
         Output = "bin-acad2025*"
         Dll = "AcadBatchPlot.Core.dll"
     }

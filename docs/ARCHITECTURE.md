@@ -852,9 +852,9 @@ AutoCAD Core 版本额外使用 `#if ACAD_CORE` 子条件处理 `CadApp.ShowModa
 
 | .csproj | 平台 | Target | Output |
 |---------|------|--------|--------|
-| `BatchPlotter.csproj` | ZWCAD | net48 | `bin\BatchPlotter.dll` |
-| `AcadBatchPlot.csproj` | AutoCAD 2015-2024 | net48 | `bin-acad\AcadBatchPlot.dll` |
-| `AcadBatchPlot.Core.csproj` | AutoCAD 2025-2027 Core | net8.0-windows | `bin-acad2025-2027\AcadBatchPlot.Core.dll` |
+| `src/BatchPlotter/BatchPlotter.csproj` | ZWCAD | net48 | `bin\BatchPlotter.dll` |
+| `src/AcadBatchPlot/AcadBatchPlot.csproj` | AutoCAD 2015-2024 | net48 | `bin-acad\AcadBatchPlot.dll` |
+| `src/AcadBatchPlot.Core/AcadBatchPlot.Core.csproj` | AutoCAD 2025-2027 Core | net8.0-windows | `bin-acad2025-2027\AcadBatchPlot.Core.dll` |
 
 > 最低支持 AutoCAD 2015。主项目使用 AutoCAD.NET 20.0 SDK (2015) 编译，2015~2024 全系列共用 `AcadBatchPlot.dll`；2025~2027 全系列共用 `AcadBatchPlot.Core.dll`。
 
@@ -871,13 +871,16 @@ LA批量打印/
 │   ├── 用户使用说明.md
 │   └── 软件说明.txt
 │
-├── BatchPlotter.csproj             ← ZWCAD 编译入口 (net48)
-├── AcadBatchPlot.csproj            ← AutoCAD 2015-2024 编译入口 (net48)
-├── AcadBatchPlot.Core.csproj       ← AutoCAD 2025-2027 Core 编译入口 (net8.0-windows)
-├── Directory.Build.props           ← 共享 MSBuild 属性 (BaseIntermediateOutputPath)
+├── LA.BatchPlot.sln                ← 解决方案（含下列四个项目）
+├── Directory.Build.props           ← 共享 MSBuild 属性 (RepoRoot / BaseIntermediateOutputPath)
 ├── global.json                     ← 最低 SDK 9.0.100，同主版本内自动用最新已安装 SDK
 │
 ├── src/
+│   ├── BatchPlotter/               ← ZWCAD 编译入口 (net48) → bin\
+│   ├── AcadBatchPlot/              ← AutoCAD 2015-2024 编译入口 (net48) → bin-acad\
+│   ├── AcadBatchPlot.Core/         ← AutoCAD 2025-2027 Core 编译入口 (net8.0-windows) → bin-acad2025-2027\
+│   ├── PianNoCN/                   ← PIA 2.0 文件格式解析库
+│   │
 │   ├── Common/                     ← 双平台共享代码 (#if AUTOCAD)，按 C# 分层目录组织，namespace 仍为 ZwcadBatchPlot
 │   │   ├── Commands/                   ← 命令层：CAD 命令入口（BatchPlotCommands partial class）
 │   │   │   ├── BatchPlotCommands.cs        ← 命令注册入口 + 面板生命周期 + UI工具
@@ -1166,5 +1169,5 @@ public sealed class AppSettings
 | `PDFsharp` 1.50.5147 | PDF 合并、验证、页数检查 |
 | `SharpZipLib` 1.3.3–1.4.2 | PIA 2.0 deflate 解压/压缩（PianNoCN 序列化依赖） |
 | `AutoCAD.NET` (20.0.1 / 23.0.0 / 25.0.0) | AutoCAD .NET API（仅 AutoCAD，运行时由 CAD 提供） |
-| `ZwManaged.dll` / `ZwDatabaseMgd.dll` | ZWCAD .NET API（仅 ZWCAD，运行时由 ZWCAD 提供） |
+| `ZWCad.Net.2025` | ZWCAD .NET API（仅 ZWCAD，`ExcludeAssets="runtime"`，运行时由 ZWCAD 提供） |
 | `PianNoCN` (内嵌源码) | PIA 2.0 文件格式解析（自定义纸张时读取/写入 PIA 2.0 压缩 PMP） |
