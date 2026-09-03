@@ -3,7 +3,8 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Windows.Forms;
+using System.Windows;
+using System.Windows.Controls;
 #if AUTOCAD
 using Autodesk.AutoCAD.DatabaseServices;
 #if ACAD_CORE
@@ -166,7 +167,7 @@ internal static class PlotStyleManager
         return false;
     }
 
-    public static void EditSelectedStyle(IWin32Window owner, string? styleSheet)
+    public static void EditSelectedStyle(Window owner, string? styleSheet)
     {
         var selectedStyle = styleSheet ?? "";
         if (string.IsNullOrWhiteSpace(selectedStyle))
@@ -175,8 +176,8 @@ internal static class PlotStyleManager
                 owner,
                 "请先选择一个打印样式。",
                 "打印样式设置",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information);
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
             return;
         }
 
@@ -187,8 +188,8 @@ internal static class PlotStyleManager
                 owner,
                 $"未找到打印样式文件“{selectedStyle}”。请检查当前 CAD 的打印样式搜索路径。",
                 "打印样式设置",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Warning);
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
             return;
         }
 
@@ -209,8 +210,8 @@ internal static class PlotStyleManager
                     owner,
                     $"无法直接启动打印样式表编辑器，已在资源管理器中定位“{selectedStyle}”。\n请双击该文件进行修改。\n\n{ex.Message}",
                     "打印样式设置",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
                 return;
             }
 
@@ -218,8 +219,8 @@ internal static class PlotStyleManager
                 owner,
                 $"无法打开打印样式“{selectedStyle}”。\n\n{ex.Message}",
                 "打印样式设置",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Error);
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
         }
     }
 

@@ -1,9 +1,9 @@
 using System;
-using System.Drawing;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Windows.Forms;
+using System.Windows;
+using System.Windows.Controls;
 #if AUTOCAD
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.DatabaseServices;
@@ -31,10 +31,18 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
     private static BatchPlotForm? _batchPlotForm;
     private static RectangleBatchPlotForm? _rectangleBatchPlotForm;
 
+    // WPF pack URI 资源查找依赖按短名定位插件程序集；命令类首次被使用前必须挂好兜底解析。
+    static BatchPlotCommands()
+    {
+        LoadedAssemblyResolver.Register();
+    }
+
     // ---- 插件生命周期 ----
 
     public void Initialize()
     {
+        LoadedAssemblyResolver.Register();
+
         if (IsCoreConsole())
         {
             return;
@@ -111,8 +119,8 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
     [CommandMethod("ZBP_MANAGE_LIBRARY", CommandFlags.Session)]
     public void ManageLibrary()
     {
-        using var form = new TitleBlockLibraryManagerForm();
-        ShowModalDialog(form);
+        var form = new TitleBlockLibraryManagerForm();
+        CadDialog.ShowModal(form);
     }
 
     [CommandMethod("_ZBP_INTERNAL_MANAGE_LIBRARY", CommandFlags.Session)]
@@ -123,8 +131,8 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
     {
         while (true)
         {
-            using var form = new SettingsForm();
-            if (ShowModalDialog(form) != DialogResult.OK)
+            var form = new SettingsForm();
+            if (CadDialog.ShowModal(form) != true)
             {
                 return;
             }
@@ -144,8 +152,8 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
                 MessageBox.Show(
                     "当前没有可用的 CAD 图纸，请先打开图纸后重试。",
                     "批量打印设置",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
                 continue;
             }
 
@@ -173,7 +181,7 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
                     out _,
                     out message);
             }
-            MessageBox.Show(message, "批量打印设置", MessageBoxButtons.OK, ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+            MessageBox.Show(message, "批量打印设置", MessageBoxButton.OK, ok ? MessageBoxImage.Information : MessageBoxImage.Warning);
             // 每次 CAD 取样后重新打开设置页，支持连续调整目录行高和多个列宽。
         }
     }
@@ -191,8 +199,8 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
     [CommandMethod("ZBP_ABOUT")]
     public void About()
     {
-        using var dialog = new AboutDialog();
-        ShowModalDialog(dialog);
+        var dialog = new AboutDialog();
+        CadDialog.ShowModal(dialog);
     }
 
     [CommandMethod("_ZBP_INTERNAL_ABOUT")]
@@ -207,12 +215,12 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
             MessageBox.Show(
                 "已安装自动加载。\n\n仅对当前这套CAD生效，其它版本不会自动加载。\n下次启动当前CAD后会自动加载批量打印插件。\n\n写入位置:\n" + string.Join("\n", roots),
                 "批量打印",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information);
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
         }
         catch (System.Exception ex)
         {
-            MessageBox.Show("安装自动加载失败: " + ex.Message, "批量打印", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show("安装自动加载失败: " + ex.Message, "批量打印", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -230,12 +238,12 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
                     ? "已卸载自动加载。\n\n仅取消了当前这套CAD的自动加载。当前已加载的插件会在本次会话继续可用，关闭CAD后不会再自动加载。"
                     : "没有找到已安装的自动加载项。",
                 "批量打印",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information);
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
         }
         catch (System.Exception ex)
         {
-            MessageBox.Show("卸载自动加载失败: " + ex.Message, "批量打印", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show("卸载自动加载失败: " + ex.Message, "批量打印", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -254,8 +262,8 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
     private static void ShortcutSettingsCore()
     {
         var settings = AppSettingsStore.Load();
-        using var form = new ShortcutSettingsDialog(settings.CommandAliases);
-        if (ShowModalDialog(form) != DialogResult.OK)
+        var form = new ShortcutSettingsDialog(settings.CommandAliases);
+        if (CadDialog.ShowModal(form) != true)
         {
             return;
         }
@@ -268,8 +276,8 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
         MessageBox.Show(
             message,
             "快捷键设置",
-            MessageBoxButtons.OK,
-            applied ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+            MessageBoxButton.OK,
+            applied ? MessageBoxImage.Information : MessageBoxImage.Warning);
     }
 
     // ---- 批量打印面板（图框库匹配） ----
@@ -282,7 +290,7 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
             return;
         }
 
-        if (_batchPlotForm is { IsDisposed: false })
+        if (_batchPlotForm is { IsLoaded: true })
         {
             _batchPlotForm.Activate();
             return;
@@ -290,24 +298,19 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
 
         var form = new BatchPlotForm(doc);
         _batchPlotForm = form;
-        form.FormClosed += (_, _) =>
+        form.Closed += (_, _) =>
         {
-            try
+            if (!form.HasPendingPrint)
             {
-                if (form.HasPendingPrint)
-                {
-                    form.ExecutePendingPrint();
-                }
+                return;
             }
-            finally
-            {
-                if (ReferenceEquals(_batchPlotForm, form))
-                {
-                    _batchPlotForm = null;
-                }
 
-                form.Dispose();
+            if (ReferenceEquals(_batchPlotForm, form))
+            {
+                _batchPlotForm = null;
             }
+
+            form.ExecutePendingPrint();
         };
 
         ShowModelessDialog(form);
@@ -323,7 +326,7 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
             return;
         }
 
-        if (_rectangleBatchPlotForm is { IsDisposed: false })
+        if (_rectangleBatchPlotForm is { IsLoaded: true })
         {
             _rectangleBatchPlotForm.Activate();
             return;
@@ -331,14 +334,12 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
 
         var form = new RectangleBatchPlotForm(doc);
         _rectangleBatchPlotForm = form;
-        form.FormClosed += (_, _) =>
+        form.Closed += (_, _) =>
         {
             if (ReferenceEquals(_rectangleBatchPlotForm, form))
             {
                 _rectangleBatchPlotForm = null;
             }
-
-            form.Dispose();
         };
         ShowModelessDialog(form);
     }
@@ -367,84 +368,90 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
         }
     }
 
-    private static DialogResult ShowModalDialog(Form form)
+    private static bool? ShowModalDialog(Window window)
     {
-#if ACAD_CORE
-        return form.ShowDialog();
-#else
-        return CadApp.ShowModalDialog(form);
-#endif
+        return CadDialog.ShowModal(window);
     }
 
-    private static void ShowModelessDialog(Form form)
+    private static void ShowModelessDialog(Window window)
     {
-#if ACAD_CORE
-        form.Show();
-#else
-        CadApp.ShowModelessDialog(form);
-#endif
+        CadDialog.ShowModeless(window);
     }
 
     /// <summary>
     /// 共享的"选择扫描范围"对话框，供图框块打印和矩形框打印共用。
     /// </summary>
-    internal static TitleBlockScanScope? PromptScanScope(IWin32Window? owner)
+    internal static TitleBlockScanScope? PromptScanScope()
     {
-        using var form = new Form
+        var dialog = new Window
         {
-            Text = "扫描当前图",
-            StartPosition = FormStartPosition.CenterParent,
-            FormBorderStyle = FormBorderStyle.FixedDialog,
-            MaximizeBox = false,
-            MinimizeBox = false,
+            Title = "扫描当前图",
+            Width = 360,
+            Height = 220,
+            ResizeMode = ResizeMode.NoResize,
             ShowInTaskbar = false,
-            ClientSize = new Size(UiLayout.Scale(360), UiLayout.Scale(220))
+            WindowStartupLocation = WindowStartupLocation.CenterScreen,
+            WindowStyle = WindowStyle.ToolWindow,
+            FontFamily = new System.Windows.Media.FontFamily("Microsoft YaHei UI"),
+            FontSize = 11
         };
 
-        var panel = new TableLayoutPanel
+        var panel = new Grid { Margin = new Thickness(16, 12, 16, 12) };
+        panel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(28) });
+        panel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(30) });
+        panel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(30) });
+        panel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(30) });
+        panel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(30) });
+        panel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+        void AddToGrid(System.Windows.UIElement element, int row)
         {
-            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 6,
-            Padding = new Padding(UiLayout.Scale(16), UiLayout.Scale(12), UiLayout.Scale(16), UiLayout.Scale(12))
-        };
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(28)));
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(30)));
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(30)));
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(30)));
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(30)));
-        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            Grid.SetRow(element, row);
+            Grid.SetColumn(element, 0);
+            panel.Children.Add(element);
+        }
 
-        var title = new Label { Text = "选择扫描范围", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
-        var all = new RadioButton { Text = "扫描本图全部模型和布局", Dock = DockStyle.Fill, Checked = true };
-        var layouts = new RadioButton { Text = "扫描全部布局", Dock = DockStyle.Fill };
-        var current = new RadioButton { Text = "扫描当前布局/模型", Dock = DockStyle.Fill };
-        var model = new RadioButton { Text = "扫描模型空间", Dock = DockStyle.Fill };
+        var title = new TextBlock { Text = "选择扫描范围", VerticalAlignment = VerticalAlignment.Center };
+        var all = new RadioButton { Content = "扫描本图全部模型和布局", GroupName = "scope", IsChecked = true, VerticalAlignment = VerticalAlignment.Center };
+        var layouts = new RadioButton { Content = "扫描全部布局", GroupName = "scope", VerticalAlignment = VerticalAlignment.Center };
+        var current = new RadioButton { Content = "扫描当前布局/模型", GroupName = "scope", VerticalAlignment = VerticalAlignment.Center };
+        var model = new RadioButton { Content = "扫描模型空间", GroupName = "scope", VerticalAlignment = VerticalAlignment.Center };
 
-        var buttons = new FlowLayoutPanel
+        // 按钮右对齐，视觉顺序与原 RightToLeft 布局一致：确定在最右。
+        var buttons = new StackPanel
         {
-            Dock = DockStyle.Fill, FlowDirection = System.Windows.Forms.FlowDirection.RightToLeft,
-            Padding = new Padding(0, UiLayout.Scale(10), 0, 0)
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 10, 0, 0)
         };
-        var ok = UiLayout.CreateButton("确定", 76);
-        var cancel = UiLayout.CreateButton("取消", 76);
-        ok.DialogResult = DialogResult.OK;
-        cancel.DialogResult = DialogResult.Cancel;
-        buttons.Controls.Add(ok);
-        buttons.Controls.Add(cancel);
+        var ok = new Button { Content = "确定", MinWidth = 76, MinHeight = 22, IsDefault = true };
+        var cancel = new Button { Content = "取消", MinWidth = 76, MinHeight = 22, IsCancel = true };
+        ok.Click += (_, _) =>
+        {
+            dialog.DialogResult = true;
+            dialog.Close();
+        };
+        cancel.Click += (_, _) =>
+        {
+            dialog.DialogResult = false;
+            dialog.Close();
+        };
+        buttons.Children.Add(cancel);
+        buttons.Children.Add(ok);
 
-        panel.Controls.Add(title, 0, 0);
-        panel.Controls.Add(all, 0, 1);
-        panel.Controls.Add(layouts, 0, 2);
-        panel.Controls.Add(current, 0, 3);
-        panel.Controls.Add(model, 0, 4);
-        panel.Controls.Add(buttons, 0, 5);
-        form.Controls.Add(panel);
-        form.AcceptButton = ok;
-        form.CancelButton = cancel;
+        AddToGrid(title, 0);
+        AddToGrid(all, 1);
+        AddToGrid(layouts, 2);
+        AddToGrid(current, 3);
+        AddToGrid(model, 4);
+        AddToGrid(buttons, 5);
+        dialog.Content = panel;
 
-        if (form.ShowDialog(owner) != DialogResult.OK) return null;
-        if (all.Checked) return TitleBlockScanScope.AllSpaces;
-        if (layouts.Checked) return TitleBlockScanScope.PaperLayouts;
-        if (current.Checked) return TitleBlockScanScope.CurrentSpace;
+        if (CadDialog.ShowModal(dialog) != true) return null;
+        if (all.IsChecked == true) return TitleBlockScanScope.AllSpaces;
+        if (layouts.IsChecked == true) return TitleBlockScanScope.PaperLayouts;
+        if (current.IsChecked == true) return TitleBlockScanScope.CurrentSpace;
         return TitleBlockScanScope.ModelSpace;
     }
 

@@ -1,0 +1,63 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <UseWpf>true</UseWpf>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <PlatformTarget>x64</PlatformTarget>
+    <Version>1.15.6.4</Version>
+    <AssemblyVersion>1.15.6.4</AssemblyVersion>
+    <FileVersion>1.15.6.4</FileVersion>
+    <InformationalVersion>1.15.6.4</InformationalVersion>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <DefineConstants>$(DefineConstants);ZWCAD</DefineConstants>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <OutputPath>$(RepoRoot)bin\</OutputPath>
+    <GenerateResourceUsePreserializedResources>true</GenerateResourceUsePreserializedResources>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <EnableDefaultPageItems>false</EnableDefaultPageItems>
+  </PropertyGroup>
+
+  <!-- 公共源码含平台条件编译（#if ZWCAD / #if AUTOCAD / #if ACAD_CORE），必须与平台实现
+       一起按各自的编译常量编译并内联进单个 DLL，以便 CAD 通过 NETLOAD 加载单个文件。
+       改用显式引用后，新增 tests\、tmp\ 等目录不会再意外进入编译。 -->
+  <ItemGroup>
+    <Compile Include="..\Common\**\*.cs" />
+    <Compile Include="..\ZWCAD\**\*.cs" />
+    <Page Include="..\Common\**\*.xaml">
+      <Link>Common\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+    <None Remove="..\Common\**\*" />
+    <None Remove="..\ZWCAD\**\*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\PianNoCN\PianNoCN.csproj" />
+  </ItemGroup>
+
+  <!-- 中望 CAD .NET API：编译期引用，运行时由 ZWCAD 宿主提供，故排除 runtime 资产 -->
+  <ItemGroup>
+    <PackageReference Include="ZWCad.Net.2025" Version="1.0.0" ExcludeAssets="runtime" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="PDFsharp" Version="1.50.5147" />
+    <PackageReference Include="SharpZipLib" Version="1.3.3" />
+    <PackageReference Include="System.Resources.Extensions" Version="7.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="$(RepoRoot)resources\zwcad\Plotters\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>Plotters\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    </None>
+  </ItemGroup>
+</Project>

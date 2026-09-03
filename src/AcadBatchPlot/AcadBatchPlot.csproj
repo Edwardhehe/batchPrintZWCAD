@@ -15,28 +15,31 @@
     <RootNamespace>ZwcadBatchPlot</RootNamespace>
     <DefineConstants>$(DefineConstants);AUTOCAD</DefineConstants>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <EnableDefaultPageItems>false</EnableDefaultPageItems>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
-    <OutputPath>bin-acad\</OutputPath>
+    <OutputPath>$(RepoRoot)bin-acad\</OutputPath>
     <GenerateResourceUsePreserializedResources>true</GenerateResourceUsePreserializedResources>
   </PropertyGroup>
 
+  <!-- 公共源码含平台条件编译（#if ZWCAD / #if AUTOCAD / #if ACAD_CORE），必须与平台实现
+       一起按各自的编译常量编译并内联进单个 DLL，以便 CAD 通过 NETLOAD 加载单个文件。 -->
   <ItemGroup>
-    <Compile Include="src\Common\**\*.cs" />
-    <Compile Include="src\AutoCAD\**\*.cs" />
-    <EmbeddedResource Include="src\AutoCAD\**\*.resx" />
+    <Compile Include="..\Common\**\*.cs" />
+    <Compile Include="..\AutoCAD\**\*.cs" />
+    <Page Include="..\Common\**\*.xaml">
+      <Link>Common\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+    <EmbeddedResource Include="..\AutoCAD\**\*.resx" />
 
-    <ProjectReference Include="src\PianNoCN\PianNoCN.csproj" />
-    <None Remove="src\AutoCAD\**\*" />
+    <ProjectReference Include="..\PianNoCN\PianNoCN.csproj" />
+    <None Remove="..\Common\**\*" />
+    <None Remove="..\AutoCAD\**\*" />
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Remove="FileTools\**\*.cs" />
-    <EmbeddedResource Remove="FileTools\**\*" />
-    <None Remove="FileTools\**\*" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <None Include="resources\acad\Plotters\**\*">
+    <None Include="$(RepoRoot)resources\acad\Plotters\**\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Link>Plotters\%(RecursiveDir)%(Filename)%(Extension)</Link>
     </None>

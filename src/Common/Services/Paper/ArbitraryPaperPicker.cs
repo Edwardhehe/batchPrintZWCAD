@@ -1,6 +1,6 @@
 using System;
 using System.Collections.Generic;
-using System.Windows.Forms;
+using System.Windows;
 #if AUTOCAD
 #if ACAD_CORE
 using CadApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
@@ -31,13 +31,13 @@ public static class ArbitraryPaperPicker
 
     /// <summary>
     /// 检测纸张候选；识别不到任何标准纸张时弹窗要求用户输入比例。
-    /// <paramref name="owner"/> 非空时（对话框内二次弹窗）以 WinForms 嵌套模态显示，保证置顶。
+    /// <paramref name="owner"/> 非空时（对话框内二次弹窗）以嵌套模态显示，保证置顶。
     /// </summary>
     public static IReadOnlyList<PaperDetection> DetectCandidatesOrPrompt(
         double width,
         double height,
         PaperSizeDetector.DetectionOptions options,
-        Form? owner = null)
+        Window? owner = null)
     {
         var candidates = PaperSizeDetector.DetectCandidates(width, height, options);
         if (candidates.Count > 0)
@@ -50,11 +50,20 @@ public static class ArbitraryPaperPicker
         var guessedScale = PaperSizeDetector.GuessScale(actualWidth, actualHeight);
         // 可自由拉伸动态块只按常用比例识别加长长度，不会以任意比例套标准图幅。
         var allowAspectRatioPapers = !options.IncludeGenericDynamicTitleBlockPaper;
-        using var scaleForm = new CustomScaleForm(actualWidth, actualHeight, guessedScale, HintText, allowAspectRatioPapers);
-        var dialogResult = owner != null
-            ? scaleForm.ShowDialog(owner)
-            : ShowScaleDialog(scaleForm);
-        if (dialogResult == DialogResult.OK
+        var scaleForm = new CustomScaleForm(actualWidth, actualHeight, guessedScale, HintText, allowAspectRatioPapers);
+        bool confirmed;
+        if (owner != null)
+        {
+            // 嵌套模态：显式设置属主窗口，保证弹窗置顶且随属主关闭。
+            new System.Windows.Interop.WindowInteropHelper(scaleForm) { Owner = new System.Windows.Interop.WindowInteropHelper(owner).Handle };
+            confirmed = scaleForm.ShowDialog() == true;
+        }
+        else
+        {
+            confirmed = CadDialog.ShowModal(scaleForm) == true;
+        }
+
+        if (confirmed
             && (scaleForm.SelectedStandardPaper != null || scaleForm.SelectedScale >= 1))
         {
             var chosen = CreatePaperFromScaleForm(scaleForm, actualWidth, actualHeight);
@@ -106,14 +115,5 @@ public static class ArbitraryPaperPicker
             RequiresCustomPaper = true,
             Note = $"任意纸张：按用户输入比例 {PaperSizeDetector.ToScaleText(scale)} 换算，输出纸张 {paperWidthMm:0.##} x {paperHeightMm:0.##} mm"
         };
-    }
-
-    private static DialogResult ShowScaleDialog(Form form)
-    {
-#if ACAD_CORE
-        return form.ShowDialog();
-#else
-        return CadApp.ShowModalDialog(form);
-#endif
     }
 }

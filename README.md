@@ -202,28 +202,39 @@ AutoCAD 2025 ~ 2027 如果菜单栏未显示，可以执行 `ZBP_SHOW_PANEL` 打
 
 ## 开发
 
-中望 CAD 项目目标框架为 `.NET Framework 4.8`，依赖中望 CAD 的托管 DLL：
+中望 CAD 项目目标框架为 `.NET Framework 4.8`，通过 NuGet 包 `ZWCad.Net.2025` 引用中望 CAD 的 .NET API。该包以 `ExcludeAssets="runtime"` 引入——只在编译期使用，运行时由 ZWCAD 宿主提供，因此 `ZwManaged.dll` / `ZwDatabaseMgd.dll` 不会被复制到输出目录。
 
-- `ZwManaged.dll`
-- `ZwDatabaseMgd.dll`
-- `Newtonsoft.Json.dll`
+这样无需在本机安装中望 CAD 即可编译，也不再有硬编码的安装路径。
 
-默认引用路径：
+主要依赖：
 
-```text
-C:\Program Files\ZWSOFT\ZWCAD Enterprise\
-```
-
-如果你的中望 CAD 安装路径不同，需要修改 `BatchPlotter.csproj` 中的 `HintPath`。
+- `ZWCad.Net.2025`（NuGet，仅 ZWCAD 项目）
+- `AutoCAD.NET` / `AutoCAD.NET.Core`（NuGet，仅 AutoCAD 项目）
+- `Newtonsoft.Json`、`PDFsharp`、`SharpZipLib`（NuGet）
 
 `FileTools/` 是本地参考项目目录，不参与编译，也不会提交到 Git 仓库。
 
 PDF 合并使用 PDFsharp（`PdfDocumentService`），避免把 x86 PDF 阅读组件加载进中望 CAD x64 进程。
 
-编译 ZWCAD 版本：
+解决方案为 `LA.BatchPlot.sln`，包含四个项目，可直接用 Visual Studio 打开，或在命令行一次编译全部平台：
 
 ```powershell
-dotnet build BatchPlotter.csproj -c Release
+dotnet build LA.BatchPlot.sln -c Release
+```
+
+项目文件统一放在 `src\<项目名>\` 下，源码按用途分目录，输出目录仍集中在仓库根目录：
+
+| 项目文件 | 平台 | 输出目录 | 目标 DLL |
+| --- | --- | --- | --- |
+| `src/BatchPlotter/BatchPlotter.csproj` | ZWCAD (net48) | `bin\` | `BatchPlotter.dll` |
+| `src/AcadBatchPlot/AcadBatchPlot.csproj` | AutoCAD 2015–2024 (net48) | `bin-acad\` | `AcadBatchPlot.dll` |
+| `src/AcadBatchPlot.Core/AcadBatchPlot.Core.csproj` | AutoCAD 2025–2027 (net8.0-windows) | `bin-acad2025-2027\` | `AcadBatchPlot.Core.dll` |
+| `src/PianNoCN/PianNoCN.csproj` | 通用解析库 | （随各平台输出） | `PianNoCN.dll` |
+
+仅编译 ZWCAD 版本：
+
+```powershell
+dotnet build src\BatchPlotter\BatchPlotter.csproj -c Release
 ```
 
 生成结果在 `bin\BatchPlotter.dll`。
@@ -233,14 +244,6 @@ dotnet build BatchPlotter.csproj -c Release
 ```powershell
 .\scripts\build-dll.ps1 -Target All -Configuration Release
 ```
-
-生成结果：
-
-| 项目 | 输出目录 | 目标 DLL |
-| --- | --- | --- |
-| `BatchPlotter.csproj` | `bin\` | `BatchPlotter.dll` |
-| `AcadBatchPlot.csproj` | `bin-acad\` | `AcadBatchPlot.dll` |
-| `AcadBatchPlot.Core.csproj` | `bin-acad2025-2027\` | `AcadBatchPlot.Core.dll` |
 
 生成本地发布目录与三组 ZIP：
 
