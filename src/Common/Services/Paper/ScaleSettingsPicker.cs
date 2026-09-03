@@ -1,7 +1,7 @@
 using System;
-using System.Drawing;
 using System.Linq;
-using System.Windows.Forms;
+using System.Windows;
+using System.Windows.Controls;
 #if AUTOCAD
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.EditorInput;
@@ -59,12 +59,8 @@ public static class ScaleSettingsPicker
             return false;
         }
 
-        using var dialog = new ScalePickConfirmDialog(shortSide);
-#if ACAD_CORE
-        if (dialog.ShowDialog() != DialogResult.OK)
-#else
-        if (CadApp.ShowModalDialog(dialog) != DialogResult.OK)
-#endif
+        var dialog = new ScalePickConfirmDialog(shortSide);
+        if (CadDialog.ShowModal(dialog) != true)
         {
             message = "已取消比例拾取。";
             return false;
@@ -88,10 +84,12 @@ public static class ScaleSettingsPicker
     /// <summary>
     /// 拾取确认窗体：下拉选择 A0~A4 图幅，按框选短边自动计算比例，允许用户微调后再录入。
     /// </summary>
-    private sealed class ScalePickConfirmDialog : Form
+    private sealed class ScalePickConfirmDialog : Window
     {
         // 计算值与整数的相对误差小于该值时吸附为整数，避免框选零头产生 1:143.02 这类脏比例。
         private const double IntegerSnapTolerance = 0.005d;
+
+        private static readonly System.Windows.Media.FontFamily DefaultFont = new("Microsoft YaHei UI");
 
         private readonly double _frameShortSide;
         private readonly ComboBox _paper = new();
@@ -104,71 +102,96 @@ public static class ScaleSettingsPicker
         public ScalePickConfirmDialog(double frameShortSide)
         {
             _frameShortSide = frameShortSide;
-            Text = "比例拾取";
-            UiLayout.ConfigureForm(this, 380, 170, 340, 150);
-            FormBorderStyle = FormBorderStyle.FixedDialog;
+            Title = "比例拾取";
+            Width = 380;
+            MinWidth = 340;
+            Height = 170;
+            MinHeight = 150;
+            ResizeMode = ResizeMode.NoResize;
+            ShowInTaskbar = false;
+            WindowStartupLocation = WindowStartupLocation.CenterScreen;
+            FontFamily = DefaultFont;
+            FontSize = 11;
 
-            var root = new TableLayoutPanel
+            var root = new Grid { Margin = new Thickness(10) };
+            for (var i = 0; i < 2; i++)
             {
-                Dock = DockStyle.Fill,
-                ColumnCount = 2,
-                RowCount = 3,
-                Padding = new Padding(UiLayout.Scale(10))
-            };
-            root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(110)));
-            root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(32)));
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(32)));
-            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+                root.ColumnDefinitions.Add(new ColumnDefinition { Width = i == 0 ? new GridLength(110) : new GridLength(1, GridUnitType.Star) });
+            }
+            for (var i = 0; i < 3; i++)
+            {
+                root.RowDefinitions.Add(new RowDefinition { Height = i < 2 ? new GridLength(32) : new GridLength(1, GridUnitType.Star) });
+            }
 
-            root.Controls.Add(new Label
-            {
-                Text = "图纸图幅：",
-                Dock = DockStyle.Fill,
-                TextAlign = ContentAlignment.MiddleLeft
-            }, 0, 0);
-            _paper.DropDownStyle = ComboBoxStyle.DropDownList;
-            _paper.Dock = DockStyle.Left;
-            _paper.Width = UiLayout.Scale(180);
+            AddLabel(root, "图纸图幅：", 0, 0);
+            _paper.IsEditable = false;
+            _paper.Width = 180;
+            _paper.VerticalAlignment = VerticalAlignment.Center;
+            _paper.HorizontalAlignment = HorizontalAlignment.Left;
             foreach (var (name, shortSideMm) in PaperOptions)
             {
                 _paper.Items.Add($"{name}（短边 {shortSideMm:0.##}mm）");
             }
             _paper.SelectedIndex = GuessPaperIndex();
-            _paper.SelectedIndexChanged += (_, _) => RecalculateScaleText();
-            root.Controls.Add(_paper, 1, 0);
+            _paper.SelectionChanged += (_, _) => RecalculateScaleText();
+            Grid.SetColumn(_paper, 1);
+            Grid.SetRow(_paper, 0);
+            root.Children.Add(_paper);
 
-            root.Controls.Add(new Label
-            {
-                Text = "比例：",
-                Dock = DockStyle.Fill,
-                TextAlign = ContentAlignment.MiddleLeft
-            }, 0, 1);
-            _scaleText.Dock = DockStyle.Left;
-            _scaleText.Width = UiLayout.Scale(180);
-            root.Controls.Add(_scaleText, 1, 1);
+            AddLabel(root, "比例：", 0, 1);
+            _scaleText.Width = 180;
+            _scaleText.VerticalAlignment = VerticalAlignment.Center;
+            _scaleText.HorizontalAlignment = HorizontalAlignment.Left;
+            Grid.SetColumn(_scaleText, 1);
+            Grid.SetRow(_scaleText, 1);
+            root.Children.Add(_scaleText);
 
-            var buttons = new FlowLayoutPanel
+            // 按钮行右对齐，视觉顺序与原 RightToLeft FlowLayoutPanel 一致：确定在最右。
+            var buttons = new StackPanel
             {
-                Dock = DockStyle.Fill,
-                FlowDirection = FlowDirection.RightToLeft,
-                WrapContents = false
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Center
             };
-            root.SetColumnSpan(buttons, 2);
-            var ok = UiLayout.CreateButton("确定", 82);
+            var ok = CreateButton("确定", 82);
             ok.Click += (_, _) => Confirm();
-            var cancel = UiLayout.CreateButton("取消", 82);
+            var cancel = CreateButton("取消", 82);
             cancel.Click += (_, _) =>
             {
-                DialogResult = DialogResult.Cancel;
+                DialogResult = false;
                 Close();
             };
-            buttons.Controls.Add(ok);
-            buttons.Controls.Add(cancel);
-            root.Controls.Add(buttons, 0, 2);
+            buttons.Children.Add(cancel);
+            buttons.Children.Add(ok);
+            Grid.SetColumnSpan(buttons, 2);
+            Grid.SetRow(buttons, 2);
+            root.Children.Add(buttons);
 
-            Controls.Add(root);
+            Content = root;
             RecalculateScaleText();
+        }
+
+        private static void AddLabel(Grid root, string text, int column, int row)
+        {
+            var label = new TextBlock
+            {
+                Text = text,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            Grid.SetColumn(label, column);
+            Grid.SetRow(label, row);
+            root.Children.Add(label);
+        }
+
+        private static Button CreateButton(string text, int minWidth)
+        {
+            return new Button
+            {
+                Content = text,
+                MinWidth = minWidth,
+                MinHeight = 22,
+                Padding = new Thickness(6, 0, 6, 0)
+            };
         }
 
         /// <summary>默认选中使比例最接近整数的图幅（框选准确时该项即为正确图幅）。</summary>
@@ -216,9 +239,9 @@ public static class ScaleSettingsPicker
             {
                 MessageBox.Show(
                     "无法识别比例输入。请输入 143（表示 1:143）、0.25（表示 4:1）或 1:143 形式。",
-                    Text,
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Warning);
+                    Title ?? "",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
                 return;
             }
 
@@ -226,7 +249,7 @@ public static class ScaleSettingsPicker
             var (name, shortSideMm) = PaperOptions[_paper.SelectedIndex];
             PaperName = name;
             PaperShortSideMm = shortSideMm;
-            DialogResult = DialogResult.OK;
+            DialogResult = true;
             Close();
         }
     }

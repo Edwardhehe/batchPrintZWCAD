@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Windows.Forms;
+using System.Windows;
 #if AUTOCAD
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.DatabaseServices;
@@ -39,7 +39,7 @@ public sealed partial class BatchPlotCommands
         if (!editor.CurrentUserCoordinateSystem.IsEqualTo(Matrix3d.Identity))
         {
             MessageBox.Show("新增图框前请先将 UCS 切换为世界坐标系（WCS）。\n命令行输入 UCS 然后回车即可。",
-                "批量打印", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                "批量打印", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
@@ -136,10 +136,10 @@ public sealed partial class BatchPlotCommands
                 var overwrite = MessageBox.Show(
                     $"图框库中已存在同名图框: {blockName}\n是否重新录入？\n选择“是”将覆盖原有图框设置。",
                     "批量打印",
-                    MessageBoxButtons.YesNo,
-                    MessageBoxIcon.Question,
-                    MessageBoxDefaultButton.Button2);
-                if (overwrite != DialogResult.Yes)
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Question,
+                    MessageBoxResult.No);
+                if (overwrite != MessageBoxResult.Yes)
                 {
                     AddBlockLog("Duplicate block name; user chose not to overwrite.");
                     editor.WriteMessage($"\n已取消录入，图框库中的 {blockName} 保持不变。");
@@ -175,8 +175,8 @@ public sealed partial class BatchPlotCommands
                 MessageBox.Show(
                     "AutoCAD 无法取得该图框块的有效外包框，请手动框选打印边界。",
                     "批量打印",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
 
                 if (!TryGetRegion(
                         editor,
@@ -248,7 +248,7 @@ public sealed partial class BatchPlotCommands
                        paperOptions,
                        paperDetectionOptions))
             {
-                if (ShowModalDialog(fieldDialog) != DialogResult.OK)
+                if (ShowModalDialog(fieldDialog) != true)
                 {
                     AddBlockLog("Field selection cancelled.");
                     return;
@@ -336,14 +336,14 @@ public sealed partial class BatchPlotCommands
             MessageBox.Show(
                 $"图框已保存: {blockName}\n纸张: {savedPaperText}",
                 "批量打印",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information);
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
         }
         catch (System.Exception ex)
         {
             AddBlockLog("Failed: " + ex);
             editor.WriteMessage("\n新增图框失败: " + ex.Message);
-            MessageBox.Show("新增图框失败: " + ex.Message, "批量打印", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show("新增图框失败: " + ex.Message, "批量打印", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 

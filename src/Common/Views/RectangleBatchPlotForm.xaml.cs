@@ -1,12 +1,14 @@
 using System;
+using System.Threading;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
-using System.Drawing;
 using System.IO;
 using System.Linq;
-using System.Threading;
-using System.Windows.Forms;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Threading;
 #if AUTOCAD
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.DatabaseServices;
@@ -27,16 +29,87 @@ using CadApp = ZwSoft.ZwCAD.ApplicationServices.Application;
 
 namespace ZwcadBatchPlot;
 
-public sealed class RectangleBatchPlotForm : Form
+/// <summary>
+/// 矩形框批量打印面板（WPF 版，非模态窗口；由 BatchPlotCommands 通过 CadDialog.ShowModeless 显示）。
+/// </summary>
+public sealed partial class RectangleBatchPlotForm : Window
 {
-    private sealed class Row
+    private sealed class MarginOption
     {
+        public double Value { get; set; }
+        public override string ToString() => Value > 0
+            ? $"+ {Value:0.#} mm"
+            : $"- {Math.Abs(Value):0.#} mm";
+    }
+
+    private sealed class Row : INotifyPropertyChanged
+    {
+        private string _fileName = "";
+        private string _paperChoice = "";
+
+        public event PropertyChangedEventHandler? PropertyChanged;
+
         public PlotJob Job { get; set; } = new();
         public IReadOnlyList<PaperDetection> Options { get; set; } = new PaperDetection[0];
-        public bool Selected { get => Job.Selected; set => Job.Selected = value; }
-        public string FileName { get; set; } = "";
-        public string PaperChoice { get; set; } = "";
-        public string Scale => Job.ScaleText;
+
+        /// <summary>纸张下拉候选（原 DataGridViewComboBoxCell.DataSource 语义）。</summary>
+        public IReadOnlyList<string> PaperOptions =>
+            Options.Select(PaperSizeDetector.FormatOption).ToList();
+
+        public bool Selected
+        {
+            get => Job.Selected;
+            set
+            {
+                if (Job.Selected == value) return;
+                Job.Selected = value;
+                OnPropertyChanged(nameof(Selected));
+            }
+        }
+
+        public string FileName
+        {
+            get => _fileName;
+            set
+            {
+                if (string.Equals(_fileName, value, StringComparison.Ordinal)) return;
+                _fileName = value;
+                OnPropertyChanged(nameof(FileName));
+            }
+        }
+
+        public string PaperChoice
+        {
+            get => _paperChoice;
+            set
+            {
+                if (string.Equals(_paperChoice, value, StringComparison.Ordinal)) return;
+                _paperChoice = value;
+                OnPropertyChanged(nameof(PaperChoice));
+            }
+        }
+
+        public string Scale { get; private set; } = "";
+
+        /// <summary>编号列显示文本（1 基，随视图顺序刷新）。</summary>
+        public string Number { get; private set; } = "";
+
+        public void RefreshFromJob()
+        {
+            Scale = Job.ScaleText;
+            OnPropertyChanged(nameof(Scale));
+        }
+
+        public void SetNumber(int index)
+        {
+            var text = index.ToString();
+            if (string.Equals(Number, text, StringComparison.Ordinal)) return;
+            Number = text;
+            OnPropertyChanged(nameof(Number));
+        }
+
+        private void OnPropertyChanged(string propertyName)
+            => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
     }
 
     private readonly Document _document;
@@ -46,25 +119,18 @@ public sealed class RectangleBatchPlotForm : Form
     private int _overlayScheduleGeneration;
     private readonly BindingList<Row> _rows = new();
     private readonly BindingList<Row> _displayRows = new();
-    private readonly DataGridView _grid = new();
-    private readonly TextBox _outputDirectory = new();
-    private readonly ComboBox _outputFormatCombo = new();
-    private readonly ComboBox _savePathModeCombo = new();
-    private readonly ComboBox _style = new();
-    private Button _styleSettingsButton = null!;
-    private readonly CheckBox _mergePdf = new();
-    private readonly CheckBox _leaveMargin = new();
-    private readonly ComboBox _marginInput = new();
-    private readonly Label _status = new();
     private CancellationTokenSource? _printCts;
-    private Button? _printButton;
     private CadSelectionWindow? _scanWindow;
     private TitleBlockScanScope? _lastScanScope;
     private bool _updating;
     private bool _updatingPrintSelection;
     private bool _viewSortedByHeader;
     private bool _outputDirectoryIsCustom;
-    private int _viewSortColumnIndex = -1;
+    private bool _outputDirectoryModified;
+    private bool _suppressTextEvents;
+    private bool _suppressComboEvents;
+    private bool _suppressPaperEvents;
+    private string _sortMemberPath = "";
     private List<Row>? _pendingPrintToggleRows;
     private string _pngPlotDevice = "";
     private string _jpgPlotDevice = "";
@@ -78,349 +144,338 @@ public sealed class RectangleBatchPlotForm : Form
         _document = document;
         _settings = AppSettingsStore.Load();
         _overlay = new TemporarySequenceOverlay(document);
-        InitializeComponents();
+        InitializeComponent();
+        InitializeGrid();
+        InitMarginCombo(_marginInput, _settings.PaperMarginMm);
+        _marginInput.IsEnabled = _leaveMargin.IsChecked == true;
+        _leaveMargin.IsChecked = _settings.LeavePaperMargin;
+        _mergePdf.IsChecked = _settings.MergePdf;
         LoadPlotOptions();
     }
 
-    private void InitializeComponents()
+    private void InitializeGrid()
     {
-        Text = "LA矩形框批量打印 V1.15.6.4";
-        FormBorderStyle = System.Windows.Forms.FormBorderStyle.Sizable;
-        ClientSize = new Size(UiLayout.Scale(900), UiLayout.Scale(520));
-        MinimumSize = new Size(UiLayout.Scale(720), UiLayout.Scale(460));
-        MaximizeBox = true;
-        SizeGripStyle = SizeGripStyle.Show;
-        StartPosition = FormStartPosition.CenterScreen;
-        Font = UiLayout.DefaultFont;
-        BackColor = Color.FromArgb(245, 247, 250);
-        var tips = new ToolTip { AutoPopDelay = 8000, InitialDelay = 400, ReshowDelay = 100, ShowAlways = true };
+        _grid.ItemsSource = _displayRows;
+    }
 
-        var actionRowHeight = UiLayout.ButtonHeight() + UiLayout.Scale(6);
-        var settingsRowHeight = UiLayout.ButtonHeight() + UiLayout.Scale(4);
-        var optionsRowHeight = UiLayout.ButtonHeight() + UiLayout.Scale(2);
-        var top = new TableLayoutPanel
+    protected override void OnClosed(EventArgs e)
+    {
+        _overlayScheduleGeneration++;
+        // 关闭窗口时只清理临时红框和序号，不再退订或接管 CAD 删除命令。
+        _overlay.Dispose();
+        base.OnClosed(e);
+    }
+
+    /// <summary>兼容原 WinForms 调用方 form.Dispose() 的清理入口。</summary>
+    public void Dispose() => Close();
+
+    // ── 事件处理（XAML 绑定） ──
+
+    private void ScanCurrentDrawing_Click(object sender, RoutedEventArgs e) => ScanCurrentDrawing();
+
+    private void ScanSelectedWindow_Click(object sender, RoutedEventArgs e) => ScanSelectedWindow();
+
+    private void ReloadFrames_Click(object sender, RoutedEventArgs e) => ReloadFrames();
+
+    private void BrowseOutputDirectory_Click(object sender, RoutedEventArgs e) => ChooseOutputDirectory();
+
+    private void OutputDirectory_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_suppressTextEvents)
         {
-            Dock = DockStyle.Top,
-            Height = actionRowHeight + settingsRowHeight + optionsRowHeight + UiLayout.Scale(8),
-            ColumnCount = 1,
-            RowCount = 3,
-            Padding = new Padding(UiLayout.Scale(10), UiLayout.Scale(4), UiLayout.Scale(10), UiLayout.Scale(4)),
-            BackColor = Color.FromArgb(245, 247, 250)
-        };
-        top.RowStyles.Add(new RowStyle(SizeType.Absolute, actionRowHeight));
-        top.RowStyles.Add(new RowStyle(SizeType.Absolute, settingsRowHeight));
-        top.RowStyles.Add(new RowStyle(SizeType.Absolute, optionsRowHeight));
+            return;
+        }
 
-        var actions = NewFlow();
-        var scanCurrent = UiLayout.CreateButton("扫描当前图", 108);
-        scanCurrent.Click += (_, _) => ScanCurrentDrawing();
-        var scanWindow = UiLayout.CreateButton("框选扫描", 92);
-        scanWindow.Click += (_, _) => ScanSelectedWindow();
-        var refresh = UiLayout.CreateButton("重新识别", 88);
-        refresh.Click += (_, _) => ReloadFrames();
-        actions.Controls.Add(scanCurrent);
-        actions.Controls.Add(scanWindow);
-        actions.Controls.Add(Separator());
-        actions.Controls.Add(refresh);
-        actions.Controls.Add(new Label
+        // 对应原 TextBox.Modified：用户手动输入时置位。
+        _outputDirectoryModified = true;
+        RefreshOutputPaths();
+    }
+
+    private void OutputDirectory_LostFocus(object sender, RoutedEventArgs e)
+        => ApplyManuallyEnteredOutputDirectory();
+
+    private void SavePathMode_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressComboEvents)
         {
-            Text = "右键条目可设为不打印、删除或批量改纸张",
-            AutoSize = true,
-            ForeColor = Color.DimGray,
-            Margin = new Padding(UiLayout.Scale(10), UiLayout.Scale(4), 0, 0)
-        });
-        tips.SetToolTip(scanCurrent, "扫描当前打开图纸中的全部符合纸张比例的矩形框。");
-        tips.SetToolTip(scanWindow, "回到 CAD 框选区域，只识别框内矩形框。");
-        tips.SetToolTip(refresh, "按上次扫描方式重新扫描，并刷新矩形框列表。");
+            return;
+        }
 
-        var outputRow = new TableLayoutPanel
+        ApplySelectedSavePathMode();
+    }
+
+    private void OutputFormat_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressComboEvents)
         {
-            Dock = DockStyle.Fill,
-            ColumnCount = 8,
-            RowCount = 1,
-            Margin = Padding.Empty,
-            Padding = Padding.Empty
-        };
-        // CAD 宿主中未声明 RowStyle 的单行面板可能保留默认高度，导致 Fill 控件文字落到裁剪区外。
-        // 显式限定为当前可见行高，保证输出标签、“设置”和“开始打印”始终完整显示。
-        outputRow.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-        outputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(52)));
-        outputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        outputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.ButtonWidth("浏览...", 84) + UiLayout.Scale(8)));
-        outputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(72)));
-        outputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(98)));
-        outputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(42)));
-        outputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.Scale(172)));
-        outputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, UiLayout.ButtonWidth("开始打印", 98)));
-        outputRow.Controls.Add(LabelFor("输出"), 0, 0);
-        _outputDirectory.Dock = DockStyle.Fill;
-        _outputDirectory.Text = SourceDirectory();
-        _outputDirectory.Margin = new Padding(0, UiLayout.Scale(3), UiLayout.Scale(8), UiLayout.Scale(4));
-        _outputDirectory.TextChanged += (_, _) => RefreshOutputPaths();
-        _outputDirectory.Leave += (_, _) => ApplyManuallyEnteredOutputDirectory();
-        outputRow.Controls.Add(_outputDirectory, 1, 0);
-        var browseButton = UiLayout.CreateButton("浏览...", 84);
-        browseButton.Margin = new Padding(0, UiLayout.Scale(2), 0, UiLayout.Scale(2));
-        browseButton.Click += (_, _) => ChooseOutputDirectory();
-        outputRow.Controls.Add(browseButton, 2, 0);
+            return;
+        }
 
-        _savePathModeCombo.DropDownStyle = ComboBoxStyle.DropDownList;
-        // 第三行同时容纳保存路径、排序、合并和留白选项，适当缩短目录选择框。
-        _savePathModeCombo.Width = UiLayout.Scale(170);
-        _savePathModeCombo.Margin = new Padding(0, UiLayout.Scale(3), UiLayout.Scale(8), UiLayout.Scale(3));
-        _savePathModeCombo.SelectionChangeCommitted += (_, _) => ApplySelectedSavePathMode();
-        tips.SetToolTip(browseButton, "选择自定义输出文件夹。");
+        UpdateOutputFormatUi();
+    }
 
-        var options = new FlowLayoutPanel
+    private void Style_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        _styleSettingsButton.IsEnabled = _style.SelectedIndex >= 0 && !IsDwgOutput;
+        if (_styleSelectionReady)
         {
-            Dock = DockStyle.Fill,
-            FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight,
-            WrapContents = false,
-            AutoScroll = false,
-            Margin = Padding.Empty,
-            Padding = Padding.Empty
-        };
+            SaveCurrentPlotOptions();
+        }
+    }
 
-        options.Controls.Add(new Label
+    private void StyleSettings_Click(object sender, RoutedEventArgs e)
+        => PlotStyleManager.EditSelectedStyle(this, _style.SelectedItem?.ToString());
+
+    private void LeaveMargin_CheckedChanged(object sender, RoutedEventArgs e)
+        => _marginInput.IsEnabled = SupportsLeaveMargin && _leaveMargin.IsChecked == true;
+
+    private void PrintOrStop_Click(object sender, RoutedEventArgs e) => PrintOrStop();
+
+    private void SortSettings_Click(object sender, RoutedEventArgs e) => ShowSortSettings();
+
+    private void GeneralSettings_Click(object sender, RoutedEventArgs e) => ShowSettingsAtTab(0);
+
+    private void Grid_Sorting(object sender, DataGridSortingEventArgs e)
+    {
+        // 原列头点击排序（Programmatic SortMode）。
+        e.Handled = true;
+        var columnIndex = _grid.Columns.IndexOf(e.Column);
+        if (columnIndex < 0 || columnIndex >= _grid.Columns.Count)
         {
-            Text = "保存路径:",
-            AutoSize = true,
-            TextAlign = ContentAlignment.MiddleLeft,
-            Margin = new Padding(0, UiLayout.Scale(8), UiLayout.Scale(8), 0)
-        });
-        options.Controls.Add(_savePathModeCombo);
+            return;
+        }
 
-        _mergePdf.Text = "合并 PDF";
-        _mergePdf.Checked = _settings.MergePdf;
-        _mergePdf.AutoSize = true;
-        _mergePdf.Anchor = AnchorStyles.Left | AnchorStyles.Top;
-        _mergePdf.Margin = new Padding(UiLayout.Scale(4), UiLayout.Scale(7), UiLayout.Scale(8), 0);
-        options.Controls.Add(_mergePdf);
-
-        _leaveMargin.Text = "周边留白";
-        _leaveMargin.Checked = _settings.LeavePaperMargin;
-        _leaveMargin.AutoSize = true;
-        _leaveMargin.Anchor = AnchorStyles.Left | AnchorStyles.Top;
-        _leaveMargin.Margin = new Padding(UiLayout.Scale(4), UiLayout.Scale(7), UiLayout.Scale(4), 0);
-        BatchPlotForm.InitMarginCombo(_marginInput, UiLayout.Scale(58), _settings.PaperMarginMm);
-        _marginInput.Enabled = _leaveMargin.Checked;
-        // 与同一行的保存路径下拉框使用相同上边距，保证高 DPI 下两个输入框顶边对齐。
-        _marginInput.Margin = new Padding(0, UiLayout.Scale(3), 0, 0);
-        _leaveMargin.CheckedChanged += (_, _) =>
-            _marginInput.Enabled = SupportsLeaveMargin && _leaveMargin.Checked;
-        _leaveMargin.Text = "留白";
-        var marginPanel = new FlowLayoutPanel
+        var memberPath = e.Column.SortMemberPath ?? "";
+        if (_viewSortedByHeader && _sortMemberPath == memberPath)
         {
-            AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight,
-            WrapContents = false,
-            Margin = Padding.Empty,
-            Padding = Padding.Empty
-        };
-        marginPanel.Controls.Add(_leaveMargin);
-        marginPanel.Controls.Add(_marginInput);
-        marginPanel.Controls.Add(new Label { Text = "mm", AutoSize = true, Margin = new Padding(2, UiLayout.Scale(7), 0, 0) });
-        options.Controls.Remove(_leaveMargin);
-        options.Controls.Add(marginPanel);
+            _viewSortedByHeader = false;
+            _sortMemberPath = "";
+            RefreshDisplayRows();
+            UpdateVisuals();
+            return;
+        }
 
-        // 输出格式、CTB 与开始打印和输出目录放在第二行。
-        outputRow.Controls.Add(LabelFor("输出格式"), 3, 0);
-        _outputFormatCombo.DropDownStyle = ComboBoxStyle.DropDownList;
-        _outputFormatCombo.Height = UiLayout.ButtonHeight();
-        _outputFormatCombo.Dock = DockStyle.Fill;
-        _outputFormatCombo.Margin = new Padding(0, UiLayout.Scale(3), UiLayout.Scale(8), 0);
-        _outputFormatCombo.SelectionChangeCommitted += (_, _) => UpdateOutputFormatUi();
-        outputRow.Controls.Add(_outputFormatCombo, 4, 0);
-        outputRow.Controls.Add(LabelFor("CTB"), 5, 0);
-        _style.DropDownStyle = ComboBoxStyle.DropDownList;
-        _style.Height = UiLayout.ButtonHeight();
-        _style.Dock = DockStyle.Fill;
-        _style.Margin = new Padding(0, UiLayout.Scale(3), UiLayout.Scale(4), 0);
-        // 用 SelectedIndexChanged：键盘、滚轮和部分 CAD 宿主里下拉确认都可能不触发 SelectionChangeCommitted。
-        _style.SelectedIndexChanged += (_, _) =>
+        _viewSortedByHeader = true;
+        _sortMemberPath = memberPath;
+        var sorted = _rows.OrderBy(row => GetHeaderSortValue(row, memberPath), NaturalStringComparer.Instance).ToList();
+        var wasUpdating = _updating;
+        _updating = true;
+        try
         {
-            _styleSettingsButton.Enabled = _style.SelectedIndex >= 0 && !IsDwgOutput;
-            if (_styleSelectionReady)
+            ReplaceBindingListContents(_displayRows, sorted);
+        }
+        finally
+        {
+            _updating = wasUpdating;
+        }
+        UpdateDisplayIndexes();
+        UpdateVisuals();
+    }
+
+    private string GetHeaderSortValue(Row row, string memberPath)
+    {
+        switch (memberPath)
+        {
+            case nameof(Row.Selected):
+                return row.Selected ? "1" : "0";
+            case nameof(Row.FileName):
+                return row.FileName;
+            case nameof(Row.PaperChoice):
+                return row.PaperChoice;
+            case nameof(Row.Scale):
+                return row.Scale;
+        }
+
+        // 编号列按真实打印顺序排序；预览按钮列保持原始顺序。
+        return _rows.IndexOf(row).ToString("D8");
+    }
+
+    private void Grid_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        var row = HitTestRow(e.OriginalSource as DependencyObject)?.Item as Row;
+        if (row == null)
+        {
+            return;
+        }
+
+        if (e.OriginalSource is System.Windows.Controls.CheckBox
+            && _grid.SelectedItems.Count > 1)
+        {
+            // 先记住点击前的多选行；点击复选框时可能会先改当前选择，后续统一同步这些行。
+            var highlightedRows = HighlightedRows();
+            _pendingPrintToggleRows = highlightedRows.Contains(row) ? highlightedRows : null;
+        }
+
+        // 原 CellClick：点击行时在 CAD 中高亮对应矩形框。
+        _highlightedJobIndex = _rows.IndexOf(row);
+        _overlay.SetHighlight(row.Job);
+    }
+
+    private void Grid_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        var container = HitTestRow(e.OriginalSource as DependencyObject);
+        if (container?.Item is not Row row)
+        {
+            return;
+        }
+
+        if (!_grid.SelectedItems.Contains(row))
+        {
+            if (_grid.SelectedItems.Count <= 1)
             {
-                SaveCurrentPlotOptions();
+                _grid.UnselectAll();
             }
-        };
-        _styleSettingsButton = UiLayout.CreateButton("设置", 56);
-        // 保留统一按钮高度并只横向拉伸，避免紧凑行在不同 DPI 下把文字区域压扁。
-        _styleSettingsButton.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-        _styleSettingsButton.Margin = new Padding(0, UiLayout.Scale(2), 0, 0);
-        _styleSettingsButton.Click += (_, _) =>
-            PlotStyleManager.EditSelectedStyle(this, _style.SelectedItem?.ToString());
-        tips.SetToolTip(_styleSettingsButton, "打开当前选中的 CTB 打印样式进行设置。");
-        var stylePanel = new TableLayoutPanel
+            // 已经 Shift/Ctrl 多选后，即使鼠标移到其它行右键，也保留原多选集合用于批量操作。
+            container.IsSelected = true;
+        }
+
+        if (_grid.SelectedItems.Contains(row))
         {
-            Dock = DockStyle.Fill,
-            ColumnCount = 2,
-            RowCount = 1,
-            Margin = Padding.Empty,
-            Padding = Padding.Empty
-        };
-        stylePanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-        stylePanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        stylePanel.ColumnStyles.Add(new ColumnStyle(
-            SizeType.Absolute,
-            UiLayout.ButtonWidth("设置", 56)));
-        stylePanel.Controls.Add(_style, 0, 0);
-        stylePanel.Controls.Add(_styleSettingsButton, 1, 0);
-        outputRow.Controls.Add(stylePanel, 6, 0);
+            _grid.CurrentItem = row;
+        }
+    }
 
-        _printButton = UiLayout.CreateButton("开始打印", 98);
-        _printButton.Margin = new Padding(0, UiLayout.Scale(2), 0, 0);
-        _printButton.BackColor = Color.FromArgb(0, 120, 215);
-        _printButton.ForeColor = Color.White;
-        _printButton.FlatStyle = FlatStyle.Flat;
-        _printButton.FlatAppearance.BorderColor = Color.FromArgb(0, 95, 170);
-        _printButton.Click += (_, _) => PrintOrStop();
-        outputRow.Controls.Add(_printButton, 7, 0);
-        tips.SetToolTip(_mergePdf, "仅 PDF 可用；书签和按纸张大小分组合并可在批量打印设置中配置。");
-        tips.SetToolTip(
-            marginPanel,
-            "PDF/DWF 均支持：正数扩大纸张并保持原比例，负数保持原纸张并居中缩小内容。");
-
-        top.Controls.Add(actions, 0, 0);
-        top.Controls.Add(outputRow, 0, 1);
-        top.Controls.Add(options, 0, 2);
-
-        UiLayout.StyleGrid(_grid, Font);
-        _grid.BorderStyle = BorderStyle.None;
-        _grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
-        _grid.DefaultCellStyle.Padding = new Padding(UiLayout.Scale(3), 0, UiLayout.Scale(3), 0);
-        _grid.DataSource = _displayRows;
-        var indexCol = new DataGridViewTextBoxColumn { HeaderText = "编号", Width = UiLayout.Scale(52), ReadOnly = true };
-        _grid.Columns.Add(indexCol);
-        _grid.CellFormatting += (_, e) =>
+    private static DataGridRow? HitTestRow(DependencyObject? source)
+    {
+        while (source != null && source is not DataGridRow)
         {
-            if (e.ColumnIndex == indexCol.Index && e.RowIndex >= 0)
+            source = System.Windows.Media.VisualTreeHelper.GetParent(source);
+        }
+        return source as DataGridRow;
+    }
+
+    private void Grid_ContextMenuOpening(object sender, ContextMenuEventArgs e)
+    {
+        // 只有多选行的候选纸张完全一致时，才允许统一修改纸张，避免套用到不适配的矩形框。
+        _changePaperItem.IsEnabled = TryGetCommonPaperOptions(HighlightedRows(), out _);
+    }
+
+    private void PrintCheck_Click(object sender, RoutedEventArgs e)
+    {
+        if (_updating || _updatingPrintSelection)
+        {
+            return;
+        }
+
+        if (((System.Windows.Controls.CheckBox)sender).DataContext is not Row row)
+        {
+            return;
+        }
+
+        // 对应原 GridCellValueChanged 的 Selected 分支。
+        ApplyPrintSelectionToHighlightedRows(row);
+        RemoveUnselectedRows();
+        RefreshFileNames();
+        RefreshOutputPaths();
+        UpdateVisuals();
+    }
+
+    private void PaperChoice_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_updating || _updatingPrintSelection || _suppressPaperEvents)
+        {
+            return;
+        }
+
+        if (((ComboBox)sender).DataContext is not Row row)
+        {
+            return;
+        }
+
+        // 对应原 GridCellValueChanged 的 PaperChoice 分支。
+        var value = row.PaperChoice;
+        var option = row.Options.FirstOrDefault(candidate => string.Equals(PaperSizeDetector.FormatOption(candidate), value, StringComparison.Ordinal));
+        if (option != null)
+        {
+            ApplyPaper(row.Job, option);
+            row.RefreshFromJob();
+            RefreshFileNames();
+            RefreshOutputPaths();
+            UpdateVisuals();
+        }
+    }
+
+    private void PreviewButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (((Button)sender).DataContext is not Row row)
+        {
+            return;
+        }
+
+        if (IsDwgOutput)
+        {
+            MessageBox.Show("DWG 输出为拆图操作，不提供打印预览。", Title, MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        // 预览与正式输出使用同一绘图器，避免不同格式之间出现纸张或旋转差异。
+        var device = SelectedDevice();
+        if (string.IsNullOrWhiteSpace(device))
+        {
+            MessageBox.Show($"未找到可用的 {SelectedOutputFormat} 输出设备。", Title, MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var selectedRows = _grid.SelectedItems.OfType<Row>().ToList();
+        var currentItem = _grid.CurrentItem as Row;
+        CadWindowFocus.HideForCadInput(this);
+        try
+        {
+            SaveCurrentPlotOptions();
+            row.Job.LeavePaperMargin = SupportsLeaveMargin && _leaveMargin.IsChecked == true;
+            row.Job.PaperMarginMm = ReadMarginValue(_marginInput);
+            // 预览当前行时同时准备已勾选图纸的全部任意尺寸；当前行未勾选也不能漏掉。
+            var previewJobs = _rows
+                .Where(candidate => candidate.Selected || ReferenceEquals(candidate, row))
+                .Select(candidate => candidate.Job)
+                .ToList();
+            // 同步留白设置到所有准备作业，保证扩大/缩比例模式即时生效。
+            ApplyLeaveMarginSelection(previewJobs);
+            CustomPaperBatchPreparer.Prepare(previewJobs, device);
+            PlotterService.Preview(row.Job, device, SelectedStyle(), _document);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show("打印预览失败: " + ex.Message, Title, MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            CadWindowFocus.RestoreDialog(this);
+            RestoreGridSelection(selectedRows, currentItem);
+        }
+    }
+
+    private void RestoreGridSelection(IReadOnlyList<Row> selectedRows, Row? currentItem)
+    {
+        try
+        {
+            _grid.UnselectAll();
+            foreach (var row in selectedRows)
             {
-                if (_grid.Rows[e.RowIndex].DataBoundItem is Row row)
+                if (_displayRows.Contains(row))
                 {
-                    e.Value = (_displayRows.IndexOf(row) + 1).ToString();
+                    _grid.SelectedItems.Add(row);
                 }
             }
-        };
 
-        _grid.Columns.Add(new DataGridViewButtonColumn
-        {
-            Name = "Preview", HeaderText = "预览", Text = "预览", UseColumnTextForButtonValue = true, Width = UiLayout.Scale(62)
-        });
-        _grid.Columns.Add(new DataGridViewCheckBoxColumn
-        {
-            DataPropertyName = nameof(Row.Selected), HeaderText = "打印", Width = UiLayout.Scale(62)
-        });
-        _grid.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            DataPropertyName = nameof(Row.FileName), HeaderText = "文件名",
-            AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill, FillWeight = 34, MinimumWidth = UiLayout.Scale(170)
-        });
-        _grid.Columns.Add(new DataGridViewComboBoxColumn
-        {
-            Name = "PaperChoice", DataPropertyName = nameof(Row.PaperChoice), HeaderText = "纸张尺寸 / 比例",
-            AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill, FillWeight = 34, MinimumWidth = UiLayout.Scale(200),
-            DisplayStyle = DataGridViewComboBoxDisplayStyle.DropDownButton, FlatStyle = FlatStyle.Flat
-        });
-        _grid.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            DataPropertyName = nameof(Row.Scale), HeaderText = "比例", ReadOnly = true, Width = UiLayout.Scale(86)
-        });
-        foreach (DataGridViewColumn column in _grid.Columns)
-        {
-            column.SortMode = DataGridViewColumnSortMode.Programmatic;
+            if (currentItem != null && _displayRows.Contains(currentItem))
+            {
+                _grid.CurrentItem = currentItem;
+            }
         }
-        _grid.DataBindingComplete += (_, _) =>
+        catch
         {
-            if (!_updating)
-            {
-                ConfigurePaperCells();
-            }
-        };
-        _grid.ColumnHeaderMouseClick += GridColumnHeaderMouseClick;
-        _grid.CellValueChanged += GridCellValueChanged;
-        _grid.CurrentCellDirtyStateChanged += (_, _) =>
-        {
-            if (_grid.IsCurrentCellDirty)
-            {
-                _grid.CommitEdit(DataGridViewDataErrorContexts.Commit);
-            }
-        };
-        _grid.CellContentClick += GridCellContentClick;
-        _grid.CellMouseDown += GridCellMouseDown;
-        _grid.CellClick += (_, e) =>
-        {
-            if (e.RowIndex >= 0 && e.RowIndex < _displayRows.Count)
-            {
-                _highlightedJobIndex = _rows.IndexOf(_displayRows[e.RowIndex]);
-                var targetJob = _displayRows[e.RowIndex].Job;
-                _overlay.SetHighlight(targetJob);
-            }
-        };
-        _grid.CellFormatting += GridCellFormatting;
-        _grid.ContextMenuStrip = CreateContextMenu();
-        _grid.DataError += (_, e) => e.ThrowException = false;
-
-        _status.Dock = DockStyle.Bottom;
-        _status.Height = UiLayout.Scale(30);
-        _status.TextAlign = ContentAlignment.MiddleLeft;
-        _status.Padding = new Padding(UiLayout.Scale(8), 0, 0, 0);
-        _status.BackColor = Color.FromArgb(235, 239, 244);
-        _status.ForeColor = Color.FromArgb(55, 65, 81);
-        _status.BorderStyle = BorderStyle.FixedSingle;
-        Controls.Add(_grid);
-        Controls.Add(_status);
-
-        // ── 底部快捷设置栏 ──
-        var quickBar = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Bottom,
-            Height = UiLayout.ButtonHeight() + UiLayout.Scale(8),
-            FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight,
-            WrapContents = false,
-            Padding = new Padding(UiLayout.Scale(8), UiLayout.Scale(3), 0, UiLayout.Scale(3)),
-            BackColor = Color.FromArgb(245, 247, 250)
-        };
-        var sortSettingsBtn = UiLayout.CreateButton("排序设置", 76);
-        sortSettingsBtn.Margin = new Padding(0, 0, UiLayout.Scale(4), 0);
-        sortSettingsBtn.Click += (_, _) => ShowSortSettings();
-        tips.SetToolTip(sortSettingsBtn, "选择矩形框空间排列顺序，并按选定方向重排当前列表。");
-        var generalSettingsBtn = UiLayout.CreateButton("常规设置", 76);
-        generalSettingsBtn.Margin = new Padding(0, 0, 0, 0);
-        generalSettingsBtn.Click += (_, _) => ShowSettingsAtTab(0);
-        tips.SetToolTip(generalSettingsBtn, "配置纸张匹配容差、四条线矩形框识别等常规选项。");
-        quickBar.Controls.Add(sortSettingsBtn);
-        quickBar.Controls.Add(generalSettingsBtn);
-        Controls.Add(quickBar);
-
-        Controls.Add(top);
-
-        static FlowLayoutPanel NewFlow() => new()
-        {
-            Dock = DockStyle.Fill,
-            FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight,
-            WrapContents = false,
-            AutoScroll = true
-        };
-
-        static Label LabelFor(string text) => new()
-        {
-            Text = text,
-            Dock = DockStyle.Fill,
-            TextAlign = ContentAlignment.TopLeft,
-            Margin = new Padding(0, UiLayout.Scale(7), UiLayout.Scale(4), 0)
-        };
-
-        static Control Separator() => new Label
-        {
-            Width = UiLayout.Scale(1),
-            Height = UiLayout.ButtonHeight() - UiLayout.Scale(8),
-            BackColor = Color.FromArgb(205, 210, 216),
-            Margin = new Padding(UiLayout.Scale(4), UiLayout.Scale(6), UiLayout.Scale(12), UiLayout.Scale(4))
-        };
+            // CAD 预览退出后可能触发 DataGrid 选择状态变化；恢复失败不影响后续打印。
+        }
     }
+
+    private void BatchChangePaper_Click(object sender, RoutedEventArgs e) => BatchChangeHighlightedPaper();
+
+    private void MarkNotPrint_Click(object sender, RoutedEventArgs e) => MarkHighlightedNotPrint();
+
+    private void DeleteHighlighted_Click(object sender, RoutedEventArgs e) => DeleteHighlighted();
+
+    // ── 数据加载 ──
 
     private void LoadRows(IReadOnlyList<RectangleFrameScanner.Result> results)
     {
@@ -438,7 +493,7 @@ public sealed class RectangleBatchPlotForm : Form
 
         ReplaceBindingListContents(_rows, rows);
         _viewSortedByHeader = false;
-        _viewSortColumnIndex = -1;
+        _sortMemberPath = "";
         SortRows();
     }
 
@@ -472,7 +527,7 @@ public sealed class RectangleBatchPlotForm : Form
             {
                 // 设置关闭四线矩形识别后，旧列表中仅由四线组成的图框不能继续残留。
                 LoadRows(results);
-                MessageBox.Show("重新识别后没有找到矩形框。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show("重新识别后没有找到矩形框。", Title, MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 
@@ -481,11 +536,11 @@ public sealed class RectangleBatchPlotForm : Form
         }
         catch (Exception ex)
         {
-            MessageBox.Show("重新识别矩形框失败: " + ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show("重新识别矩形框失败: " + ex.Message, Title, MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
-    private TitleBlockScanScope? PromptScanScope() => BatchPlotCommands.PromptScanScope(this);
+    private TitleBlockScanScope? PromptScanScope() => BatchPlotCommands.PromptScanScope();
 
     private void ScanCurrentDrawing()
     {
@@ -504,7 +559,7 @@ public sealed class RectangleBatchPlotForm : Form
                 _settings.RecognizeFourLineRectangleFrames);
             if (results.Count == 0)
             {
-                MessageBox.Show("扫描范围内没有识别到符合常见纸张比例的矩形框。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show("扫描范围内没有识别到符合常见纸张比例的矩形框。", Title, MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 
@@ -515,7 +570,7 @@ public sealed class RectangleBatchPlotForm : Form
         }
         catch (Exception ex)
         {
-            MessageBox.Show("扫描当前图失败: " + ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show("扫描当前图失败: " + ex.Message, Title, MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -551,7 +606,7 @@ public sealed class RectangleBatchPlotForm : Form
                 _settings.RecognizeFourLineRectangleFrames);
             if (results.Count == 0)
             {
-                MessageBox.Show("框选范围内没有识别到符合常见纸张比例的矩形框。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show("框选范围内没有识别到符合常见纸张比例的矩形框。", Title, MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 
@@ -562,7 +617,7 @@ public sealed class RectangleBatchPlotForm : Form
         }
         catch (Exception ex)
         {
-            MessageBox.Show("框选扫描失败: " + ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show("框选扫描失败: " + ex.Message, Title, MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {
@@ -625,7 +680,7 @@ public sealed class RectangleBatchPlotForm : Form
         }
 
         _viewSortedByHeader = false;
-        _viewSortColumnIndex = -1;
+        _sortMemberPath = "";
         var horizontalFirst = _settings.SortOrderHorizontalFirst;
 
         var allRows = _rows.ToList();
@@ -646,25 +701,21 @@ public sealed class RectangleBatchPlotForm : Form
     {
         var wasUpdating = _updating;
         _updating = true;
-        _grid.SuspendLayout();
         try
         {
             ReplaceBindingListContents(_displayRows, _rows);
         }
         finally
         {
-            _grid.ResumeLayout();
             _updating = wasUpdating;
         }
 
-        ConfigurePaperCells();
-        _grid.Refresh();
+        UpdateDisplayIndexes();
     }
 
     /// <summary>
     /// 一次性替换绑定列表内容，只在结束时发送一次 Reset。
-    /// 大图纸有数百个矩形框时，逐行 Add 会让 DataGridView 每次都触发 DataBindingComplete，
-    /// 并重复配置此前所有纸张下拉单元格，形成明显的 O(n²) 界面卡顿。
+    /// 大图纸有数百个矩形框时，逐行 Add 会重复触发整表刷新，形成明显的 O(n²) 界面卡顿。
     /// </summary>
     private static void ReplaceBindingListContents<T>(BindingList<T> target, IEnumerable<T> values)
     {
@@ -684,67 +735,12 @@ public sealed class RectangleBatchPlotForm : Form
         }
     }
 
-    private void GridColumnHeaderMouseClick(object? sender, DataGridViewCellMouseEventArgs e)
+    private void UpdateDisplayIndexes()
     {
-        if (e.ColumnIndex < 0 || e.ColumnIndex >= _grid.Columns.Count)
+        for (var i = 0; i < _displayRows.Count; i++)
         {
-            return;
+            _displayRows[i].SetNumber(i + 1);
         }
-
-        if (_viewSortedByHeader && _viewSortColumnIndex == e.ColumnIndex)
-        {
-            _viewSortedByHeader = false;
-            _viewSortColumnIndex = -1;
-            RefreshDisplayRows();
-            UpdateVisuals();
-            return;
-        }
-
-        _viewSortedByHeader = true;
-        _viewSortColumnIndex = e.ColumnIndex;
-        var sorted = _rows.OrderBy(row => GetHeaderSortValue(row, e.ColumnIndex), NaturalStringComparer.Instance).ToList();
-        var wasUpdating = _updating;
-        _updating = true;
-        _grid.SuspendLayout();
-        try
-        {
-            ReplaceBindingListContents(_displayRows, sorted);
-        }
-        finally
-        {
-            _grid.ResumeLayout();
-            _updating = wasUpdating;
-        }
-        ConfigurePaperCells();
-        _grid.Refresh();
-        UpdateVisuals();
-    }
-
-    private string GetHeaderSortValue(Row row, int columnIndex)
-    {
-        var column = _grid.Columns[columnIndex];
-        if (column.DataPropertyName == nameof(Row.Selected))
-        {
-            return row.Selected ? "1" : "0";
-        }
-
-        if (column.DataPropertyName == nameof(Row.FileName))
-        {
-            return row.FileName;
-        }
-
-        if (column.Name == "PaperChoice" || column.DataPropertyName == nameof(Row.PaperChoice))
-        {
-            return row.PaperChoice;
-        }
-
-        if (column.DataPropertyName == nameof(Row.Scale))
-        {
-            return row.Scale;
-        }
-
-        // 编号列按真实打印顺序排序；预览按钮列保持原始顺序。
-        return _rows.IndexOf(row).ToString("D8");
     }
 
     private void RefreshFileNames()
@@ -784,52 +780,6 @@ public sealed class RectangleBatchPlotForm : Form
         {
             row.Job.OutputPath = Path.Combine(directory, row.FileName);
         }
-        _grid.Refresh();
-    }
-
-    private void ConfigurePaperCells()
-    {
-        foreach (DataGridViewRow gridRow in _grid.Rows)
-        {
-            if (gridRow.DataBoundItem is not Row row
-                || gridRow.Cells["PaperChoice"] is not DataGridViewComboBoxCell cell)
-            {
-                continue;
-            }
-
-            cell.DataSource = row.Options.Select(PaperSizeDetector.FormatOption).ToList();
-            cell.Value = row.PaperChoice;
-        }
-    }
-
-    private void GridCellValueChanged(object? sender, DataGridViewCellEventArgs e)
-    {
-        if (_updating || _updatingPrintSelection || e.RowIndex < 0 || e.ColumnIndex < 0
-            || _grid.Rows[e.RowIndex].DataBoundItem is not Row row)
-        {
-            return;
-        }
-
-        if (_grid.Columns[e.ColumnIndex].DataPropertyName == nameof(Row.Selected))
-        {
-            ApplyPrintSelectionToHighlightedRows(row);
-            RemoveUnselectedRows();
-        }
-        else if (_grid.Columns[e.ColumnIndex].Name == "PaperChoice")
-        {
-            var value = _grid.Rows[e.RowIndex].Cells[e.ColumnIndex].Value?.ToString() ?? "";
-            var option = row.Options.FirstOrDefault(candidate => string.Equals(PaperSizeDetector.FormatOption(candidate), value, StringComparison.Ordinal));
-            if (option != null)
-            {
-                row.PaperChoice = value;
-                ApplyPaper(row.Job, option);
-                _grid.Refresh();
-            }
-        }
-
-        RefreshFileNames();
-        RefreshOutputPaths();
-        UpdateVisuals();
     }
 
     private void ApplyPrintSelectionToHighlightedRows(Row changedRow)
@@ -854,98 +804,12 @@ public sealed class RectangleBatchPlotForm : Form
         {
             _updatingPrintSelection = false;
         }
-
-        _grid.Refresh();
-    }
-
-    private ContextMenuStrip CreateContextMenu()
-    {
-        var menu = new ContextMenuStrip();
-        var changePaper = new ToolStripMenuItem("批量修改纸张...");
-        changePaper.Click += (_, _) => BatchChangeHighlightedPaper();
-        var markNotPrint = new ToolStripMenuItem("不打印");
-        markNotPrint.Click += (_, _) => MarkHighlightedNotPrint();
-        var delete = new ToolStripMenuItem("删除");
-        delete.Click += (_, _) => DeleteHighlighted();
-        menu.Items.Add(changePaper);
-        menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(markNotPrint);
-        menu.Items.Add(delete);
-        menu.Opening += (_, _) =>
-        {
-            // 只有多选行的候选纸张完全一致时，才允许统一修改纸张，避免套用到不适配的矩形框。
-            changePaper.Enabled = TryGetCommonPaperOptions(HighlightedRows(), out _);
-        };
-        return menu;
-    }
-
-    private void GridCellMouseDown(object? sender, DataGridViewCellMouseEventArgs e)
-    {
-        if (e.RowIndex < 0)
-        {
-            return;
-        }
-
-        if (e.Button == MouseButtons.Left
-            && e.ColumnIndex >= 0
-            && _grid.Columns[e.ColumnIndex].DataPropertyName == nameof(Row.Selected)
-            && _grid.SelectedRows.Count > 1
-            && _grid.Rows[e.RowIndex].DataBoundItem is Row clickedRow)
-        {
-            // 先记住点击前的多选行；DataGrid 点击复选框时可能会先改当前选择，后续 CellValueChanged 再统一同步这些行。
-            var highlightedRows = HighlightedRows();
-            _pendingPrintToggleRows = highlightedRows.Contains(clickedRow) ? highlightedRows : null;
-        }
-
-        if (e.Button != MouseButtons.Right)
-        {
-            return;
-        }
-
-        if (!_grid.Rows[e.RowIndex].Selected)
-        {
-            if (_grid.SelectedRows.Count <= 1)
-            {
-                _grid.ClearSelection();
-                _grid.Rows[e.RowIndex].Selected = true;
-            }
-            // 已经 Shift/Ctrl 多选后，即使鼠标移到其它行右键，也保留原多选集合用于批量操作。
-        }
-
-        if (_grid.Rows[e.RowIndex].Selected)
-        {
-            _grid.CurrentCell = _grid.Rows[e.RowIndex].Cells[Math.Max(e.ColumnIndex, 0)];
-        }
-    }
-
-    private void GridCellFormatting(object? sender, DataGridViewCellFormattingEventArgs e)
-    {
-        if (e.RowIndex < 0 || _grid.Rows[e.RowIndex].DataBoundItem is not Row row)
-        {
-            return;
-        }
-
-        if (!row.Selected && !_grid.Rows[e.RowIndex].Selected)
-        {
-            var cellStyle = e.CellStyle;
-            if (cellStyle is null)
-            {
-                return;
-            }
-
-            cellStyle.ForeColor = Color.Gray;
-            cellStyle.BackColor = Color.FromArgb(247, 247, 247);
-        }
     }
 
     private List<Row> HighlightedRows()
     {
-        var rows = _grid.SelectedRows.Cast<DataGridViewRow>()
-            .Select(gridRow => gridRow.DataBoundItem)
-            .OfType<Row>()
-            .Distinct()
-            .ToList();
-        if (rows.Count == 0 && _grid.CurrentRow?.DataBoundItem is Row current)
+        var rows = _grid.SelectedItems.OfType<Row>().Distinct().ToList();
+        if (rows.Count == 0 && _grid.CurrentItem is Row current)
         {
             rows.Add(current);
         }
@@ -965,30 +829,37 @@ public sealed class RectangleBatchPlotForm : Form
 
     private void BatchChangeHighlightedPaper()
     {
-        _grid.EndEdit();
+        _grid.CommitEdit(DataGridEditingUnit.Row, true);
         var rows = HighlightedRows();
         if (!TryGetCommonPaperOptions(rows, out var options))
         {
-            MessageBox.Show("只有所选矩形框的候选纸张尺寸完全一致时，才能批量修改纸张。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show("只有所选矩形框的候选纸张尺寸完全一致时，才能批量修改纸张。", Title, MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
-        using var dialog = new SinglePlotPaperSelectionForm(options);
-        if (dialog.ShowDialog(this) != DialogResult.OK)
+        var dialog = new SinglePlotPaperSelectionForm(options);
+        if (CadDialog.ShowModal(dialog) != true)
         {
             return;
         }
 
         var selectedPaper = dialog.SelectedPaper;
         var paperChoice = PaperSizeDetector.FormatOption(selectedPaper);
-        foreach (var row in rows)
+        _suppressPaperEvents = true;
+        try
         {
-            row.PaperChoice = paperChoice;
-            ApplyPaper(row.Job, selectedPaper);
+            foreach (var row in rows)
+            {
+                row.PaperChoice = paperChoice;
+                ApplyPaper(row.Job, selectedPaper);
+                row.RefreshFromJob();
+            }
+        }
+        finally
+        {
+            _suppressPaperEvents = false;
         }
 
-        _grid.Refresh();
-        ConfigurePaperCells();
         RefreshFileNames();
         RefreshOutputPaths();
         UpdateVisuals();
@@ -1071,90 +942,6 @@ public sealed class RectangleBatchPlotForm : Form
         {
             RefreshDisplayRows();
         }
-        else
-        {
-            _grid.Refresh();
-        }
-    }
-
-    private void GridCellContentClick(object? sender, DataGridViewCellEventArgs e)
-    {
-        if (e.RowIndex < 0 || e.ColumnIndex < 0)
-        {
-            return;
-        }
-
-        if (_grid.Columns[e.ColumnIndex].Name == "Preview"
-            && _grid.Rows[e.RowIndex].DataBoundItem is Row row)
-        {
-            if (IsDwgOutput)
-            {
-                MessageBox.Show("DWG 输出为拆图操作，不提供打印预览。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-
-            // 预览与正式输出使用同一绘图器，避免不同格式之间出现纸张或旋转差异。
-            var device = SelectedDevice();
-            if (string.IsNullOrWhiteSpace(device))
-            {
-                MessageBox.Show($"未找到可用的 {SelectedOutputFormat} 输出设备。", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-
-            var selectedRows = _grid.SelectedRows.Cast<DataGridViewRow>().ToList();
-            var currentCell = _grid.CurrentCell;
-            CadWindowFocus.HideForCadInput(this);
-            try
-            {
-                SaveCurrentPlotOptions();
-                row.Job.LeavePaperMargin = SupportsLeaveMargin && _leaveMargin.Checked;
-                row.Job.PaperMarginMm = BatchPlotForm.ReadMarginValue(_marginInput);
-                // 预览当前行时同时准备已勾选图纸的全部任意尺寸；当前行未勾选也不能漏掉。
-                var previewJobs = _rows
-                    .Where(candidate => candidate.Selected || ReferenceEquals(candidate, row))
-                    .Select(candidate => candidate.Job)
-                    .ToList();
-                // 同步留白设置到所有准备作业，保证扩大/缩比例模式即时生效。
-                ApplyLeaveMarginSelection(previewJobs);
-                CustomPaperBatchPreparer.Prepare(previewJobs, device);
-                PlotterService.Preview(row.Job, device, SelectedStyle(), _document);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show("打印预览失败: " + ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-            finally
-            {
-                CadWindowFocus.RestoreDialog(this);
-                RestoreGridSelection(selectedRows, currentCell);
-            }
-        }
-    }
-
-    private void RestoreGridSelection(IReadOnlyList<DataGridViewRow> selectedRows, DataGridViewCell? currentCell)
-    {
-        try
-        {
-            _grid.ClearSelection();
-            foreach (var row in selectedRows)
-            {
-                if (row.Index >= 0 && row.Index < _grid.Rows.Count)
-                {
-                    row.Selected = true;
-                }
-            }
-
-            if (currentCell != null
-                && currentCell.RowIndex >= 0 && currentCell.RowIndex < _grid.Rows.Count
-                && currentCell.ColumnIndex >= 0 && currentCell.ColumnIndex < _grid.Columns.Count)
-            {
-                _grid.CurrentCell = _grid.Rows[currentCell.RowIndex].Cells[currentCell.ColumnIndex];
-            }
-        }
-        catch
-        {
-            // CAD 预览退出后可能触发 DataGrid 选择状态变化；恢复失败不影响后续打印。
-        }
     }
 
     private void PrintOrStop()
@@ -1171,7 +958,7 @@ public sealed class RectangleBatchPlotForm : Form
 
     private void Print()
     {
-        _grid.EndEdit();
+        _grid.CommitEdit(DataGridEditingUnit.Row, true);
         RefreshOutputPaths();
         if (IsDwgOutput)
         {
@@ -1182,21 +969,21 @@ public sealed class RectangleBatchPlotForm : Form
         var selected = _rows.Where(row => row.Selected).Select(row => row.Job).ToList();
         if (selected.Count == 0)
         {
-            MessageBox.Show("没有勾选任何矩形框。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show("没有勾选任何矩形框。", Title, MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
         var directory = _outputDirectory.Text.Trim();
         if (string.IsNullOrWhiteSpace(directory))
         {
-            MessageBox.Show("请选择输出路径。", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show("请选择输出路径。", Title, MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
         var device = SelectedDevice();
         if (string.IsNullOrWhiteSpace(device))
         {
-            MessageBox.Show($"未找到可用的 {SelectedOutputFormat} 输出设备。", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show($"未找到可用的 {SelectedOutputFormat} 输出设备。", Title, MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
@@ -1206,7 +993,7 @@ public sealed class RectangleBatchPlotForm : Form
         var originalPaths = selected.ToDictionary(job => job, job => job.OutputPath);
         string? temporaryDirectory = null;
         var mergedOutput = Path.Combine(directory, SourceStem() + ".pdf");
-        var mergePdf = IsPdfOutput && _mergePdf.Checked;
+        var mergePdf = IsPdfOutput && _mergePdf.IsChecked == true;
         var mergedOutputPaths = new List<string>();
         var completed = 0;
         var printLogLines = new List<string>();
@@ -1240,12 +1027,9 @@ public sealed class RectangleBatchPlotForm : Form
         {
             // 切换按钮为"停止"状态
             _printCts = new CancellationTokenSource();
-            if (_printButton != null)
-            {
-                _printButton.Text = "停止";
-                _printButton.BackColor = Color.FromArgb(200, 40, 40);
-                _printButton.FlatAppearance.BorderColor = Color.FromArgb(160, 30, 30);
-            }
+            _printButton.Content = "停止";
+            _printButton.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(200, 40, 40));
+            _printButton.BorderBrush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(160, 30, 30));
 
             if (mergePdf)
             {
@@ -1258,7 +1042,7 @@ public sealed class RectangleBatchPlotForm : Form
             }
 
             _status.Text = $"打印中... 0 / {selected.Count}";
-            System.Windows.Forms.Application.DoEvents();
+            Pump();
 
             // 汇总本批所有任意加长尺寸后只更新一次实际 PMP，再进入连续打印。
             CustomPaperBatchPreparer.Prepare(selected, device);
@@ -1272,7 +1056,7 @@ public sealed class RectangleBatchPlotForm : Form
                     AppendPrintLog(
                         "INFO",
                         $"开始打印 {completed}/{selected.Count}；源文件={job.SourceFile}；布局={job.SpaceName}；输出={finalOutput}");
-                    System.Windows.Forms.Application.DoEvents();
+                    Pump();
                 },
                 cancellationToken: _printCts.Token);
 
@@ -1297,7 +1081,7 @@ public sealed class RectangleBatchPlotForm : Form
             if (mergePdf)
             {
                 _status.Text = "正在合并 PDF...";
-                System.Windows.Forms.Application.DoEvents();
+                Pump();
                 var mergeInputs = selected.Select(job => new PdfMergeInput(
                     job.OutputPath,
                     Path.GetFileNameWithoutExtension(originalPaths[job]),
@@ -1338,35 +1122,32 @@ public sealed class RectangleBatchPlotForm : Form
                 mergePdf
                     ? $"打印并合并完成，共 {selected.Count} 张，生成 {mergedOutputPaths.Count} 个 PDF。\n{string.Join("\n", mergedOutputPaths)}{printLogText}"
                     : $"打印完成，共 {selected.Count} 张。\n{directory}{printLogText}",
-                Text,
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information);
+                Title,
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
         }
         catch (OperationCanceledException)
         {
             _status.Text = $"已停止（已完成 {completed} / {selected.Count}）";
             AppendPrintLog("INFO", $"用户取消打印；已开始={completed}/{selected.Count}");
             var printLogPath = SavePrintLog();
-            MessageBox.Show($"打印已停止。\n已完成 {completed} / {selected.Count} 张。{BuildLogText(printLogPath)}", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show($"打印已停止。\n已完成 {completed} / {selected.Count} 张。{BuildLogText(printLogPath)}", Title, MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex)
         {
             _status.Text = "打印失败";
             AppendPrintLog("ERROR", "矩形框批量打印失败: " + ex);
             var printLogPath = SavePrintLog();
-            MessageBox.Show("矩形框批量打印失败: " + ex.Message + BuildLogText(printLogPath), Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show("矩形框批量打印失败: " + ex.Message + BuildLogText(printLogPath), Title, MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {
             _printCts?.Dispose();
             _printCts = null;
             // 恢复按钮
-            if (_printButton != null)
-            {
-                _printButton.Text = "开始打印";
-                _printButton.BackColor = Color.FromArgb(0, 120, 215);
-                _printButton.FlatAppearance.BorderColor = Color.FromArgb(0, 95, 170);
-            }
+            _printButton.Content = "开始打印";
+            _printButton.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0, 120, 215));
+            _printButton.BorderBrush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0, 95, 170));
 
             foreach (var pair in originalPaths)
             {
@@ -1385,31 +1166,31 @@ public sealed class RectangleBatchPlotForm : Form
         var selected = _rows.Where(row => row.Selected).Select(row => row.Job).ToList();
         if (selected.Count == 0)
         {
-            MessageBox.Show("没有勾选任何矩形框。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show("没有勾选任何矩形框。", Title, MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
         var directory = _outputDirectory.Text.Trim();
         if (string.IsNullOrWhiteSpace(directory))
         {
-            MessageBox.Show("请选择输出路径。", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show("请选择输出路径。", Title, MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
         var confirm = MessageBox.Show(
             $"将按当前矩形框拆出 {selected.Count} 个 DWG 文件。\n\n输出位置：{directory}\n\n是否继续？",
             "矩形框批量拆图",
-            MessageBoxButtons.OKCancel,
-            MessageBoxIcon.Question);
-        if (confirm != DialogResult.OK)
+            MessageBoxButton.OKCancel,
+            MessageBoxImage.Question);
+        if (confirm != MessageBoxResult.OK)
         {
             return;
         }
 
         Directory.CreateDirectory(directory);
         SaveCurrentPlotOptions();
-        Cursor = Cursors.WaitCursor;
-        Enabled = false;
+        Cursor = Cursors.Wait;
+        IsEnabled = false;
         try
         {
             _status.Text = $"拆图中... 0 / {selected.Count}";
@@ -1423,7 +1204,7 @@ public sealed class RectangleBatchPlotForm : Form
                 {
                     completed++;
                     _status.Text = $"拆图中... {completed} / {selected.Count}";
-                    System.Windows.Forms.Application.DoEvents();
+                    Pump();
                 },
                 explicitOutputPaths: explicitPaths);
 
@@ -1439,17 +1220,17 @@ public sealed class RectangleBatchPlotForm : Form
             }
             RevealOutput(null, directory);
             _status.Text = $"拆图完成，共 {selected.Count} 张";
-            MessageBox.Show($"DWG 拆图完成，共 {selected.Count} 张。\n{directory}", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show($"DWG 拆图完成，共 {selected.Count} 张。\n{directory}", Title, MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex)
         {
             _status.Text = "拆图失败";
-            MessageBox.Show("矩形框批量拆图失败: " + ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show("矩形框批量拆图失败: " + ex.Message, Title, MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {
-            Enabled = true;
-            Cursor = Cursors.Default;
+            IsEnabled = true;
+            Cursor = Cursors.Arrow;
             UpdateVisuals();
         }
     }
@@ -1457,8 +1238,8 @@ public sealed class RectangleBatchPlotForm : Form
     private void ApplyLeaveMarginSelection(IEnumerable<PlotJob> jobs)
     {
         // PNG/JPG 使用像素介质，留白的毫米纸张/缩放语义不成立，作业层必须强制关闭。
-        var leaveMargin = SupportsLeaveMargin && _leaveMargin.Checked;
-        var marginMm = BatchPlotForm.ReadMarginValue(_marginInput);
+        var leaveMargin = SupportsLeaveMargin && _leaveMargin.IsChecked == true;
+        var marginMm = ReadMarginValue(_marginInput);
         foreach (var job in jobs)
         {
             // 留白是本次输出选项，预览和正式打印都写入同一个 PlotJob，保证效果一致。
@@ -1480,8 +1261,13 @@ public sealed class RectangleBatchPlotForm : Form
 
     private void LoadPlotOptions()
     {
+        _suppressComboEvents = true;
         _outputFormatCombo.Items.Clear();
-        _outputFormatCombo.Items.AddRange(new object[] { "PDF", "PNG", "JPG", "DWF", "DWG" });
+        _outputFormatCombo.Items.Add("PDF");
+        _outputFormatCombo.Items.Add("PNG");
+        _outputFormatCombo.Items.Add("JPG");
+        _outputFormatCombo.Items.Add("DWF");
+        _outputFormatCombo.Items.Add("DWG");
         _outputFormatCombo.SelectedIndex = 0;
         RefreshSavePathModeOptions(preserveSelection: false);
 
@@ -1525,6 +1311,7 @@ public sealed class RectangleBatchPlotForm : Form
         // 上次样式在当前 CAD 不可用时已回退；立刻写回设置，避免下次仍记住失效 CTB。
         SaveCurrentPlotOptions();
         UpdateOutputFormatUi();
+        _suppressComboEvents = false;
         _styleSelectionReady = true;
     }
 
@@ -1555,7 +1342,6 @@ public sealed class RectangleBatchPlotForm : Form
         {
             row.Selected = selected;
         }
-        _grid.Refresh();
         RefreshFileNames();
         UpdateVisuals();
     }
@@ -1635,21 +1421,15 @@ public sealed class RectangleBatchPlotForm : Form
     /// </summary>
     private void ScheduleOverlayRefresh()
     {
-        if (IsDisposed)
+        if (!IsLoaded)
         {
             return;
         }
 
         var generation = ++_overlayScheduleGeneration;
-        // 构造窗口时句柄尚未创建，BeginInvoke 会抛 InvalidOperationException。
-        if (!IsHandleCreated)
+        Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
         {
-            return;
-        }
-
-        BeginInvoke(new Action(() =>
-        {
-            if (IsDisposed || generation != _overlayScheduleGeneration)
+            if (!IsLoaded || generation != _overlayScheduleGeneration)
             {
                 return;
             }
@@ -1680,16 +1460,16 @@ public sealed class RectangleBatchPlotForm : Form
 
     private void ChooseOutputDirectory()
     {
-        using var dialog = new FolderBrowserDialog
+        // FolderBrowserDialog 保留 WinForms 版（WPF 没有等价物）。
+        using var dialog = new System.Windows.Forms.FolderBrowserDialog
         {
             Description = "选择输出目录",
             SelectedPath = _outputDirectory.Text
         };
-        if (dialog.ShowDialog(this) == DialogResult.OK)
+        if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
         {
             _outputDirectoryIsCustom = true;
-            _outputDirectory.Text = dialog.SelectedPath;
-            _outputDirectory.Modified = false;
+            SetOutputDirectoryText(dialog.SelectedPath);
             SaveCurrentPlotOptions();
             RefreshOutputPaths();
         }
@@ -1697,12 +1477,12 @@ public sealed class RectangleBatchPlotForm : Form
 
     private void ApplyManuallyEnteredOutputDirectory()
     {
-        if (!_outputDirectory.Modified)
+        if (!_outputDirectoryModified)
         {
             return;
         }
 
-        _outputDirectory.Modified = false;
+        _outputDirectoryModified = false;
         var directory = _outputDirectory.Text.Trim();
         if (string.IsNullOrWhiteSpace(directory))
         {
@@ -1712,7 +1492,7 @@ public sealed class RectangleBatchPlotForm : Form
         else
         {
             _outputDirectoryIsCustom = true;
-            _outputDirectory.Text = directory;
+            SetOutputDirectoryText(directory);
         }
 
         SaveCurrentPlotOptions();
@@ -1729,7 +1509,8 @@ public sealed class RectangleBatchPlotForm : Form
             ? "源文件路径/输出格式"
             : "源文件路径/" + format;
 
-        _savePathModeCombo.BeginUpdate();
+        var wasSuppressing = _suppressComboEvents;
+        _suppressComboEvents = true;
         try
         {
             _savePathModeCombo.Items.Clear();
@@ -1739,7 +1520,7 @@ public sealed class RectangleBatchPlotForm : Form
         }
         finally
         {
-            _savePathModeCombo.EndUpdate();
+            _suppressComboEvents = wasSuppressing;
         }
     }
 
@@ -1755,10 +1536,23 @@ public sealed class RectangleBatchPlotForm : Form
     private void UpdateAutomaticOutputDirectory()
     {
         var subfolder = AutomaticOutputSubfolder;
-        _outputDirectory.Text = string.IsNullOrWhiteSpace(subfolder)
+        SetOutputDirectoryText(string.IsNullOrWhiteSpace(subfolder)
             ? SourceDirectory()
-            : Path.Combine(SourceDirectory(), subfolder);
-        _outputDirectory.Modified = false;
+            : Path.Combine(SourceDirectory(), subfolder));
+    }
+
+    private void SetOutputDirectoryText(string text)
+    {
+        _suppressTextEvents = true;
+        try
+        {
+            _outputDirectory.Text = text;
+        }
+        finally
+        {
+            _suppressTextEvents = false;
+        }
+        _outputDirectoryModified = false;
     }
 
     private void UpdateOutputFormatUi()
@@ -1770,12 +1564,12 @@ public sealed class RectangleBatchPlotForm : Form
         }
 
         var plotOutput = !IsDwgOutput;
-        _style.Enabled = plotOutput;
-        _styleSettingsButton.Enabled = plotOutput && _style.SelectedIndex >= 0;
+        _style.IsEnabled = plotOutput;
+        _styleSettingsButton.IsEnabled = plotOutput && _style.SelectedIndex >= 0;
         // 禁用但保留勾选状态，切回 PDF/DWF 后恢复用户原选择；实际作业另有强制关闭保护。
-        _leaveMargin.Enabled = SupportsLeaveMargin;
-        _marginInput.Enabled = SupportsLeaveMargin && _leaveMargin.Checked;
-        _mergePdf.Enabled = IsPdfOutput;
+        _leaveMargin.IsEnabled = SupportsLeaveMargin;
+        _marginInput.IsEnabled = SupportsLeaveMargin && _leaveMargin.IsChecked == true;
+        _mergePdf.IsEnabled = IsPdfOutput;
         RefreshFileNames();
         SaveCurrentPlotOptions();
         UpdateVisuals();
@@ -1821,11 +1615,39 @@ public sealed class RectangleBatchPlotForm : Form
         {
             _settings.LastStyleSheet = style;
         }
-        _settings.MergePdf = _mergePdf.Checked;
-        _settings.LeavePaperMargin = _leaveMargin.Checked;
-        _settings.PaperMarginMm = BatchPlotForm.ReadMarginValue(_marginInput);
+        _settings.MergePdf = _mergePdf.IsChecked == true;
+        _settings.LeavePaperMargin = _leaveMargin.IsChecked == true;
+        _settings.PaperMarginMm = ReadMarginValue(_marginInput);
         AppSettingsStore.Save(_settings);
     }
+
+    /// <summary>初始化留白下拉列表，正值=扩大纸张，负值=缩比例，整数1~10配对显示。</summary>
+    private static void InitMarginCombo(ComboBox combo, double savedValue)
+    {
+        combo.Items.Clear();
+        // 整数 1~10，每档先 + 再 -，共 20 项
+        for (var n = 1; n <= 10; n++)
+        {
+            combo.Items.Add(new MarginOption { Value = n });
+            combo.Items.Add(new MarginOption { Value = -n });
+        }
+        // 选中与保存值最接近的项
+        var bestIdx = 0;
+        var bestDiff = double.MaxValue;
+        for (var i = 0; i < combo.Items.Count; i++)
+        {
+            if (combo.Items[i] is MarginOption opt)
+            {
+                var diff = Math.Abs(opt.Value - savedValue);
+                if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
+            }
+        }
+        combo.SelectedIndex = bestIdx;
+    }
+
+    /// <summary>读取留白下拉列表的选中值（毫米）。</summary>
+    private static double ReadMarginValue(ComboBox combo)
+        => combo.SelectedItem is MarginOption opt ? opt.Value : 1.0;
 
     private static void ApplyPaper(PlotJob job, PaperDetection paper)
     {
@@ -1882,26 +1704,14 @@ public sealed class RectangleBatchPlotForm : Form
         }
     }
 
-    protected override void Dispose(bool disposing)
-    {
-        if (disposing)
-        {
-            _overlayScheduleGeneration++;
-            // 关闭窗口时只清理临时红框和序号，不再退订或接管 CAD 删除命令。
-            _overlay.Dispose();
-        }
-
-        base.Dispose(disposing);
-    }
-
     private void ShowSortSettings()
     {
         // 矩形框没有图号/图名业务字段，始终只允许选择图纸位置的排列方向。
-        using var dialog = new SortOrderDialog(
+        var dialog = new SortOrderDialog(
             _settings.SortOrderHorizontalFirst,
             showSortBasis: false,
             sortMode: TitleBlockSortMode.Spatial);
-        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+        if (CadDialog.ShowModal(dialog) != true) return;
         _settings.SortOrderHorizontalFirst = dialog.HorizontalFirst;
         AppSettingsStore.Save(_settings);
         SortRows();
@@ -1912,10 +1722,10 @@ public sealed class RectangleBatchPlotForm : Form
         while (true)
         {
             SettingsForm.InitialTabIndex = tabIndex;
-            using var form = new SettingsForm();
-            if (form.ShowDialog(this) != DialogResult.OK)
+            var form = new SettingsForm();
+            if (CadDialog.ShowModal(form) != true)
             {
-                return;
+                break;
             }
 
             // 重新加载相关设置
@@ -1948,7 +1758,7 @@ public sealed class RectangleBatchPlotForm : Form
 
             tabIndex = form.SelectedTabIndex;
             Hide();
-            System.Windows.Forms.Application.DoEvents();
+            Pump();
             try
             {
                 var document = GetActiveCadDocument();
@@ -1957,8 +1767,8 @@ public sealed class RectangleBatchPlotForm : Form
                     MessageBox.Show(
                         "当前没有可用的 CAD 图纸，请先打开图纸后重试。",
                         "批量打印设置",
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Information);
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Information);
                     continue;
                 }
 
@@ -1986,8 +1796,8 @@ public sealed class RectangleBatchPlotForm : Form
                 MessageBox.Show(
                     message,
                     "批量打印设置",
-                    MessageBoxButtons.OK,
-                    ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+                    MessageBoxButton.OK,
+                    ok ? MessageBoxImage.Information : MessageBoxImage.Warning);
             }
             finally
             {
@@ -1995,6 +1805,12 @@ public sealed class RectangleBatchPlotForm : Form
                 Activate();
             }
         }
+    }
+
+    private static void Pump()
+    {
+        // 等价原 WinForms Application.DoEvents：在打印循环里刷新界面。
+        Dispatcher.CurrentDispatcher.Invoke(DispatcherPriority.Background, new Action(() => { }));
     }
 
     private static Document? GetActiveCadDocument()

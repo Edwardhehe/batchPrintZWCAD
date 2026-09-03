@@ -1,0 +1,207 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:ZwcadBatchPlot"
+        x:Class="ZwcadBatchPlot.RectangleBatchPlotForm"
+        Title="LA矩形框批量打印 V1.15.6.4"
+        Width="900" Height="520"
+        MinWidth="720" MinHeight="460"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="CanResize"
+        Background="#F5F7FA"
+        FontFamily="Microsoft YaHei UI"
+        FontSize="11"
+        TextOptions.TextFormattingMode="Display"
+        UseLayoutRounding="True">
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="WpfUi.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Window.Resources>
+
+    <DockPanel LastChildFill="True">
+        <!-- 底部状态栏（原 Dock=Bottom 的 _status） -->
+        <Border DockPanel.Dock="Bottom" Height="30"
+                Background="#EBEFF4" BorderBrush="#C8CDD4" BorderThickness="0,1,0,0">
+            <TextBlock x:Name="_status" VerticalAlignment="Center"
+                       Margin="8,0,0,0" Foreground="#374151" TextTrimming="CharacterEllipsis" />
+        </Border>
+
+        <!-- 底部快捷设置栏 -->
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="8,3,0,3">
+            <Button x:Name="_sortSettingsBtn" Content="排序设置" MinWidth="76"
+                    Style="{StaticResource PluginButtonStyle}" Margin="0,0,4,0"
+                    Click="SortSettings_Click"
+                    ToolTip="选择矩形框空间排列顺序，并按选定方向重排当前列表。" />
+            <Button x:Name="_generalSettingsBtn" Content="常规设置" MinWidth="76"
+                    Style="{StaticResource PluginButtonStyle}"
+                    Click="GeneralSettings_Click"
+                    ToolTip="配置纸张匹配容差、四条线矩形框识别等常规选项。" />
+        </StackPanel>
+
+        <!-- 顶部操作区：动作行 / 输出行 / 选项行 -->
+        <StackPanel DockPanel.Dock="Top" Margin="10,4,10,2">
+            <!-- 动作行 -->
+            <StackPanel Orientation="Horizontal">
+                <Button x:Name="_scanCurrentBtn" Content="扫描当前图" MinWidth="108"
+                        Style="{StaticResource PluginButtonStyle}" Margin="0,0,3,0"
+                        Click="ScanCurrentDrawing_Click"
+                        ToolTip="扫描当前打开图纸中的全部符合纸张比例的矩形框。" />
+                <Button x:Name="_scanWindowBtn" Content="框选扫描" MinWidth="92"
+                        Style="{StaticResource PluginButtonStyle}" Margin="0,0,3,0"
+                        Click="ScanSelectedWindow_Click"
+                        ToolTip="回到 CAD 框选区域，只识别框内矩形框。" />
+                <Rectangle Width="1" Height="14" Fill="#CDD2D8"
+                           Margin="4,0,12,0" VerticalAlignment="Center" />
+                <Button x:Name="_refreshBtn" Content="重新识别" MinWidth="88"
+                        Style="{StaticResource PluginButtonStyle}" Margin="0,0,3,0"
+                        Click="ReloadFrames_Click"
+                        ToolTip="按上次扫描方式重新扫描，并刷新矩形框列表。" />
+                <TextBlock Text="右键条目可设为不打印、删除或批量改纸张"
+                           Foreground="DimGray" Margin="10,0,0,0" VerticalAlignment="Center" />
+            </StackPanel>
+
+            <!-- 输出行：输出目录 / 浏览 / 输出格式 / CTB / 设置 / 开始打印 -->
+            <Grid Margin="0,4,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="52" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="92" />
+                    <ColumnDefinition Width="72" />
+                    <ColumnDefinition Width="98" />
+                    <ColumnDefinition Width="42" />
+                    <ColumnDefinition Width="172" />
+                    <ColumnDefinition Width="98" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="输出" VerticalAlignment="Center" />
+                <TextBox x:Name="_outputDirectory" Grid.Column="1"
+                         VerticalContentAlignment="Center" Margin="0,0,8,0"
+                         TextChanged="OutputDirectory_TextChanged"
+                         LostFocus="OutputDirectory_LostFocus" />
+                <Button x:Name="_browseButton" Grid.Column="2" Content="浏览..." MinWidth="84"
+                        Style="{StaticResource PluginButtonStyle}" Margin="0,0,8,0"
+                        Click="BrowseOutputDirectory_Click"
+                        ToolTip="选择自定义输出文件夹。" />
+                <TextBlock Grid.Column="3" Text="输出格式" VerticalAlignment="Center" />
+                <ComboBox x:Name="_outputFormatCombo" Grid.Column="4" IsEditable="False"
+                          VerticalContentAlignment="Center" Margin="0,0,8,0"
+                          SelectionChanged="OutputFormat_SelectionChanged" />
+                <TextBlock Grid.Column="5" Text="CTB" VerticalAlignment="Center" />
+                <Grid Grid.Column="6">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="56" />
+                    </Grid.ColumnDefinitions>
+                    <ComboBox x:Name="_style" Grid.Column="0" IsEditable="False"
+                              VerticalContentAlignment="Center" Margin="0,0,4,0"
+                              SelectionChanged="Style_SelectionChanged" />
+                    <Button x:Name="_styleSettingsButton" Grid.Column="1" Content="设置" MinWidth="56"
+                            Style="{StaticResource PluginButtonStyle}" IsEnabled="False"
+                            Click="StyleSettings_Click"
+                            ToolTip="打开当前选中的 CTB 打印样式进行设置。" />
+                </Grid>
+                <Button x:Name="_printButton" Grid.Column="7" Content="开始打印" MinWidth="98"
+                        Style="{StaticResource PluginButtonStyle}"
+                        Background="#0078D7" Foreground="White" BorderBrush="#005FAA"
+                        Click="PrintOrStop_Click" />
+            </Grid>
+
+            <!-- 选项行：保存路径 / 合并 PDF / 留白 -->
+            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                <TextBlock Text="保存路径:" VerticalAlignment="Center" Margin="0,0,8,0" />
+                <ComboBox x:Name="_savePathModeCombo" Width="170" IsEditable="False"
+                          VerticalContentAlignment="Center" Margin="0,0,8,0"
+                          SelectionChanged="SavePathMode_SelectionChanged" />
+                <CheckBox x:Name="_mergePdf" Content="合并 PDF" VerticalAlignment="Center"
+                          Margin="4,0,8,0"
+                          ToolTip="仅 PDF 可用；书签和按纸张大小分组合并可在批量打印设置中配置。" />
+                <StackPanel x:Name="_marginPanel" Orientation="Horizontal"
+                            ToolTip="PDF/DWF 均支持：正数扩大纸张并保持原比例，负数保持原纸张并居中缩小内容。">
+                    <CheckBox x:Name="_leaveMargin" Content="留白" VerticalAlignment="Center"
+                              Margin="4,0,4,0" Checked="LeaveMargin_CheckedChanged"
+                              Unchecked="LeaveMargin_CheckedChanged" />
+                    <ComboBox x:Name="_marginInput" Width="58" IsEditable="False"
+                              VerticalContentAlignment="Center" Margin="0,0,2,0" />
+                    <TextBlock Text="mm" VerticalAlignment="Center" Margin="2,0,0,0" />
+                </StackPanel>
+            </StackPanel>
+        </StackPanel>
+
+        <!-- 矩形框列表 -->
+        <DataGrid x:Name="_grid" Style="{StaticResource PluginGridStyle}"
+                  Margin="10,2,10,6"
+                  AutoGenerateColumns="False"
+                  SelectionMode="Extended" SelectionUnit="FullRow"
+                  HeadersVisibility="Column"
+                  GridLinesVisibility="Horizontal"
+                  Sorting="Grid_Sorting"
+                  ContextMenuOpening="Grid_ContextMenuOpening"
+                  PreviewMouseLeftButtonDown="Grid_PreviewMouseLeftButtonDown"
+                  PreviewMouseRightButtonDown="Grid_PreviewMouseRightButtonDown">
+            <DataGrid.RowStyle>
+                <Style TargetType="DataGridRow">
+                    <Style.Triggers>
+                        <!-- 未勾选打印且未被选中的行显示为灰色（原 CellFormatting 逻辑） -->
+                        <MultiDataTrigger>
+                            <MultiDataTrigger.Conditions>
+                                <Condition Binding="{Binding Selected}" Value="False" />
+                                <Condition Binding="{Binding RelativeSource={RelativeSource Self}, Path=IsSelected}" Value="False" />
+                            </MultiDataTrigger.Conditions>
+                            <Setter Property="Foreground" Value="Gray" />
+                            <Setter Property="Background" Value="#F7F7F7" />
+                        </MultiDataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </DataGrid.RowStyle>
+            <DataGrid.Columns>
+                <DataGridTemplateColumn Header="编号" Width="52" IsReadOnly="True" SortMemberPath="Number">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding Number}" />
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTemplateColumn Header="预览" Width="62" SortMemberPath="Number">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <Button Content="预览" Padding="6,0" MinHeight="20"
+                                    Click="PreviewButton_Click" />
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTemplateColumn Header="打印" Width="62" SortMemberPath="Selected">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <CheckBox HorizontalAlignment="Center" VerticalAlignment="Center"
+                                      IsChecked="{Binding Selected, UpdateSourceTrigger=PropertyChanged}"
+                                      Click="PrintCheck_Click" />
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTextColumn Header="文件名" Binding="{Binding FileName}"
+                                    Width="*" MinWidth="170" />
+                <DataGridTemplateColumn Header="纸张尺寸 / 比例" Width="*" MinWidth="200" SortMemberPath="PaperChoice">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <ComboBox ItemsSource="{Binding PaperOptions}"
+                                      SelectedItem="{Binding PaperChoice, UpdateSourceTrigger=PropertyChanged}"
+                                      VerticalAlignment="Center"
+                                      SelectionChanged="PaperChoice_SelectionChanged" />
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTextColumn Header="比例" Binding="{Binding Scale}"
+                                    Width="86" IsReadOnly="True" SortMemberPath="Scale" />
+            </DataGrid.Columns>
+            <DataGrid.ContextMenu>
+                <ContextMenu>
+                    <MenuItem x:Name="_changePaperItem" Header="批量修改纸张..." Click="BatchChangePaper_Click" />
+                    <Separator />
+                    <MenuItem x:Name="_markNotPrintItem" Header="不打印" Click="MarkNotPrint_Click" />
+                    <MenuItem x:Name="_deleteItem" Header="删除" Click="DeleteHighlighted_Click" />
+                </ContextMenu>
+            </DataGrid.ContextMenu>
+        </DataGrid>
+    </DockPanel>
+</Window>

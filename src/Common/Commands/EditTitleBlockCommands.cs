@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
-using System.Windows.Forms;
+using System.Windows;
 #if AUTOCAD
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.DatabaseServices;
@@ -34,7 +34,7 @@ public sealed partial class BatchPlotCommands
         var doc = CadApp.DocumentManager.MdiActiveDocument;
         if (doc == null)
         {
-            MessageBox.Show("当前没有可编辑的 CAD 图纸。", "图框信息库管理", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show("当前没有可编辑的 CAD 图纸。", "图框信息库管理", MessageBoxButton.OK, MessageBoxImage.Information);
             return false;
         }
 
@@ -44,8 +44,8 @@ public sealed partial class BatchPlotCommands
             MessageBox.Show(
                 "编辑图框前请先将 UCS 切换为世界坐标系（WCS）。\n命令行输入 UCS 然后回车即可。",
                 "图框信息库管理",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Warning);
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
             return false;
         }
 
@@ -56,7 +56,7 @@ public sealed partial class BatchPlotCommands
                 string.Equals(x.BlockName, blockName, StringComparison.OrdinalIgnoreCase));
             if (existing == null)
             {
-                MessageBox.Show("图框信息库中找不到该记录，请重新读取后再试。", "图框信息库管理", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show("图框信息库中找不到该记录，请重新读取后再试。", "图框信息库管理", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return false;
             }
 
@@ -65,8 +65,8 @@ public sealed partial class BatchPlotCommands
                 MessageBox.Show(
                     $"当前图中没有找到图框：{existing.BlockName}\n请打开包含该图框的 DWG，或切换动态块到对应可见状态后再编辑。",
                     "图框信息库管理",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
                 return false;
             }
 
@@ -74,7 +74,7 @@ public sealed partial class BatchPlotCommands
             if (!string.Equals(LayoutManager.Current.CurrentLayout, match.LayoutName, StringComparison.OrdinalIgnoreCase))
             {
                 LayoutManager.Current.CurrentLayout = match.LayoutName;
-                System.Windows.Forms.Application.DoEvents();
+                System.Windows.Application.Current?.Dispatcher.Invoke(System.Windows.Threading.DispatcherPriority.Background, () => { });
             }
 
             // 布局切换会重建/激活 CAD 子窗口，必须重新确认主窗口位于前台。
@@ -85,8 +85,8 @@ public sealed partial class BatchPlotCommands
                 MessageBox.Show(
                     $"图框位于“{match.LayoutName}”，该空间当前不是 WCS。\n请切换到 WCS 后再次点击编辑。",
                     "图框信息库管理",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Warning);
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
                 return false;
             }
 
@@ -156,7 +156,7 @@ public sealed partial class BatchPlotCommands
 
             editor.WriteMessage($"\n已定位图框 {existing.BlockName}，红色临时框显示当前已配置字段，可点击对应‘框选’修改。");
             CadWindowFocus.ActivateCadWindow();
-            if (ShowModalDialog(dialog) != DialogResult.OK)
+            if (ShowModalDialog(dialog) != true)
             {
                 return false;
             }
@@ -190,15 +190,15 @@ public sealed partial class BatchPlotCommands
             MessageBox.Show(
                 $"图框信息已更新：{updated.BlockName}\n纸张：{updated.PaperName} {updated.PaperWidthMm:0.##} × {updated.PaperHeightMm:0.##} mm",
                 "图框信息库管理",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information);
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
             return true;
         }
         catch (Exception ex)
         {
             AddBlockLog("Edit title block failed: " + ex);
             editor.WriteMessage("\n编辑图框失败: " + ex.Message);
-            MessageBox.Show("编辑图框失败: " + ex.Message, "图框信息库管理", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show("编辑图框失败: " + ex.Message, "图框信息库管理", MessageBoxButton.OK, MessageBoxImage.Error);
             return false;
         }
     }

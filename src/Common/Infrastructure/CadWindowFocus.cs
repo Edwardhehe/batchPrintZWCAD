@@ -1,12 +1,13 @@
 using System;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using System.Windows.Forms;
+using System.Windows;
+using System.Windows.Interop;
 
 namespace ZwcadBatchPlot;
 
 /// <summary>
-/// CAD 内嵌 WinForms 隐藏后，Windows 可能把前台焦点交给其他进程。
+/// CAD 内嵌 WPF 窗口隐藏后，Windows 可能把前台焦点交给其他进程。
 /// 所有需要回到图面取点的流程统一通过本类把焦点交还当前 CAD 主窗口。
 /// </summary>
 internal static class CadWindowFocus
@@ -56,21 +57,38 @@ internal static class CadWindowFocus
     }
 
     /// <summary>隐藏插件窗口并立即把输入焦点交给 CAD，避免焦点落到其他程序。</summary>
-    public static void HideForCadInput(Form form)
+    public static void HideForCadInput(Window window)
     {
-        form.Hide();
+        window.Hide();
         ActivateCadWindow();
-        System.Windows.Forms.Application.DoEvents();
-        // DoEvents 可能继续处理一次失焦消息，因此处理完后再次确认 CAD 位于前台。
+        System.Windows.Application.Current?.Dispatcher.Invoke(
+            System.Windows.Threading.DispatcherPriority.Background, () => { });
+        // 处理完挂起消息后再次确认 CAD 位于前台。
         ActivateCadWindow();
     }
 
     /// <summary>CAD 取点结束后恢复原窗口并置顶，保持原有模态窗口链。</summary>
-    public static void RestoreDialog(Form form)
+    public static void RestoreDialog(Window window)
     {
         ActivateCadWindow();
-        form.Visible = true;
-        form.BringToFront();
-        form.Activate();
+        window.Visibility = Visibility.Visible;
+        window.BringToFront();
+        window.Activate();
+    }
+
+    private static void BringToFront(this Window window)
+    {
+        try
+        {
+            var handle = new WindowInteropHelper(window).Handle;
+            if (handle != IntPtr.Zero)
+            {
+                BringWindowToTop(handle);
+            }
+        }
+        catch
+        {
+            // 句柄尚未创建时忽略。
+        }
     }
 }

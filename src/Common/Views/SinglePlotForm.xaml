@@ -1,0 +1,102 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="ZwcadBatchPlot.SinglePlotForm"
+        Title="单张打印"
+        Width="660" Height="370"
+        MinWidth="620" MinHeight="340"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        WindowStartupLocation="CenterScreen"
+        FontFamily="Microsoft YaHei UI"
+        FontSize="11"
+        TextOptions.TextFormattingMode="Display"
+        UseLayoutRounding="True"
+        Background="{x:Static SystemColors.ControlBrush}">
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="WpfUi.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Window.Resources>
+
+    <!-- 单张打印压缩为必要信息和操作区域，避免字段之间出现大块空白。 -->
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="32" /> <!-- 区域 -->
+            <RowDefinition Height="32" /> <!-- 比例 -->
+            <RowDefinition Height="40" /> <!-- 纸张 -->
+            <RowDefinition Height="40" /> <!-- 输出 -->
+            <RowDefinition Height="40" /> <!-- 打印样式 -->
+            <RowDefinition Height="32" /> <!-- 留白 -->
+            <RowDefinition Height="*" />  <!-- 间距 -->
+            <RowDefinition Height="40" /> <!-- 按钮 -->
+        </Grid.RowDefinitions>
+
+        <!-- 第一行：打印区域 -->
+        <TextBlock x:Name="_areaLabel" Grid.Row="0" VerticalAlignment="Center" />
+
+        <!-- 第二行：比例 -->
+        <TextBlock x:Name="_scaleLabel" Grid.Row="1" VerticalAlignment="Center" />
+
+        <!-- 第三行：纸张选择 -->
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="96" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="纸张:" VerticalAlignment="Center" />
+            <ComboBox x:Name="_paperCombo" Grid.Column="1" Margin="0,5,0,5"
+                      IsEditable="False" VerticalContentAlignment="Center" />
+        </Grid>
+
+        <!-- 第四行：输出路径 -->
+        <Grid Grid.Row="3">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="96" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="104" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="输出路径:" VerticalAlignment="Center" />
+            <TextBox x:Name="_outputPath" Grid.Column="1" Margin="0,5,8,5" VerticalContentAlignment="Center" />
+            <Button x:Name="_browseButton" Grid.Column="2" Content="浏览..." MinWidth="96"
+                    Margin="0,4,0,4" Style="{StaticResource PluginButtonStyle}" Click="BrowseButton_Click" />
+        </Grid>
+
+        <!-- 第五行：打印样式。选择值会由调用方写回共享设置，并实际传给预览/打印引擎。 -->
+        <Grid Grid.Row="4">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="96" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="打印样式:" VerticalAlignment="Center" />
+            <ComboBox x:Name="_styleCombo" Grid.Column="1" Margin="0,5,8,5"
+                      IsEditable="False" VerticalContentAlignment="Center" />
+            <Button x:Name="_styleSettingsButton" Grid.Column="2" Content="设置" MinWidth="56"
+                    Margin="0,4,0,4" Style="{StaticResource PluginButtonStyle}" Click="StyleSettingsButton_Click" />
+        </Grid>
+
+        <!-- 第六行：留白。单张打印的预览和正式输出都读取这个值，保证留白效果一致。 -->
+        <StackPanel Grid.Row="5" Orientation="Horizontal">
+            <CheckBox x:Name="_leaveMargin" Content="周边留白，短边两侧各"
+                      VerticalAlignment="Center" IsChecked="False"
+                      Checked="LeaveMargin_CheckChanged" Unchecked="LeaveMargin_CheckChanged" />
+            <ComboBox x:Name="_marginInput" Width="72" IsEnabled="False" Margin="4,0,0,0"
+                      IsEditable="False" VerticalContentAlignment="Center" />
+            <TextBlock Text="mm" Margin="3,0,0,0" VerticalAlignment="Center" />
+        </StackPanel>
+
+        <!-- 第七行：弹性空白 -->
+
+        <!-- 第八行：操作按钮（预览 / 打印 / 取消）。WinForms FlowDirection=RightToLeft，先加的在最右。 -->
+        <DockPanel Grid.Row="7" LastChildFill="False" Margin="0,5,0,0">
+            <Button x:Name="_printButton" Content="打印" MinWidth="96" DockPanel.Dock="Right"
+                    IsDefault="True" Style="{StaticResource PluginButtonStyle}" Click="PrintButton_Click" />
+            <Button x:Name="_previewButton" Content="预览" MinWidth="96" DockPanel.Dock="Right"
+                    Style="{StaticResource PluginButtonStyle}" Click="PreviewButton_Click" />
+            <Button x:Name="_cancelButton" Content="取消" MinWidth="96" DockPanel.Dock="Right"
+                    IsCancel="True" Style="{StaticResource PluginButtonStyle}" />
+        </DockPanel>
+    </Grid>
+</Window>

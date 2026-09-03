@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Windows.Forms;
+using System.Windows;
 #if AUTOCAD
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.DatabaseServices;
@@ -84,7 +84,7 @@ public sealed partial class BatchPlotCommands
             var height = maxY - minY;
             if (width <= 1e-6 || height <= 1e-6)
             {
-                MessageBox.Show("选择的图纸外框宽度或高度无效。", "单张打印", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show("选择的图纸外框宽度或高度无效。", "单张打印", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
 
@@ -112,8 +112,8 @@ public sealed partial class BatchPlotCommands
                 isArbitraryPaper = true;
                 // 推测比例，弹出自定义比例对话框
                 var guessedScale = PaperSizeDetector.GuessScale(width, height);
-                using var scaleForm = new CustomScaleForm(width, height, guessedScale);
-                if (ShowModalDialog(scaleForm) != DialogResult.OK)
+                var scaleForm = new CustomScaleForm(width, height, guessedScale);
+                if (CadDialog.ShowModal(scaleForm) != true)
                 {
                     return;
                 }
@@ -182,14 +182,14 @@ public sealed partial class BatchPlotCommands
             var settings = AppSettingsStore.Load();
             var styles = PlotStyleManager.GetAvailableCtbStyles();
             var (deviceName, defaultStyleSheet) = ResolveSinglePlotOptions(settings, styles);
-            using var form = new SinglePlotForm(
+            var form = new SinglePlotForm(
                 sourceFile,
                 width,
                 height,
                 candidates,
                 styles,
                 defaultStyleSheet);
-            if (ShowModalDialog(form) != DialogResult.OK)
+            if (CadDialog.ShowModal(form) != true)
             {
                 return;
             }
@@ -249,14 +249,14 @@ public sealed partial class BatchPlotCommands
                 MessageBox.Show(
                     $"单张打印完成。\n纸张: {paper.PaperName} {paper.PaperWidthMm:0.##} x {paper.PaperHeightMm:0.##} mm\n文件: {outputPath}",
                     "单张打印",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
             }
         }
         catch (System.Exception ex)
         {
             editor.WriteMessage("\n单张打印失败: " + ex.Message);
-            MessageBox.Show("单张打印失败: " + ex.Message, "单张打印", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show("单张打印失败: " + ex.Message, "单张打印", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {
