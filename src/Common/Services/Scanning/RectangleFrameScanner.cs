@@ -40,15 +40,44 @@ public static class RectangleFrameScanner
     /// 静态级缓存，同一次 CAD 会话内跨扫描复用。</summary>
     private static readonly Dictionary<ObjectId, bool> LayerScannableCache = new();
 
-    /// <summary>块定义内容缓存：key=块定义 ObjectId，value=该块定义内的最大矩形（局部坐标）。
+    /// <summary>块定义内容缓存：key=块定义 ObjectId，value=该块定义内的最大矩形（局部坐标）及边框实体。
     /// 同一次扫描内同一块定义只遍历一次，后续实例直接变换缓存结果。</summary>
-    private static readonly Dictionary<ObjectId, List<LocalRectangle>> BlockDefinitionCache = new();
+    private static readonly Dictionary<ObjectId, List<CachedBlockRectangle>> BlockDefinitionCache = new();
 
     /// <summary>由 Line 或开放 Polyline 提取的线段，用于识别 4 线段拼合矩形。</summary>
     private struct LineSegment
     {
         public Point3d Start;
         public Point3d End;
+
+        /// <summary>线段来源实体的 ObjectId，空框过滤时用于把候选自身边框排除出内容判断。</summary>
+        public ObjectId SourceEntityId;
+    }
+
+    /// <summary>块定义缓存的矩形条目：局部坐标矩形 + 构成其边界的实体（块定义内 ObjectId）。</summary>
+    private sealed class CachedBlockRectangle
+    {
+        public CachedBlockRectangle(LocalRectangle rectangle, IReadOnlyList<ObjectId> borderEntityIds)
+        {
+            Rectangle = rectangle;
+            BorderEntityIds = borderEntityIds;
+        }
+
+        public LocalRectangle Rectangle { get; }
+
+        public IReadOnlyList<ObjectId> BorderEntityIds { get; }
+    }
+
+    /// <summary>
+    /// 单个空间收集到的候选矩形及其边框实体来源。
+    /// LocalRectangle 未重写相等比较、按引用相等使用，可安全作为字典键贯穿过滤流水线。
+    /// </summary>
+    private sealed class SpaceRectangles
+    {
+        public List<LocalRectangle> Rectangles { get; } = new();
+
+        /// <summary>候选矩形 → 构成其边界的实体 ObjectId（边框多段线/四条边 + 途经块参照）。</summary>
+        public Dictionary<LocalRectangle, HashSet<ObjectId>> BorderEntityIds { get; } = new();
     }
 
     /// <summary>四叉树中的端点记录；同一线段的两个端点分别插入。</summary>
@@ -314,7 +343,7 @@ public static class RectangleFrameScanner
                 return new List<Result>();
             }
 
-            var rectangles = CollectRectanglesFromSpace(tr, owner, recognizeFourLines, layout.LayoutName);
+            var collected = CollectRectanglesFromSpace(tr, owner, recognizeFourLines, layout.LayoutName);
             var ownerId = owner.ObjectId;
             var layoutName = layout.LayoutName;
             var layoutTabOrder = layout.TabOrder;
@@ -323,7 +352,8 @@ public static class RectangleFrameScanner
 
             return FilterAndPackageRectangles(
                 document,
-                rectangles,
+                collected.Rectangles,
+                collected.BorderEntityIds,
                 scanWindow,
                 ownerId,
                 sourceFile,
@@ -387,7 +417,7 @@ public static class RectangleFrameScanner
             ReportScan("正在枚举布局…");
 
             // 第一阶段：在事务内遍历所有匹配布局，收集矩形
-            var spaceData = new List<(List<LocalRectangle> Rectangles, ObjectId OwnerId, string LayoutName, bool IsPaperSpace, int TabOrder)>();
+            var spaceData = new List<(SpaceRectangles Collected, ObjectId OwnerId, string LayoutName, bool IsPaperSpace, int TabOrder)>();
             var collectSpacesSw = profile != null ? Stopwatch.StartNew() : null;
             using (var tr = document.Database.TransactionManager.StartTransaction())
             {
@@ -424,12 +454,12 @@ public static class RectangleFrameScanner
                         $"正在收集矩形（{layout.LayoutName}）…",
                         layoutIndex + 1,
                         pendingLayouts.Count);
-                    var rectangles = CollectRectanglesFromSpace(
+                    var collected = CollectRectanglesFromSpace(
                         tr,
                         owner,
                         recognizeFourLines,
                         layout.LayoutName);
-                    spaceData.Add((rectangles, owner.ObjectId, layout.LayoutName, !layout.ModelType, layout.TabOrder));
+                    spaceData.Add((collected, owner.ObjectId, layout.LayoutName, !layout.ModelType, layout.TabOrder));
                 }
 
                 tr.Commit();
@@ -450,14 +480,15 @@ public static class RectangleFrameScanner
             for (var i = 0; i < spaceData.Count; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var (rectangles, ownerId, layoutName, isPaperSpace, tabOrder) = spaceData[i];
+                var (collected, ownerId, layoutName, isPaperSpace, tabOrder) = spaceData[i];
                 ReportScan(
                     $"正在筛选纸张与空框（{layoutName}）…",
                     i + 1,
                     spaceData.Count);
                 var results = FilterAndPackageRectangles(
                     document,
-                    rectangles,
+                    collected.Rectangles,
+                    collected.BorderEntityIds,
                     isPaperSpace
                         ? null
                         : CadCoordinateSystem.CreateModelContext(document.Editor, true),
@@ -505,14 +536,15 @@ public static class RectangleFrameScanner
     /// 遍历单个空间内的闭合 PL 矩形；开关开启时，同时收集顶层独立直线/直线型 PL，
     /// 经四叉树找出四边闭环后转换为同一个 LocalRectangle 流程。
     /// </summary>
-    private static List<LocalRectangle> CollectRectanglesFromSpace(
+    private static SpaceRectangles CollectRectanglesFromSpace(
         Transaction tr,
         BlockTableRecord owner,
         bool recognizeFourLineRectangles,
         string layoutName = "")
     {
         var profile = _activeProfile;
-        var rectangles = new List<LocalRectangle>();
+        var collected = new SpaceRectangles();
+        var rectangles = collected.Rectangles;
         var segments = recognizeFourLineRectangles ? new List<LineSegment>() : null;
         var entitySw = profile != null ? Stopwatch.StartNew() : null;
         var topLevelVisits = 0;
@@ -551,6 +583,7 @@ public static class RectangleFrameScanner
                 entity,
                 Matrix3d.Identity,
                 rectangles,
+                collected.BorderEntityIds,
                 segments,
                 new HashSet<ObjectId>(),
                 0,
@@ -578,7 +611,7 @@ public static class RectangleFrameScanner
                 0);
             var fourSw = profile != null ? Stopwatch.StartNew() : null;
             var before = rectangles.Count;
-            rectangles.AddRange(FindRectanglesFromSegments(segments));
+            rectangles.AddRange(FindRectanglesFromSegments(segments, collected.BorderEntityIds));
             if (fourSw != null && profile != null)
             {
                 fourSw.Stop();
@@ -587,7 +620,7 @@ public static class RectangleFrameScanner
             }
         }
 
-        return rectangles;
+        return collected;
     }
 
     /// <summary>
@@ -598,6 +631,7 @@ public static class RectangleFrameScanner
     private static List<Result> FilterAndPackageRectangles(
         Document document,
         List<LocalRectangle> rectangles,
+        IReadOnlyDictionary<LocalRectangle, HashSet<ObjectId>> borderEntityIds,
         CadSelectionWindow? coordinateContext,
         ObjectId ownerId,
         string sourceFile,
@@ -688,7 +722,7 @@ public static class RectangleFrameScanner
         // 3d. 空框过滤
         ReportScan("正在检查空框…");
         var emptySw = profile != null ? Stopwatch.StartNew() : null;
-        var withContent = FilterEmptyRectangles(document, ownerId, unique);
+        var withContent = FilterEmptyRectangles(document, ownerId, unique, borderEntityIds);
         if (emptySw != null && profile != null)
         {
             emptySw.Stop();
@@ -1058,6 +1092,7 @@ public static class RectangleFrameScanner
     /// <param name="entity">当前实体</param>
     /// <param name="transform">从当前实体坐标系到 WCS 的累积变换矩阵</param>
     /// <param name="rectangles">收集到的矩形列表</param>
+    /// <param name="borderIdsByRectangle">候选矩形 → 构成其边界的实体 ObjectId（空框过滤排除自身边框用）</param>
     /// <param name="segments">收集到的线段列表（Line 和开放 Polyline）</param>
     /// <param name="visitedDefinitions">已访问的块定义 ID，防循环</param>
     /// <param name="depth">当前递归深度</param>
@@ -1067,6 +1102,7 @@ public static class RectangleFrameScanner
         Entity entity,
         Matrix3d transform,
         ICollection<LocalRectangle> rectangles,
+        IDictionary<LocalRectangle, HashSet<ObjectId>> borderIdsByRectangle,
         ICollection<LineSegment>? segments,
         ISet<ObjectId> visitedDefinitions,
         int depth,
@@ -1095,7 +1131,8 @@ public static class RectangleFrameScanner
             var segment = new LineSegment
             {
                 Start = line.StartPoint.TransformBy(transform),
-                End = line.EndPoint.TransformBy(transform)
+                End = line.EndPoint.TransformBy(transform),
+                SourceEntityId = entity.ObjectId
             };
             if (segment.Start.DistanceTo(segment.End) > 1e-6)
             {
@@ -1109,6 +1146,7 @@ public static class RectangleFrameScanner
             && entity is Polyline plSegment
             && TryGetStraightOpenPolylineSegment(plSegment, transform, out var polylineSegment))
         {
+            polylineSegment.SourceEntityId = entity.ObjectId;
             segments.Add(polylineSegment);
         }
 
@@ -1122,6 +1160,7 @@ public static class RectangleFrameScanner
                 transform,
                 out var legacyPolylineSegment))
         {
+            legacyPolylineSegment.SourceEntityId = entity.ObjectId;
             segments.Add(legacyPolylineSegment);
         }
 
@@ -1138,6 +1177,7 @@ public static class RectangleFrameScanner
         {
             // 先全部收集，不去重——不同实例的同一定义各自独立，去重放在后续 FilterRectangles
             rectangles.Add(rectangle);
+            RecordBorderEntities(borderIdsByRectangle, rectangle, entity.ObjectId);
         }
 
         // ── 分支 1b：Polyline2d（老式 POLYLINE+VERTEX）→ 矩形检测 ──
@@ -1153,6 +1193,7 @@ public static class RectangleFrameScanner
                 out var rectangle2d))
         {
             rectangles.Add(rectangle2d);
+            RecordBorderEntities(borderIdsByRectangle, rectangle2d, entity.ObjectId);
         }
 
         // ── 分支 1c：Polyline3d（3DPOLY）→ 矩形检测 ──
@@ -1167,6 +1208,7 @@ public static class RectangleFrameScanner
                 out var rectangle3d))
         {
             rectangles.Add(rectangle3d);
+            RecordBorderEntities(borderIdsByRectangle, rectangle3d, entity.ObjectId);
         }
 
         // ── 分支 2：BlockReference → 缓存 + 递归进入 ──
@@ -1189,8 +1231,14 @@ public static class RectangleFrameScanner
         {
             if (cachedRects.Count > 0)
             {
-                rectangles.Add(RectangleGeometry.TransformRectangle(cachedRects[0], instanceXform));
+                AddBlockInstanceRectangle(
+                    rectangles,
+                    borderIdsByRectangle,
+                    cachedRects[0],
+                    instanceXform,
+                    entity.ObjectId);
             }
+
             return;
         }
 
@@ -1237,6 +1285,7 @@ public static class RectangleFrameScanner
                     nested,
                     Matrix3d.Identity,
                     localRects,
+                    borderIdsByRectangle,
                     blockSegments,
                     visitedDefinitions,
                     depth + 1,
@@ -1245,21 +1294,30 @@ public static class RectangleFrameScanner
 
             if (blockSegments != null && blockSegments.Count >= 4)
             {
-                var segRects = FindRectanglesFromSegments(blockSegments);
+                var segRects = FindRectanglesFromSegments(blockSegments, borderIdsByRectangle);
                 localRects.AddRange(segRects);
             }
 
-            // 缓存局部坐标下的最大矩形，并变换到当前实例的世界坐标
-            List<LocalRectangle> cacheEntry;
+            // 缓存局部坐标下的最大矩形及其边框实体，并变换到当前实例的世界坐标
+            List<CachedBlockRectangle> cacheEntry;
             if (localRects.Count > 0)
             {
                 var largest = localRects.OrderByDescending(Area).First();
-                cacheEntry = new List<LocalRectangle> { largest };
-                rectangles.Add(RectangleGeometry.TransformRectangle(largest, instanceXform));
+                borderIdsByRectangle.TryGetValue(largest, out var largestBorderIds);
+                var cached = new CachedBlockRectangle(
+                    largest,
+                    largestBorderIds != null ? new List<ObjectId>(largestBorderIds) : new List<ObjectId>());
+                cacheEntry = new List<CachedBlockRectangle> { cached };
+                AddBlockInstanceRectangle(
+                    rectangles,
+                    borderIdsByRectangle,
+                    cached,
+                    instanceXform,
+                    entity.ObjectId);
             }
             else
             {
-                cacheEntry = new List<LocalRectangle>();
+                cacheEntry = new List<CachedBlockRectangle>();
             }
 
             BlockDefinitionCache[definitionId] = cacheEntry;
@@ -1273,6 +1331,42 @@ public static class RectangleFrameScanner
             // 离开时移除，允许其他路径再次进入同一定义（不同父级下可重复）
             visitedDefinitions.Remove(definitionId);
         }
+    }
+
+    /// <summary>
+    /// 由块定义内的矩形生成当前块实例的世界坐标候选，并登记边框实体链：
+    /// 定义内部边框实体（对所有实例相同）+ 当前块参照 ObjectId（内容收集时块参照自身的包盒）。
+    /// </summary>
+    private static void AddBlockInstanceRectangle(
+        ICollection<LocalRectangle> rectangles,
+        IDictionary<LocalRectangle, HashSet<ObjectId>> borderIdsByRectangle,
+        CachedBlockRectangle cached,
+        Matrix3d instanceXform,
+        ObjectId referenceEntityId)
+    {
+        var instance = RectangleGeometry.TransformRectangle(cached.Rectangle, instanceXform);
+        rectangles.Add(instance);
+        var borderIds = new HashSet<ObjectId>(cached.BorderEntityIds);
+        if (!referenceEntityId.IsNull)
+        {
+            borderIds.Add(referenceEntityId);
+        }
+
+        borderIdsByRectangle[instance] = borderIds;
+    }
+
+    /// <summary>登记候选矩形的边框实体（单个边界实体，如闭合多段线自身）。</summary>
+    private static void RecordBorderEntities(
+        IDictionary<LocalRectangle, HashSet<ObjectId>> borderIdsByRectangle,
+        LocalRectangle rectangle,
+        ObjectId borderEntityId)
+    {
+        if (borderEntityId.IsNull)
+        {
+            return;
+        }
+
+        borderIdsByRectangle[rectangle] = new HashSet<ObjectId> { borderEntityId };
     }
 
     /// <summary>
@@ -1407,8 +1501,12 @@ public static class RectangleFrameScanner
     ///   4. 防重复：对 4 条线段索引排序生成去重 key
     /// </summary>
     /// <param name="segments">从 Line 和开放 Polyline 提取的线段列表</param>
+    /// <param name="borderIdsByRectangle">候选矩形 → 边框实体 ObjectId 的登记表（可选）。
+    /// 找到的每个矩形由 4 条线段组成，其来源实体在空框过滤时排除。</param>
     /// <returns>识别出的矩形 LocalRectangle 列表</returns>
-    private static List<LocalRectangle> FindRectanglesFromSegments(List<LineSegment> segments)
+    private static List<LocalRectangle> FindRectanglesFromSegments(
+        List<LineSegment> segments,
+        IDictionary<LocalRectangle, HashSet<ObjectId>>? borderIdsByRectangle = null)
     {
         var rectangles = new List<LocalRectangle>();
         if (segments.Count < 4)
@@ -1570,6 +1668,17 @@ public static class RectangleFrameScanner
                         }
 
                         rectangles.Add(rectangle);
+                        if (borderIdsByRectangle != null)
+                        {
+                            // 同一实体可能贡献多条线段，去重后登记为该候选的边框
+                            var borderIds = new HashSet<ObjectId>();
+                            foreach (var segmentIndex in ids)
+                            {
+                                borderIds.Add(segments[segmentIndex].SourceEntityId);
+                            }
+
+                            borderIdsByRectangle[rectangle] = borderIds;
+                        }
                     }
                 }
             }
@@ -1976,29 +2085,45 @@ public static class RectangleFrameScanner
     // 空框过滤：检查矩形内是否存在实际的绘图内容（图素）
     // ═══════════════════════════════════════════════════════════════
 
+    /// <summary>内容外包盒：几何包围盒 + 所属实体 ObjectId，供候选框排除自身边框。</summary>
+	    private readonly struct ContentBox
+	    {
+	        public ContentBox(LocalRectangle box, ObjectId entityId)
+	        {
+	            Box = box;
+	            EntityId = entityId;
+	        }
+
+	        public LocalRectangle Box { get; }
+
+	        public ObjectId EntityId { get; }
+	    }
     /// <summary>
-    /// 过滤掉没有任何可见可打印图素的空矩形框。
+    /// 空框过滤：判断候选矩形内是否存在"除组成该框自身边界之外的"绘图内容。
+    /// 判据与人工检查一致——用框的范围去查内容，如果命中的只有组成识别框的实体
+    /// （闭合多段线、四条独立边或产生该框的块参照），它就是空白矩形。
     ///
-    /// 对每个候选矩形，递归遍历布局内的所有实体，检查是否有至少一个
-    /// 可见、可打印、非矩形框自身的实体落入矩形范围内。
+    /// 实现：先预扫描一次收集所有实体的世界坐标外包盒（含嵌套块），
+    /// 再对每个候选矩形做内存级包围盒相交判断，判断时排除该候选登记的边框实体。
+    /// 避免对每个矩形都遍历 CAD 数据库——O(R×E) → O(E + R×B)。
     /// </summary>
     /// <param name="document">当前 CAD 文档</param>
     /// <param name="ownerId">布局 BlockTableRecord 的 ObjectId</param>
     /// <param name="candidates">待检查的候选矩形列表</param>
+    /// <param name="borderEntityIds">候选矩形 → 构成其边界的实体 ObjectId（收集阶段登记）。
+    /// 未登记的候选退回旧行为（不排除任何实体，宁可不滤不可误删）。</param>
     /// <returns>包含实际图素的矩形列表</returns>
-	    /// <summary>
-	    /// 空框过滤：先预扫描一次收集所有实体的世界坐标外包盒（含嵌套块），
-	    /// 再对每个候选矩形做内存级包围盒相交判断。
-	    /// 避免对每个矩形都遍历 CAD 数据库——O(R×E) → O(E + R×B)。
-	    /// </summary>
 	    private static List<LocalRectangle> FilterEmptyRectangles(
-	        Document document, ObjectId ownerId, List<LocalRectangle> candidates)
+	        Document document,
+	        ObjectId ownerId,
+	        List<LocalRectangle> candidates,
+	        IReadOnlyDictionary<LocalRectangle, HashSet<ObjectId>> borderEntityIds)
 	    {
 	        using var tr = document.Database.TransactionManager.StartTransaction();
 	        var owner = (BlockTableRecord)tr.GetObject(ownerId, OpenMode.ForRead);
 
 	        // 预扫描：一次性收集所有实体的世界坐标外包盒（含嵌套块）
-	        var entityBoxes = new List<LocalRectangle>();
+	        var entityBoxes = new List<ContentBox>();
 	        var boxSw = _activeProfile != null ? Stopwatch.StartNew() : null;
 	        CollectEntityBoxesForContentCheck(tr, owner, Matrix3d.Identity, entityBoxes,
 	            new HashSet<ObjectId>(), 0);
@@ -2008,11 +2133,14 @@ public static class RectangleFrameScanner
 	            _activeProfile.EmptyBoxCollectMs += boxSw.ElapsedMilliseconds;
 	        }
 
-	        // 内存级矩形相交判断，不再访问 CAD 数据库
+	        // 内存级矩形相交判断，不再访问 CAD 数据库；候选自身边框实体不计为内容
 	        var result = new List<LocalRectangle>();
 	        foreach (var rect in candidates)
 	        {
-	            if (AnyIntersects(entityBoxes, rect))
+	            var borderIds = borderEntityIds.TryGetValue(rect, out var ids)
+	                ? ids
+	                : new HashSet<ObjectId>();
+	            if (AnyIntersects(entityBoxes, rect, borderIds))
 	            {
 	                result.Add(rect);
 	            }
@@ -2024,13 +2152,14 @@ public static class RectangleFrameScanner
 	    /// <summary>
 	    /// 递归收集空间内所有实体的世界坐标外包盒，过滤规则与旧 CheckEntityContent 一致：
 	    /// 跳过临时标注图层、不可打印图层、不可见实体；块参照递归进入（防循环、防过深）。
+	    /// 每个外包盒都携带所属实体 ObjectId，供候选框排除自身边框。
 	    /// visitedDefinitions 的 Add/Remove 模式允许同一块定义从不同父路径重新进入。
 	    /// </summary>
 	    private static void CollectEntityBoxesForContentCheck(
 	        Transaction tr,
 	        BlockTableRecord owner,
 	        Matrix3d transform,
-	        List<LocalRectangle> boxes,
+	        List<ContentBox> boxes,
 	        HashSet<ObjectId> visitedDefinitions,
 	        int depth)
 	    {
@@ -2065,9 +2194,11 @@ public static class RectangleFrameScanner
 	                var ext = entity.GeometricExtents;
 	                var extMin = ext.MinPoint.TransformBy(transform);
 	                var extMax = ext.MaxPoint.TransformBy(transform);
-	                boxes.Add(LocalRectangle.FromPoints(
-	                    Math.Min(extMin.X, extMax.X), Math.Min(extMin.Y, extMax.Y),
-	                    Math.Max(extMin.X, extMax.X), Math.Max(extMin.Y, extMax.Y)));
+	                boxes.Add(new ContentBox(
+	                    LocalRectangle.FromPoints(
+	                        Math.Min(extMin.X, extMax.X), Math.Min(extMin.Y, extMax.Y),
+	                        Math.Max(extMin.X, extMax.X), Math.Max(extMin.Y, extMax.Y)),
+	                    entity.ObjectId));
 	            }
 	            catch
 	            {
@@ -2108,14 +2239,17 @@ public static class RectangleFrameScanner
 	    }
 
 	    /// <summary>
-	    /// 检查预收集的实体外包盒列表中是否有任意一个与目标矩形相交。
+	    /// 检查预收集的实体外包盒列表中是否有"非候选自身边框"的实体与目标矩形相交。
 	    /// 纯内存操作，短路退出。
 	    /// </summary>
-	    private static bool AnyIntersects(List<LocalRectangle> boxes, LocalRectangle target)
+	    private static bool AnyIntersects(
+	        List<ContentBox> boxes,
+	        LocalRectangle target,
+	        HashSet<ObjectId> excludedEntityIds)
 	    {
 	        foreach (var box in boxes)
 	        {
-	            if (Intersects(box, target))
+	            if (Intersects(box.Box, target) && !excludedEntityIds.Contains(box.EntityId))
 	            {
 	                return true;
 	            }
