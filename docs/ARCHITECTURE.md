@@ -257,7 +257,12 @@ RectangleFrameScanner.ScanScope(Document, scope)
 
 ### 5.3 空框过滤
 
-`FilterEmptyRectangles()` 检查每个候选矩形内是否存在可见、可打印的绘图实体。遍历布局所有实体（含块内嵌套），检查 `GeometricExtents` 是否与目标矩形相交。矩形框多段线自身不计为"内容"。
+`FilterEmptyRectangles()` 检查每个候选矩形内是否存在"除组成该框自身边界之外的"绘图内容。实现分两步：
+
+1. **收集阶段登记边框实体**（`CollectEntityRectangles`）：每个候选矩形都记录构成其边界的实体 ObjectId——闭合多段线候选登记多段线自身，四线拼合候选登记 4 条边的来源实体，来自块内的候选额外登记途经的块参照 ObjectId（`SpaceRectangles.BorderEntityIds`，按 `LocalRectangle` 引用作键；块定义缓存 `BlockDefinitionCache` 同时缓存边框实体链）。
+2. **判断阶段**（`FilterEmptyRectangles`）：先一次性预扫描布局内所有实体（含块内嵌套，跳过临时标注图层、不可打印图层、不可见实体）收集世界坐标外包盒，再对每个候选做内存相交判断——**候选自身登记的边框实体不计为"内容"**，任何其他实体与候选相交即认为有内容。
+
+不加排除时候选矩形必然与自身边框实体相交、过滤恒真，因此边框实体排除是该过滤生效的前提。判断按外包盒相交进行，比几何级穿越检测更保守：外包盒相交 ⊇ 几何穿越，宁可少过滤、不会误删真图框。未登记边框实体的候选退回不排除行为。
 
 ---
 
