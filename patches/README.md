@@ -5,18 +5,19 @@
 - **功能已实现**：配置3 现在输出 `A1x1.25`、`A2x1.5` 形式
 - **代码位置**：分支 `feature/config3-multiplier`，已提交
 - **补丁文件**：`patches/config3-multiplier.patch`
+- **PR 文案**：`patches/PR_DESCRIPTION.md`
 
-修改只涉及 3 个文件、34 行代码：
+修改只涉及 3 个文件、42 行新增 / 6 行修改：
 
 | 文件 | 改动 |
 | --- | --- |
-| `src/Common/Models/AppSettingsStore.cs` | 枚举 `Reserved2` 改名 `Multiplier` |
-| `src/Common/Utilities/FileNameSanitizer.cs` | 新增倍数转换逻辑 |
+| `src/Common/Models/AppSettingsStore.cs` | 枚举 `Reserved2` 改名 `Multiplier`，占位值仍为 `2` |
+| `src/Common/Utilities/FileNameSanitizer.cs` | 新增倍数分支，抽出 `FormatMultiplier`，新增 `LongPaperNumberExtPattern` 正则 |
 | `src/Common/Views/SettingsForm.xaml.cs` | 设置界面下拉项文案 |
 
 ## 原作者更新后怎么操作
 
-### 推荐做法：合patch（一条命令）
+### 推荐做法：变基（rebase）
 
 ```bash
 cd "M:\软件\Autocad\LA批打印-AutoCAD2015-2024\batchPrintZWCAD"
@@ -29,7 +30,7 @@ git pull origin main
 git checkout feature/config3-multiplier
 git rebase main
 
-# 3. 重新编译
+# 3. 重新编译（先关闭 CAD，否则 DLL 被锁定会编译失败）
 powershell -ExecutionPolicy Bypass -File scripts\build-dll.ps1 -Target All -Configuration Release
 ```
 
@@ -57,31 +58,46 @@ powershell -ExecutionPolicy Bypass -File scripts\build-dll.ps1 -Target All -Conf
 
 ## 转换逻辑参考
 
-`FileNameSanitizer.NormalizeLongPaperFraction` 方法开头需要有这样一段：
+`FileNameSanitizer.NormalizeLongPaperFraction` 方法开头需要有这样一段（与当前分支实际代码一致）：
 
 ```csharp
+// ── 配置3（倍数）：将加长图转换为"图幅x放大倍数"形式 ──
 if (format == LongPaperNameFormat.Multiplier)
 {
-    // 分数形式：A1+1/4 -> A1x1.25
-    var result = LongPaperFractionPattern.Replace(paperName, match =>
+    // 先处理已有 "/" 的分数形式（如 A1+1/2）
+    var multiplierResult = LongPaperFractionPattern.Replace(paperName, match =>
     {
         var numerator = int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);
         var denominator = int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture);
         if (denominator == 0) return match.Value;
         var ext = numerator / (double)denominator;
-        return "x" + (1.0 + ext).ToString("0.##", CultureInfo.InvariantCulture);
+        return FormatMultiplier(ext);
     });
 
-    // 小数形式：A1+0.25 -> A1x1.25
-    result = LongPaperDecimalExtPattern.Replace(result, match =>
+    // 再处理整数或小数扩展量（如 A1+1、A1+0.25）
+    multiplierResult = LongPaperNumberExtPattern.Replace(multiplierResult, match =>
     {
-        var dec = double.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);
-        if (dec <= 0d) return match.Value;
-        return "x" + (1.0 + dec).ToString("0.##", CultureInfo.InvariantCulture);
+        var ext = double.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);
+        return ext <= 0d ? match.Value : FormatMultiplier(ext);
     });
 
-    return result;
+    return multiplierResult;
 }
+```
+
+辅助方法与正则：
+
+```csharp
+/// <summary>把加长扩展量换算为"图幅x总倍数"形式，如 0.25 → x1.25、1 → x2。</summary>
+private static string FormatMultiplier(double extension)
+{
+    // 最多3位小数，覆盖 1/8 模数（0.125）而不产生多余尾零。
+    return "x" + (1.0 + extension).ToString("0.###", CultureInfo.InvariantCulture);
+}
+
+// 匹配末尾整数或小数扩展量，如 +1、+0.5、+1.125
+private static readonly Regex LongPaperNumberExtPattern =
+    new Regex(@"\+(\d+(?:\.\d+)?)$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 ```
 
 枚举定义：
@@ -103,6 +119,17 @@ public enum LongPaperNameFormat
 ```csharp
 _longPaperNameFormat.Items.Add("配置3（倍数）：A1x1.25、A2x1.5（倍数形式）");
 ```
+
+### 转换行为对照
+
+| 输入 | 配置3 输出 | 说明 |
+| --- | --- | --- |
+| `A1+1/4` | `A1x1.25` | 分数输入 |
+| `A1+1/8` | `A1x1.125` | 1/8 模数，3 位小数 |
+| `A1+0.25` | `A1x1.25` | 小数输入 |
+| `A1+1` | `A1x2` | 整数加长 |
+| `A0`、`A1` 等标准图幅 | 原样返回 | 无 `+` 后缀不处理 |
+| `A1+1.501` | `A1x2.501` | 任意加长 |
 
 ## 关于上游更新
 
