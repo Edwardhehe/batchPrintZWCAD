@@ -6,14 +6,15 @@ using Newtonsoft.Json;
 
 namespace ZwcadBatchPlot;
 
-/// <summary>加长图图名格式配置。共预留6种，当前实现配置1（分数）和配置2（小数）。</summary>
+/// <summary>加长图图名格式配置。共预留6种，当前实现配置1（分数）、配置2（小数）和配置3（倍数）。</summary>
 public enum LongPaperNameFormat
 {
     /// <summary>配置1（分数）：A3+1/8、A2+3/4，分母为8的约分分数。</summary>
     Fraction = 0,
     /// <summary>配置2（小数）：A3+0.125、A2+0.75，精确到3位小数。</summary>
     Decimal = 1,
-    Reserved2 = 2,
+    /// <summary>配置3（倍数）：A1x1.25、A2x1.5，图幅x放大倍数形式。</summary>
+    Multiplier = 2,
     Reserved3 = 3,
     Reserved4 = 4,
     Reserved5 = 5,
