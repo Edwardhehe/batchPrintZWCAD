@@ -1,0 +1,118 @@
+From c4158e2c5105ce486fd53ff66689ff21d721c903 Mon Sep 17 00:00:00 2001
+From: LA BatchPlot User <user@local>
+Date: Wed, 16 Sep 2026 22:17:19 +0800
+Subject: [PATCH] =?UTF-8?q?feat:=20=E5=8A=A0=E9=95=BF=E5=9B=BE=E9=85=8D?=
+ =?UTF-8?q?=E7=BD=AE3=E6=94=B9=E4=B8=BA=E5=9B=BE=E5=B9=85x=E6=94=BE?=
+ =?UTF-8?q?=E5=A4=A7=E5=80=8D=E6=95=B0=E6=A0=BC=E5=BC=8F?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ src/Common/Models/AppSettingsStore.cs     |  5 ++--
+ src/Common/Utilities/FileNameSanitizer.cs | 33 ++++++++++++++++++++---
+ src/Common/Views/SettingsForm.xaml.cs     |  2 +-
+ 3 files changed, 34 insertions(+), 6 deletions(-)
+
+diff --git a/src/Common/Models/AppSettingsStore.cs b/src/Common/Models/AppSettingsStore.cs
+index 365ebfd..8ba9931 100644
+--- a/src/Common/Models/AppSettingsStore.cs
++++ b/src/Common/Models/AppSettingsStore.cs
+@@ -6,14 +6,15 @@ using Newtonsoft.Json;
+ 
+ namespace ZwcadBatchPlot;
+ 
+-/// <summary>加长图图名格式配置。共预留6种，当前实现配置1（分数）和配置2（小数）。</summary>
++/// <summary>加长图图名格式配置。共预留6种，当前实现配置1（分数）、配置2（小数）和配置3（倍数）。</summary>
+ public enum LongPaperNameFormat
+ {
+     /// <summary>配置1（分数）：A3+1/8、A2+3/4，分母为8的约分分数。</summary>
+     Fraction = 0,
+     /// <summary>配置2（小数）：A3+0.125、A2+0.75，精确到3位小数。</summary>
+     Decimal = 1,
+-    Reserved2 = 2,
++    /// <summary>配置3（倍数）：A1x1.25、A2x1.5，图幅x放大倍数形式。</summary>
++    Multiplier = 2,
+     Reserved3 = 3,
+     Reserved4 = 4,
+     Reserved5 = 5,
+diff --git a/src/Common/Utilities/FileNameSanitizer.cs b/src/Common/Utilities/FileNameSanitizer.cs
+index 9172e5b..ddf8d6e 100644
+--- a/src/Common/Utilities/FileNameSanitizer.cs
++++ b/src/Common/Utilities/FileNameSanitizer.cs
+@@ -80,13 +80,40 @@ public static class FileNameSanitizer
+     /// 配置1（分数）：含"/"的转为"∕"（U+2215）；小数扩展量先尝试还原为1/8模数分数（如0.5→1∕2）；
+     ///               无法还原的任意加长保留小数。
+     /// 配置2（小数）：含"/"的分数转为小数（如1/4→0.25）；已是小数的保持不变。
++    /// 配置3（倍数）：将加长图转换为"图幅x放大倍数"形式（如A1+1/4→A1x1.25，A2+0.5→A2x1.5）。
+     /// </summary>
+     public static string NormalizeLongPaperFraction(string paperName, LongPaperNameFormat format = LongPaperNameFormat.Fraction)
+     {
+         if (string.IsNullOrEmpty(paperName)) return paperName ?? "";
+ 
++        // ── 配置3（倍数）：将加长图转换为"图幅x放大倍数"形式 ──
++        if (format == LongPaperNameFormat.Multiplier)
++        {
++            // 处理已有 "/" 的分数形式（如 A1+1/2）
++            var result = LongPaperFractionPattern.Replace(paperName, match =>
++            {
++                var numerator = int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);
++                var denominator = int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture);
++                if (denominator == 0) return match.Value;
++                var ext = numerator / (double)denominator;
++                var multiplier = 1.0 + ext;
++                return "x" + multiplier.ToString("0.##", CultureInfo.InvariantCulture);
++            });
++
++            // 处理小数形式（如 A1+0.25）
++            result = LongPaperDecimalExtPattern.Replace(result, match =>
++            {
++                var dec = double.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);
++                if (dec <= 0d) return match.Value;
++                var multiplier = 1.0 + dec;
++                return "x" + multiplier.ToString("0.##", CultureInfo.InvariantCulture);
++            });
++
++            return result;
++        }
++
+         // ── 处理已有 "/" 的分数形式（如 A1+1/2）──
+-        var result = LongPaperFractionPattern.Replace(paperName, match =>
++        var resultDefault = LongPaperFractionPattern.Replace(paperName, match =>
+         {
+             var numerator = int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);
+             var denominator = int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture);
+@@ -104,7 +131,7 @@ public static class FileNameSanitizer
+         // 例：A1+0.5 → A1+1∕2，A2+1.501（任意加长）保持不变
+         if (format == LongPaperNameFormat.Fraction)
+         {
+-            result = LongPaperDecimalExtPattern.Replace(result, match =>
++            resultDefault = LongPaperDecimalExtPattern.Replace(resultDefault, match =>
+             {
+                 var dec = double.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);
+                 if (dec <= 0d) return match.Value;
+@@ -116,7 +143,7 @@ public static class FileNameSanitizer
+             });
+         }
+ 
+-        return result;
++        return resultDefault;
+     }
+ 
+     private static int Gcd(int a, int b)
+diff --git a/src/Common/Views/SettingsForm.xaml.cs b/src/Common/Views/SettingsForm.xaml.cs
+index afccd22..a2ca5e7 100644
+--- a/src/Common/Views/SettingsForm.xaml.cs
++++ b/src/Common/Views/SettingsForm.xaml.cs
+@@ -430,7 +430,7 @@ public sealed partial class SettingsForm : Window
+         _longPaperNameFormat.Items.Clear();
+         _longPaperNameFormat.Items.Add("配置1（分数）：A3+1/8、A2+3/4（分数形式）");
+         _longPaperNameFormat.Items.Add("配置2（小数）：A3+0.125、A2+0.75（小数形式）");
+-        _longPaperNameFormat.Items.Add("配置3（预留）");
++        _longPaperNameFormat.Items.Add("配置3（倍数）：A1x1.25、A2x1.5（倍数形式）");
+         _longPaperNameFormat.Items.Add("配置4（预留）");
+         _longPaperNameFormat.Items.Add("配置5（预留）");
+         _longPaperNameFormat.Items.Add("配置6（预留）");
+-- 
+2.55.0.windows.3
+
