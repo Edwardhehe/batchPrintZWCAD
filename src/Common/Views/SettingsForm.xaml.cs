@@ -430,7 +430,7 @@ public sealed partial class SettingsForm : Window
         _longPaperNameFormat.Items.Clear();
         _longPaperNameFormat.Items.Add("配置1（分数）：A3+1/8、A2+3/4（分数形式）");
         _longPaperNameFormat.Items.Add("配置2（小数）：A3+0.125、A2+0.75（小数形式）");
-        _longPaperNameFormat.Items.Add("配置3（预留）");
+        _longPaperNameFormat.Items.Add("配置3（倍数）：A1x1.25、A2x1.5（倍数形式）");
         _longPaperNameFormat.Items.Add("配置4（预留）");
         _longPaperNameFormat.Items.Add("配置5（预留）");
         _longPaperNameFormat.Items.Add("配置6（预留）");
