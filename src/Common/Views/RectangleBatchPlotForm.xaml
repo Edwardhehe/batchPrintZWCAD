@@ -60,6 +60,10 @@
                         Style="{StaticResource PluginButtonStyle}" Margin="0,0,3,0"
                         Click="AddDwgFiles_Click"
                         ToolTip="多选 DWG，勾选模型/布局后扫描并加入清单。" />
+                <Button x:Name="_addFolderBtn" Content="多文件批打（文件夹）" MinWidth="148"
+                        Style="{StaticResource PluginButtonStyle}" Margin="0,0,3,0"
+                        Click="AddDwgFolder_Click"
+                        ToolTip="选择文件夹，自动收集其中（含子文件夹）全部 DWG，后续与多文件批打相同。" />
                 <Rectangle Width="1" Height="14" Fill="#CDD2D8"
                            Margin="4,0,12,0" VerticalAlignment="Center" />
                 <Button x:Name="_refreshBtn" Content="重新识别" MinWidth="88"

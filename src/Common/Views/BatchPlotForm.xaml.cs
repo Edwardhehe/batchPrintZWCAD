@@ -376,7 +376,72 @@ public sealed partial class BatchPlotForm : Window
             .Select(Path.GetFullPath)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
+        BeginMultiFileBatch(files);
+    }
+
+    /// <summary>选择文件夹，收集其中（含子文件夹）全部 DWG，后续流程与多文件批打相同。</summary>
+    private void AddDwgFolder()
+    {
+        using var dialog = new System.Windows.Forms.FolderBrowserDialog
+        {
+            Description = "选择包含 DWG 的文件夹（将包含子文件夹内的文件）",
+            ShowNewFolderButton = false
+        };
+        var seed = GetSelectedCadDirectory();
+        if (!string.IsNullOrWhiteSpace(seed) && Directory.Exists(seed))
+        {
+            dialog.SelectedPath = seed;
+        }
+
+        if (dialog.ShowDialog() != System.Windows.Forms.DialogResult.OK
+            || string.IsNullOrWhiteSpace(dialog.SelectedPath))
+        {
+            return;
+        }
+
+        List<string> files;
+        try
+        {
+            files = CollectDwgFilesInFolder(dialog.SelectedPath);
+        }
+        catch (Exception ex)
+        {
+            System.Windows.MessageBox.Show(
+                "读取文件夹失败: " + ex.Message,
+                "批量打印",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
+
         if (files.Count == 0)
+        {
+            System.Windows.MessageBox.Show(
+                "该文件夹内未找到 DWG 文件。",
+                "批量打印",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+
+        AppendLog("INFO", $"文件夹批打：{dialog.SelectedPath}，共 {files.Count} 个 DWG。");
+        BeginMultiFileBatch(files);
+    }
+
+    /// <summary>枚举文件夹及其子文件夹中的全部 .dwg（忽略大小写去重，按路径排序）。</summary>
+    private static List<string> CollectDwgFilesInFolder(string folder)
+    {
+        return Directory.EnumerateFiles(folder, "*.dwg", SearchOption.AllDirectories)
+            .Select(Path.GetFullPath)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    /// <summary>多文件批打核心：枚举空间 → 勾选 → 扫描入清单（文件选择与文件夹选择共用）。</summary>
+    private void BeginMultiFileBatch(IReadOnlyList<string> files)
+    {
+        if (files == null || files.Count == 0)
         {
             return;
         }
@@ -1854,6 +1919,7 @@ public sealed partial class BatchPlotForm : Window
         _settings.PaperMatchToleranceMm = updated.PaperMatchToleranceMm;
         _settings.HideFrameBoundaryWhenPlotting = updated.HideFrameBoundaryWhenPlotting;
         _settings.PlotTransparency = updated.PlotTransparency;
+        _settings.PlotObjectLineweights = updated.PlotObjectLineweights;
         _settings.AddSequenceWhenPdfExists = updated.AddSequenceWhenPdfExists;
         _settings.MergePdf = updated.MergePdf;
         _settings.UseFileNameAsPdfBookmark = updated.UseFileNameAsPdfBookmark;
@@ -2532,6 +2598,11 @@ public sealed partial class BatchPlotForm : Window
         {
             baseName = "合并图纸";
         }
+        else
+        {
+            // 与单页 PDF 区分：合并件在源图名后加「_合并」。
+            baseName += "_合并";
+        }
 
         return Path.Combine(directory, baseName + ".pdf");
     }
@@ -2618,6 +2689,7 @@ public sealed partial class BatchPlotForm : Window
     private void ScanSelectedObjects_Click(object sender, RoutedEventArgs e) => ScanSelectedObjects();
 
     private void AddDwgFiles_Click(object sender, RoutedEventArgs e) => AddDwgFiles();
+    private void AddDwgFolder_Click(object sender, RoutedEventArgs e) => AddDwgFolder();
 
     private void ClearJobs_Click(object sender, RoutedEventArgs e) => ClearJobs();
 

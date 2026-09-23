@@ -108,9 +108,9 @@ public sealed class FieldBoxSelectDialog : Form
             new Point3d(worldFrame.MaxX, worldFrame.MaxY, 0));
 
         Text = "设置图框字段与纸张";
-        UiLayout.ConfigureForm(this, 460, 488, 430, 462);
-        // 套用已有图框（略高以容纳状态提示）+ 打印范围 + 纸张各一行。
-        ClientSize = new Size(UiLayout.Scale(460), UiLayout.Scale(466));
+        UiLayout.ConfigureForm(this, 460, 508, 430, 482);
+        // 套用已有图框（略高以容纳状态提示）+ 打印范围（两行：尺寸+提示）+ 纸张各一行。
+        ClientSize = new Size(UiLayout.Scale(460), UiLayout.Scale(486));
         FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
         ShowInTaskbar = false;
         // 非模态核对红框时保持可见，不挡 CAD 缩放/平移。
@@ -125,9 +125,10 @@ public sealed class FieldBoxSelectDialog : Form
         table.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
-        // Row 0: 套用已有图框（略高）；Row 1: 打印范围；Row 2-8: 字段；Row 9: 纸张
+        // Row 0: 套用已有图框（略高）；Row 1: 打印范围（两行：尺寸+提示）；Row 2-8: 字段；Row 9: 纸张
         table.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(52)));
-        for (var i = 1; i < 10; i++)
+        table.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(48)));
+        for (var i = 2; i < 10; i++)
         {
             table.RowStyles.Add(new RowStyle(SizeType.Absolute, UiLayout.Scale(34)));
         }
@@ -142,6 +143,7 @@ public sealed class FieldBoxSelectDialog : Form
         // 打印范围：显示当前尺寸，提供"框选"按钮供用户修正自动识别的外框。
         table.Controls.Add(MakeLabel("打印范围"), 0, 1);
         _printAreaStatus = MakeStatusLabel();
+        _printAreaStatus.AutoEllipsis = false;
         UpdatePrintAreaStatus();
         table.Controls.Add(MakePrintAreaRow(_printAreaStatus, SelectPrintArea), 1, 1);
 
@@ -689,13 +691,13 @@ public sealed class FieldBoxSelectDialog : Form
     }
 
     /// <summary>
-    /// 更新打印范围状态标签，显示当前外框的宽×高（世界坐标单位）。
+    /// 更新打印范围状态标签：第一行宽×高（世界坐标单位），第二行提示可手动修正自动识别边框。
     /// </summary>
     private void UpdatePrintAreaStatus()
     {
         var w = Math.Abs(_printAreaCorners.Corner2.X - _printAreaCorners.Corner1.X);
         var h = Math.Abs(_printAreaCorners.Corner2.Y - _printAreaCorners.Corner1.Y);
-        _printAreaStatus.Text = $"{(int)w} × {(int)h}（点击\"框选\"可修改）";
+        _printAreaStatus.Text = $"{(int)w} × {(int)h}\n如果觉得自动识别的边框不对，请自己调整这里";
         _printAreaStatus.ForeColor = Color.Green;
     }
 

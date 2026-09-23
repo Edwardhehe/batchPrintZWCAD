@@ -72,33 +72,29 @@ public sealed partial class ScanSpacePickerDialog : Window
 
         var top = new StackPanel
         {
-            Orientation = Orientation.Horizontal,
             Margin = new Thickness(0, 0, 0, 8)
         };
         DockPanel.SetDock(top, Dock.Top);
-        var selectAll = new Button
+
+        var buttons = new WrapPanel
         {
-            Content = "全选",
-            MinWidth = 76,
-            Style = TryFindResource("PluginButtonStyle") as Style,
-            Margin = new Thickness(0, 0, 6, 0)
+            Orientation = Orientation.Horizontal
         };
-        selectAll.Click += (_, __) => SetAllSelected(true);
-        var selectNone = new Button
-        {
-            Content = "全不选",
-            MinWidth = 76,
-            Style = TryFindResource("PluginButtonStyle") as Style
-        };
-        selectNone.Click += (_, __) => SetAllSelected(false);
-        top.Children.Add(selectAll);
-        top.Children.Add(selectNone);
+        buttons.Children.Add(MakeQuickSelectButton("全选", "勾选全部模型与布局", () => SetAllSelected(true)));
+        buttons.Children.Add(MakeQuickSelectButton("全不选", "取消全部勾选", () => SetAllSelected(false)));
+        buttons.Children.Add(MakeQuickSelectButton(
+            "当前布局/模型",
+            "每个文件只勾选保存时停留的那个模型或布局（列表中带「当前」标记）",
+            SelectLastActiveSpaces));
+        buttons.Children.Add(MakeQuickSelectButton("仅模型", "每个文件只勾选模型空间", SelectModelSpacesOnly));
+        buttons.Children.Add(MakeQuickSelectButton("仅布局", "每个文件只勾选布局（不含模型）", SelectPaperSpacesOnly));
+        top.Children.Add(buttons);
         top.Children.Add(new TextBlock
         {
-            Text = "勾选需要扫描的模型/布局，确认后将清空清单并重新扫描。",
+            Text = "勾选需要扫描的模型/布局，确认后将清空清单并重新扫描。带「（当前）」的是该文件保存时停留的空间。",
             Foreground = Brushes.DimGray,
             VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(12, 0, 0, 0),
+            Margin = new Thickness(0, 6, 0, 0),
             TextWrapping = TextWrapping.Wrap
         });
         root.Children.Add(top);
@@ -295,7 +291,46 @@ public sealed partial class ScanSpacePickerDialog : Window
         }
     }
 
+    /// <summary>创建顶部快速选择按钮。</summary>
+    private Button MakeQuickSelectButton(string content, string toolTip, Action onClick)
+    {
+        var button = new Button
+        {
+            Content = content,
+            MinWidth = 76,
+            Style = TryFindResource("PluginButtonStyle") as Style,
+            Margin = new Thickness(0, 0, 6, 4),
+            ToolTip = toolTip
+        };
+        button.Click += (_, __) => onClick();
+        return button;
+    }
+
     private void SetAllSelected(bool selected)
+    {
+        ApplySelection(_ => selected);
+    }
+
+    /// <summary>每个文件只勾选保存时的当前模型/布局（<see cref="DwgSpaceEntry.IsLastActive"/>）。</summary>
+    private void SelectLastActiveSpaces()
+    {
+        ApplySelection(row => row.Entry.IsLastActive);
+    }
+
+    /// <summary>每个文件只勾选模型空间。</summary>
+    private void SelectModelSpacesOnly()
+    {
+        ApplySelection(row => row.Entry.IsModelSpace);
+    }
+
+    /// <summary>每个文件只勾选布局（不含模型）。</summary>
+    private void SelectPaperSpacesOnly()
+    {
+        ApplySelection(row => !row.Entry.IsModelSpace);
+    }
+
+    /// <summary>按谓词批量改勾选，并同步各文件头三态复选框。</summary>
+    private void ApplySelection(Func<SpaceRow, bool> shouldSelect)
     {
         foreach (var group in _groups)
         {
@@ -305,11 +340,12 @@ public sealed partial class ScanSpacePickerDialog : Window
             {
                 foreach (var row in group.Rows)
                 {
+                    var selected = shouldSelect(row);
                     row.Entry.Selected = selected;
                     row.Check.IsChecked = selected;
                 }
 
-                group.HeaderCheck.IsChecked = selected;
+                SyncHeaderFromChildren(group);
             }
             finally
             {
