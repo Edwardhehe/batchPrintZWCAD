@@ -137,6 +137,65 @@ public sealed class CadSelectionWindow
         job.UcsYAxisZ = coordinateSystem.Yaxis.Z;
     }
 
+    /// <summary>
+    /// 多文件/侧载扫描往往拿不到当时的 UCS。若模型图框 CornerPoints 相对 WCS 已旋转，
+    /// 则从图框底边/左边反推局部坐标系，供出图前 ViewTwist 对齐（与单张 UCS→DCS 同效）。
+    /// 已是 UCS 任务、图纸空间、DCS 窗口或近似正交于 WCS 时跳过。
+    /// </summary>
+    public static void EnsureModelFrameOrientation(PlotJob job)
+    {
+        if (job.IsPaperSpace || job.IsDcsWindow || job.UsesUserCoordinateSystem)
+        {
+            return;
+        }
+
+        if (job.CornerPoints is not { Length: >= 8 } corners)
+        {
+            return;
+        }
+
+        // CornerPoints 约定与图框/矩形扫描一致：c0 左下 → c1 右下 → c2 右上 → c3 左上（局部框坐标经变换后的 WCS）。
+        var c0 = new Point3d(corners[0], corners[1], 0);
+        var c1 = new Point3d(corners[2], corners[3], 0);
+        var c3 = new Point3d(corners[6], corners[7], 0);
+        var xVec = c1 - c0;
+        var yVec = c3 - c0;
+        if (xVec.Length <= 1e-9 || yVec.Length <= 1e-9)
+        {
+            return;
+        }
+
+        var xAxis = xVec.GetNormal();
+        var yAxis = yVec.GetNormal();
+        // 与世界轴近似平行时无需扭转视图，避免无意义地改写任务坐标系。
+        if (Math.Min(Math.Abs(xAxis.X), Math.Abs(xAxis.Y)) < 1e-4)
+        {
+            return;
+        }
+
+        // 保证右手系：若叉积指向 -Z，翻转 Y。
+        if (xAxis.CrossProduct(yAxis).Z < 0)
+        {
+            yAxis = -yAxis;
+            yVec = -yVec;
+        }
+
+        job.UsesUserCoordinateSystem = true;
+        job.UcsOriginX = c0.X;
+        job.UcsOriginY = c0.Y;
+        job.UcsOriginZ = c0.Z;
+        job.UcsXAxisX = xAxis.X;
+        job.UcsXAxisY = xAxis.Y;
+        job.UcsXAxisZ = xAxis.Z;
+        job.UcsYAxisX = yAxis.X;
+        job.UcsYAxisY = yAxis.Y;
+        job.UcsYAxisZ = yAxis.Z;
+        job.UcsMinX = 0;
+        job.UcsMinY = 0;
+        job.UcsMaxX = xVec.Length;
+        job.UcsMaxY = Math.Abs(yVec.Length);
+    }
+
     public static Matrix3d GetJobUcsToWorld(PlotJob job)
     {
         var origin = new Point3d(job.UcsOriginX, job.UcsOriginY, job.UcsOriginZ);

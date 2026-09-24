@@ -105,6 +105,11 @@ public static partial class PlotterService
             return;
         }
 
+        // 多文件侧载扫描常无 UCS 上下文；用图框四角反推朝向后再扭转视图，避免内容相对纸张倾斜。
+        CadSelectionWindow.EnsureModelFrameOrientation(job);
+        // 图框四角若已与世界轴平行，仍可能整图在命名 UCS 下绘制：打开文档后读当前 UCS。
+        TryApplyDocumentUcsOrientation(doc, job);
+
         var corners = CadSelectionWindow.GetJobWorldCorners(job);
         var center = new Point3d(
             corners.Average(point => point.X),
@@ -136,6 +141,39 @@ public static partial class PlotterService
         view.Width = width * 1.05;
         view.Height = height * 1.05;
         doc.Editor.SetCurrentView(view);
+    }
+
+    /**
+     * TryApplyDocumentUcsOrientation：打开后的文档若仍处于非世界 UCS，且任务尚无朝向信息，
+     * 则把当前 UCS 写入任务（多文件侧载扫描拿不到编辑器 UCS 时的兜底）。
+     */
+    private static void TryApplyDocumentUcsOrientation(Document doc, PlotJob job)
+    {
+        if (job.IsPaperSpace || job.IsDcsWindow || job.UsesUserCoordinateSystem)
+        {
+            return;
+        }
+
+        try
+        {
+            var ucsToWorld = doc.Editor.CurrentUserCoordinateSystem;
+            if (ucsToWorld.IsEqualTo(Matrix3d.Identity))
+            {
+                return;
+            }
+
+            var context = new CadSelectionWindow
+            {
+                UcsToWorld = ucsToWorld,
+                WorldToUcs = ucsToWorld.Inverse()
+            };
+            var bounds = context.TransformWorldPointsToBounds(CadSelectionWindow.GetJobWorldCorners(job));
+            context.ApplyToJob(job, bounds);
+        }
+        catch
+        {
+            // 个别文档状态读不到 UCS 时保持原朝向，由后续 ViewTwist=0 路径处理。
+        }
     }
 
     /** DetectRotation：按纸向与窗口横竖检测是否需旋转。 */

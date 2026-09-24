@@ -171,6 +171,11 @@ public static partial class PlotterService
         {
             string? lastSpaceKey = null;
             EnsureSpaceRegenerated(currentDocument, job, ref lastSpaceKey);
+            if (!job.IsPaperSpace && !job.IsDcsWindow)
+            {
+                PrepareEditorViewForPlot(currentDocument, job);
+            }
+
             // 首次扫描得到的图框信息已可用于预览，避免每次点击预览都重新扫描整张图纸。
             PreviewDatabase(currentDocument.Database, currentDocument.Name, job, deviceName, styleSheet, currentDocument);
         }
@@ -219,6 +224,12 @@ public static partial class PlotterService
                 using (currentDocument.LockDocument())
                 {
                     EnsureSpaceRegenerated(currentDocument, job, ref lastSpaceKey);
+                    // 当前图批打原先未对齐视图；UCS/斜图框与单张打印不一致时会打斜。
+                    if (!job.IsPaperSpace && !job.IsDcsWindow)
+                    {
+                        PrepareEditorViewForPlot(currentDocument, job);
+                    }
+
                     PlotDatabase(currentDocument.Database, currentDocument.Name, job, deviceName, styleSheet, settings, currentDocument);
                 }
 
