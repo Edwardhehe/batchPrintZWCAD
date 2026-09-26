@@ -80,13 +80,37 @@ public static class FileNameSanitizer
     /// 配置1（分数）：含"/"的转为"∕"（U+2215）；小数扩展量先尝试还原为1/8模数分数（如0.5→1∕2）；
     ///               无法还原的任意加长保留小数。
     /// 配置2（小数）：含"/"的分数转为小数（如1/4→0.25）；已是小数的保持不变。
+    /// 配置3（倍数）：将加长图转换为"图幅x放大倍数"形式（如A1+1/4→A1x1.25，A2+0.5→A2x1.5）。
     /// </summary>
     public static string NormalizeLongPaperFraction(string paperName, LongPaperNameFormat format = LongPaperNameFormat.Fraction)
     {
         if (string.IsNullOrEmpty(paperName)) return paperName ?? "";
 
+        // ── 配置3（倍数）：将加长图转换为"图幅x放大倍数"形式 ──
+        if (format == LongPaperNameFormat.Multiplier)
+        {
+            // 先处理已有 "/" 的分数形式（如 A1+1/2）
+            var multiplierResult = LongPaperFractionPattern.Replace(paperName, match =>
+            {
+                var numerator = int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);
+                var denominator = int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture);
+                if (denominator == 0) return match.Value;
+                var ext = numerator / (double)denominator;
+                return FormatMultiplier(ext);
+            });
+
+            // 再处理整数或小数扩展量（如 A1+1、A1+0.25）
+            multiplierResult = LongPaperNumberExtPattern.Replace(multiplierResult, match =>
+            {
+                var ext = double.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);
+                return ext <= 0d ? match.Value : FormatMultiplier(ext);
+            });
+
+            return multiplierResult;
+        }
+
         // ── 处理已有 "/" 的分数形式（如 A1+1/2）──
-        var result = LongPaperFractionPattern.Replace(paperName, match =>
+        var resultDefault = LongPaperFractionPattern.Replace(paperName, match =>
         {
             var numerator = int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);
             var denominator = int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture);
@@ -104,7 +128,7 @@ public static class FileNameSanitizer
         // 例：A1+0.5 → A1+1∕2，A2+1.501（任意加长）保持不变
         if (format == LongPaperNameFormat.Fraction)
         {
-            result = LongPaperDecimalExtPattern.Replace(result, match =>
+            resultDefault = LongPaperDecimalExtPattern.Replace(resultDefault, match =>
             {
                 var dec = double.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);
                 if (dec <= 0d) return match.Value;
@@ -116,7 +140,7 @@ public static class FileNameSanitizer
             });
         }
 
-        return result;
+        return resultDefault;
     }
 
     private static int Gcd(int a, int b)
@@ -125,12 +149,23 @@ public static class FileNameSanitizer
         return a;
     }
 
+    /// <summary>把加长扩展量换算为"图幅x总倍数"形式，如 0.25 → x1.25、1 → x2。</summary>
+    private static string FormatMultiplier(double extension)
+    {
+        // 最多3位小数，覆盖 1/8 模数（0.125）而不产生多余尾零。
+        return "x" + (1.0 + extension).ToString("0.###", CultureInfo.InvariantCulture);
+    }
+
     private static readonly Regex LongPaperFractionPattern =
         new Regex(@"\+(\d+)/(\d+)$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     // 匹配末尾小数扩展量，如 +0.5、+1.501、+1.125
     private static readonly Regex LongPaperDecimalExtPattern =
         new Regex(@"\+(\d+\.\d+)$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    // 匹配末尾整数或小数扩展量，如 +1、+0.5、+1.125
+    private static readonly Regex LongPaperNumberExtPattern =
+        new Regex(@"\+(\d+(?:\.\d+)?)$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     /// <summary>
     /// 按用户输入的规则生成文件名。占位符区分大小写：
