@@ -1,5 +1,5 @@
 ﻿param(
-    [string]$Version = "1.15.7.6",
+    [string]$Version = "1.15.7.7",
     [string]$ZwcadOutput,
     [string]$LegacyAcadOutput,
     [string]$CoreAcadOutput
