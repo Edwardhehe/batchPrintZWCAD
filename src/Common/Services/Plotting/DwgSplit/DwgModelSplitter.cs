@@ -66,11 +66,22 @@ internal static class DwgModelSplitter
                 throw new InvalidOperationException("拆图窗口角点无效，无法建立 XClip 边界。");
             }
 
-            using var newDb = new Database(true, true);
-            BuildClippedBlockDatabase(sourceDatabase, newDb, keepIds, clipCorners);
+            using (var newDb = new Database(true, true))
+            {
+                BuildClippedBlockDatabase(sourceDatabase, newDb, keepIds, clipCorners);
 
-            HostApplicationServices.WorkingDatabase = newDb;
-            newDb.SaveAs(outputPath, DwgVersion.Current);
+                // SaveAs 期间可临时切到 newDb；但必须在 using 释放 newDb 之前恢复 WorkingDatabase，
+                // 否则会出现 WorkingDatabase 指向已 Dispose 对象的窗口。
+                HostApplicationServices.WorkingDatabase = newDb;
+                try
+                {
+                    newDb.SaveAs(outputPath, DwgVersion.Current);
+                }
+                finally
+                {
+                    HostApplicationServices.WorkingDatabase = oldWorkingDatabase;
+                }
+            }
         }
         finally
         {
