@@ -1,31 +1,34 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 #if AUTOCAD
-using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.DatabaseServices;
+using Autodesk.AutoCAD.DatabaseServices.Filters;
+using Autodesk.AutoCAD.Geometry;
 #else
-using ZwSoft.ZwCAD.ApplicationServices;
 using ZwSoft.ZwCAD.DatabaseServices;
+using ZwSoft.ZwCAD.DatabaseServices.Filters;
+using ZwSoft.ZwCAD.Geometry;
 #endif
 
 namespace ZwcadBatchPlot;
 
-/// <summary>
-/// 模型拆图（含 UCS）：先把源 DWG 另存一份，再只删模型空间里图框外的对象。
-/// 不切布局、不删布局，避免副本或当前图被改坏后 CAD 打不开。
-/// </summary>
+/**
+ * 模型拆图（含 UCS）：按 WS.CAD.DwgSplitter 思路——
+ * 收集与图框相交/落入的模型实体 → 克隆进新库匿名块 → 块参照上挂 SpatialFilter（XClip）→ SaveAs。
+ * 不再整文件复制后删框外；布局拆图仍由 <see cref="DwgPaperSplitter"/> 负责。
+ *
+ * 说明：跨框实体会整段克隆，XClip 只裁显示，框外几何仍在块定义里（体积可能大于「删除框外」方案）。
+ */
 internal static class DwgModelSplitter
 {
-    /// <summary>
-    /// 复制已保存的源 DWG，打开副本后按图框窗口删除框外模型实体。
-    /// UCS 只用于去留判定，不改副本里的坐标、UCS、视图和布局。
-    /// </summary>
-    /// <param name="sourceDatabase">当前打开的源数据库，仅用于解析已保存路径。</param>
-    /// <param name="sourcePath">调度层传入的身份路径。</param>
-    /// <param name="outputPath">拆出 DWG 路径。</param>
-    /// <param name="job">拆图任务。</param>
-    /// <param name="result">去留统计。</param>
+    private const string BlockNamePrefix = "SplitBlock_";
+
+    /**
+     * 从源库模型空间按图框窗口克隆实体到新 DWG（带 XClip）。
+     * 源库可为当前未保存文档或侧载库；不改写源文件。
+     */
     internal static void Split(
         Database sourceDatabase,
         string sourcePath,
@@ -33,38 +36,41 @@ internal static class DwgModelSplitter
         PlotJob job,
         DwgSplitService.SplitResult result)
     {
-        var copyFrom = DwgDatabaseCleanup.ResolveSavedSourcePath(sourceDatabase, sourcePath, job);
         Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
-        File.Copy(copyFrom, outputPath, overwrite: true);
 
-        using var db = new Database(false, true);
-        db.ReadDwgFile(outputPath, FileOpenMode.OpenForReadAndWriteNoShare, true, "");
-        db.CloseInput(true);
+        // 多文件侧载常无 UCS 元数据；与出图路径一致，先按四角反推朝向再算保留区。
+        CadSelectionWindow.EnsureModelFrameOrientation(job);
 
         var oldWorkingDatabase = HostApplicationServices.WorkingDatabase;
-        HostApplicationServices.WorkingDatabase = db;
         try
         {
-            using (var tr = db.TransactionManager.StartTransaction())
+            HostApplicationServices.WorkingDatabase = sourceDatabase;
+
+            List<ObjectId> keepIds;
+            using (var sourceTr = sourceDatabase.TransactionManager.StartTransaction())
             {
-                var blockTable = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
-                var model = (BlockTableRecord)tr.GetObject(
-                    blockTable[BlockTableRecord.ModelSpace],
-                    OpenMode.ForWrite);
-                var layerLocks = DwgDatabaseCleanup.UnlockLayers(tr, db);
-                CleanModelSpaceByWindow(tr, model, job, result);
-                DwgDatabaseCleanup.RestoreLayerLocks(tr, layerLocks);
-                tr.Commit();
+                keepIds = CollectKeepEntityIds(sourceTr, sourceDatabase, job, result);
+                sourceTr.Commit();
             }
 
-            if (result.KeptEntities == 0)
+            if (keepIds.Count == 0)
             {
                 throw new InvalidOperationException(
-                    "拆图范围内未找到可保留对象，已停止生成空 DWG。请检查图框的 UCS/WCS 坐标。");
+                    "拆图范围内未找到可保留对象，已停止生成空 DWG。请检查图框的 UCS/WCS 坐标。"
+                    + (string.IsNullOrWhiteSpace(sourcePath) ? "" : " 源=" + sourcePath));
             }
 
-            DwgDatabaseCleanup.PurgeUnusedNamedObjects(db);
-            db.SaveAs(outputPath, DwgVersion.Current);
+            var clipCorners = DwgSplitGeometry.BuildKeepPolygon(job);
+            if (clipCorners.Length < 3)
+            {
+                throw new InvalidOperationException("拆图窗口角点无效，无法建立 XClip 边界。");
+            }
+
+            using var newDb = new Database(true, true);
+            BuildClippedBlockDatabase(sourceDatabase, newDb, keepIds, clipCorners);
+
+            HostApplicationServices.WorkingDatabase = newDb;
+            newDb.SaveAs(outputPath, DwgVersion.Current);
         }
         finally
         {
@@ -72,42 +78,149 @@ internal static class DwgModelSplitter
         }
     }
 
-    /// <summary>只删模型空间框外实体；UCS 只用于去留判定，不改实体坐标。</summary>
-    private static void CleanModelSpaceByWindow(
+    /// <summary>遍历模型空间，收集应保留的实体 Id（跳过临时红框/序号）。</summary>
+    private static List<ObjectId> CollectKeepEntityIds(
         Transaction tr,
-        BlockTableRecord model,
+        Database sourceDatabase,
         PlotJob job,
         DwgSplitService.SplitResult result)
     {
-        var ids = model.Cast<ObjectId>().ToList();
-        foreach (var id in ids)
+        var blockTable = (BlockTable)tr.GetObject(sourceDatabase.BlockTableId, OpenMode.ForRead);
+        var model = (BlockTableRecord)tr.GetObject(
+            blockTable[BlockTableRecord.ModelSpace],
+            OpenMode.ForRead);
+
+        var keepIds = new List<ObjectId>();
+        foreach (ObjectId id in model)
         {
             if (id.IsErased)
             {
                 continue;
             }
 
-            if (tr.GetObject(id, OpenMode.ForWrite, false) is not Entity entity)
+            if (tr.GetObject(id, OpenMode.ForRead, false) is not Entity entity)
             {
                 continue;
             }
 
             if (DwgDatabaseCleanup.IsTemporaryOverlayEntity(entity))
             {
-                entity.Erase();
                 result.RemovedEntities++;
                 continue;
             }
 
             if (DwgSplitGeometry.ShouldKeepEntity(tr, entity, job, result))
             {
+                keepIds.Add(id);
                 result.KeptEntities++;
             }
             else
             {
-                entity.Erase();
                 result.RemovedEntities++;
             }
         }
+
+        return keepIds;
+    }
+
+    /**
+     * 在空库中建块、WblockCloneObjects、插入块参照并写入 SpatialFilter（等价 XClip）。
+     * 裁剪角点为 WCS；块原点与插入点取裁剪框第一角，与 WS 样例一致。
+     */
+    private static void BuildClippedBlockDatabase(
+        Database sourceDatabase,
+        Database newDatabase,
+        IReadOnlyList<ObjectId> keepIds,
+        Point3d[] clipCornersWcs)
+    {
+        var basePoint = clipCornersWcs[0];
+        using var tr = newDatabase.TransactionManager.StartTransaction();
+        var blockTable = (BlockTable)tr.GetObject(newDatabase.BlockTableId, OpenMode.ForWrite);
+
+        var blockName = BlockNamePrefix + Guid.NewGuid().ToString("N");
+        var blockDefinition = new BlockTableRecord
+        {
+            Name = blockName,
+            Origin = basePoint
+        };
+        var blockId = blockTable.Add(blockDefinition);
+        tr.AddNewlyCreatedDBObject(blockDefinition, true);
+
+        using (var idCollection = new ObjectIdCollection(keepIds.ToArray()))
+        using (var mapping = new IdMapping())
+        {
+            sourceDatabase.WblockCloneObjects(
+                idCollection,
+                blockId,
+                mapping,
+                DuplicateRecordCloning.Replace,
+                false);
+        }
+
+        var modelSpace = (BlockTableRecord)tr.GetObject(
+            blockTable[BlockTableRecord.ModelSpace],
+            OpenMode.ForWrite);
+        var blockRef = new BlockReference(basePoint, blockId);
+        modelSpace.AppendEntity(blockRef);
+        tr.AddNewlyCreatedDBObject(blockRef, true);
+
+        ApplySpatialClip(tr, blockRef, clipCornersWcs);
+        tr.Commit();
+    }
+
+    /// <summary>给块参照写入 ACAD_FILTER / SPATIAL，效果等同 XClip 矩形/多边形裁剪。</summary>
+    private static void ApplySpatialClip(
+        Transaction tr,
+        BlockReference blockRef,
+        Point3d[] clipCornersWcs)
+    {
+        var points = new Point2dCollection();
+        foreach (var corner in clipCornersWcs)
+        {
+            points.Add(new Point2d(corner.X, corner.Y));
+        }
+
+        var definition = new SpatialFilterDefinition(
+            points,
+            Vector3d.ZAxis,
+            elevation: 0.0,
+            frontClip: 1.0e+20,
+            backClip: 1.0e+20,
+            enabled: true);
+
+        var filter = new SpatialFilter
+        {
+            Definition = definition
+        };
+
+        if (blockRef.ExtensionDictionary.IsNull)
+        {
+            blockRef.CreateExtensionDictionary();
+        }
+
+        var extensionDictionary = (DBDictionary)tr.GetObject(
+            blockRef.ExtensionDictionary,
+            OpenMode.ForWrite);
+
+        DBDictionary filterDictionary;
+        if (extensionDictionary.Contains("ACAD_FILTER"))
+        {
+            filterDictionary = (DBDictionary)tr.GetObject(
+                extensionDictionary.GetAt("ACAD_FILTER"),
+                OpenMode.ForWrite);
+            if (filterDictionary.Contains("SPATIAL"))
+            {
+                filterDictionary.Remove("SPATIAL");
+            }
+        }
+        else
+        {
+            filterDictionary = new DBDictionary();
+            extensionDictionary.SetAt("ACAD_FILTER", filterDictionary);
+            tr.AddNewlyCreatedDBObject(filterDictionary, true);
+        }
+
+        filterDictionary.SetAt("SPATIAL", filter);
+        tr.AddNewlyCreatedDBObject(filter, true);
     }
 }
