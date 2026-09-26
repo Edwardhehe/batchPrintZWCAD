@@ -70,8 +70,10 @@
                                           ToolTip="勾选后，正式打印把内容四边各裁 1mm，外框线不再输出；纸张、比例和留白不变。" />
                                 <CheckBox x:Name="_plotTransparency" Content="打印透明度" Margin="0,0,0,2"
                                           ToolTip="勾选后按对象透明度输出，对应 CAD 打印对话框中的“打印透明度”；默认开启。" />
-                                <CheckBox x:Name="_plotObjectLineweights" Content="打印对象线宽" Margin="0,0,0,2"
-                                          ToolTip="勾选后按对象线宽输出，对应 CAD 打印对话框中的“打印对象线宽”；默认关闭。" />
+                                <CheckBox x:Name="_plotObjectLineweights" Content="打印对象线宽" Margin="0,0,0,0"
+                                          ToolTip="勾选后打印样式表（颜色、淡显、线型等）照常生效，只有线宽改按对象/图层线宽打印：出图时自动使用线宽全为“使用对象线宽”的样式表临时副本（原名__objlw.ctb，不修改原 CTB）。线宽为“默认”的对象按 CAD 默认线宽（LWDEFAULT，通常 0.25mm）出图。不勾选时完全按所选打印样式表出图。默认关闭。" />
+                                <TextBlock Foreground="DimGray" Margin="18,0,0,2" TextWrapping="Wrap"
+                                           Text="勾选后打印样式表中只有线宽不生效，按对象/图层线宽打印；线宽为“默认”的对象按 CAD 默认线宽（通常 0.25mm）出图" />
                                 <CheckBox x:Name="_generatePrintLog" Content="生成打印日志" Margin="0,0,0,2" />
                                 <CheckBox x:Name="_convertTextToGeometryWhenPlotting" Content="文字自动转图形打印"
                                           ToolTip="勾选后，PDF/DWF/PNG/JPG 输出会把 TrueType 文字转换为图形轮廓，避免接收方缺少字体；不会炸开或修改原 DWG 文字。默认关闭。" />

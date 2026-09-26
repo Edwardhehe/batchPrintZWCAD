@@ -48,6 +48,8 @@ public static partial class PlotterService
         WaitForPlotIdle();
 
         styleSheet = PlotStyleManager.ResolveJobStyle(job, styleSheet);
+        // 勾选“打印对象线宽”时改用线宽全为“使用对象线宽”的样式表副本，其余样式设置不变。
+        var styleChoice = ObjectLineweightPlotStyle.Resolve(styleSheet, settings.PlotObjectLineweights);
 
         var oldDatabase = HostApplicationServices.WorkingDatabase;
         HostApplicationServices.WorkingDatabase = db;
@@ -61,10 +63,10 @@ public static partial class PlotterService
                 job,
                 window,
                 deviceName,
-                styleSheet,
+                styleChoice,
                 settings.HideFrameBoundaryWhenPlotting,
-                settings.PlotTransparency,
-                settings.PlotObjectLineweights);
+                settings.PlotTransparency);
+            ObjectLineweightPlotStyle.LogEffective(plot.Settings, styleChoice, job, "");
 
             PrepareOutputFile(job.OutputPath);
             RunPlot(plot.Info, documentName, job.OutputPath, job.DrawingNumber);
@@ -84,22 +86,21 @@ public static partial class PlotterService
         PlotJob job,
         Extents2d window,
         string deviceName,
-        string styleSheet,
+        PlotStyleChoice styleChoice,
         bool hideOuterFrame,
-        bool plotTransparency,
-        bool plotObjectLineweights)
+        bool plotTransparency)
     {
         try
         {
             return CreateValidatedPlotCore(
-                layout, job, window, deviceName, styleSheet, hideOuterFrame, plotTransparency, plotObjectLineweights);
+                layout, job, window, deviceName, styleChoice, hideOuterFrame, plotTransparency);
         }
         catch (CachedMediaCatalogException)
         {
             // PC3/PMP 可能在 CAD 会话中被更新；仅当缓存目录失效时清缓存并完整读取一次。
             InvalidateMediaCatalog(deviceName);
             return CreateValidatedPlotCore(
-                layout, job, window, deviceName, styleSheet, hideOuterFrame, plotTransparency, plotObjectLineweights);
+                layout, job, window, deviceName, styleChoice, hideOuterFrame, plotTransparency);
         }
     }
 
@@ -109,10 +110,9 @@ public static partial class PlotterService
         PlotJob job,
         Extents2d window,
         string deviceName,
-        string styleSheet,
+        PlotStyleChoice styleChoice,
         bool hideOuterFrame,
-        bool plotTransparency,
-        bool plotObjectLineweights)
+        bool plotTransparency)
     {
         var validator = PlotSettingsValidator.Current;
         var media = ChooseMedia(validator, layout, deviceName, job, window, out var usedCachedCatalog);
@@ -130,14 +130,13 @@ public static partial class PlotterService
                     validator,
                     settings,
                     deviceName,
-                    styleSheet,
+                    styleChoice,
                     media,
                     rotation,
                     window,
                     job,
                     hideOuterFrame,
-                    plotTransparency,
-                    plotObjectLineweights);
+                    plotTransparency);
 
                 var info = new PlotInfo
                 {
@@ -198,14 +197,13 @@ public static partial class PlotterService
         PlotSettingsValidator validator,
         PlotSettings settings,
         string deviceName,
-        string styleSheet,
+        PlotStyleChoice styleChoice,
         MediaChoice media,
         PlotRotation rotation,
         Extents2d window,
         PlotJob job,
         bool hideOuterFrame,
-        bool plotTransparency,
-        bool plotObjectLineweights)
+        bool plotTransparency)
     {
         try
         {
@@ -242,10 +240,8 @@ public static partial class PlotterService
         // 若校验后单位被改成 Inches，再在上面的二次校验分支统一清零原点并重新居中。
         validator.SetPlotCentered(settings, true);
 
-        if (!string.IsNullOrWhiteSpace(styleSheet))
-        {
-            validator.SetCurrentStyleSheet(settings, styleSheet);
-        }
+        // 写入样式表（勾选“打印对象线宽”时为 __objlw 副本），并显式设置 PlotPlotStyles / PrintLineweights。
+        ObjectLineweightPlotStyle.Apply(validator, settings, styleChoice);
 
         // 比例和留白已按原窗口写入；内退只替换打印窗口，避免 ScaleToFit 把裁切后的内容重新铺满纸面。
         if (hideOuterFrame)
@@ -254,8 +250,8 @@ public static partial class PlotterService
         }
 
         settings.PlotTransparency = plotTransparency;
-        // CopyFrom(layout) 会带入布局原线宽开关；按常规设置强制覆盖。
-        settings.PrintLineweights = plotObjectLineweights;
+        // CopyFrom(layout) 会带入布局原开关；按常规设置强制覆盖 PlotPlotStyles / PrintLineweights。
+        ObjectLineweightPlotStyle.ApplyFlags(settings, styleChoice);
     }
 
     /** RunPlot：调用 PlotEngine 把 PlotInfo 输出到文件，并等待引擎空闲。 */
@@ -369,6 +365,7 @@ public static partial class PlotterService
         {
             using var tr = db.TransactionManager.StartTransaction();
             var settings = AppSettingsStore.Load();
+            var styleChoice = ObjectLineweightPlotStyle.Resolve(styleSheet, settings.PlotObjectLineweights);
             var layout = FindLayoutForJob(tr, db, job);
             var window = GetPlotWindow(job, plotDocument);
             using var plot = CreateValidatedPlot(
@@ -376,10 +373,10 @@ public static partial class PlotterService
                 job,
                 window,
                 deviceName,
-                styleSheet,
+                styleChoice,
                 settings.HideFrameBoundaryWhenPlotting,
-                settings.PlotTransparency,
-                settings.PlotObjectLineweights);
+                settings.PlotTransparency);
+            ObjectLineweightPlotStyle.LogEffective(plot.Settings, styleChoice, job, "预览");
             RunPreview(plot.Info, documentName);
             tr.Commit();
             WaitForPlotIdle();

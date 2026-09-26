@@ -1928,6 +1928,8 @@ public sealed partial class RectangleBatchPlotForm : Window
         {
             if (_settings.GeneratePrintLog)
             {
+                // 先并入出图管道暂存的诊断行（如实际打印样式/线宽开关），保持时间顺序。
+                printLogLines.AddRange(BatchPlotLogger.DrainPending());
                 printLogLines.Add(BatchPlotLogger.Format(level, message));
             }
         }

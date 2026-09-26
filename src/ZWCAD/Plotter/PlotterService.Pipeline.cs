@@ -38,6 +38,8 @@ public static partial class PlotterService
         WaitForPlotIdle();
 
         styleSheet = PlotStyleManager.ResolveJobStyle(job, styleSheet);
+        // 勾选“打印对象线宽”时改用线宽全为“使用对象线宽”的样式表副本，其余样式设置不变。
+        var styleChoice = ObjectLineweightPlotStyle.Resolve(styleSheet, settings.PlotObjectLineweights);
 
         var oldWorkingDatabase = HostApplicationServices.WorkingDatabase;
         HostApplicationServices.WorkingDatabase = db;
@@ -79,10 +81,8 @@ public static partial class PlotterService
 
             validator.SetCanonicalMediaName(plotSettings, media.Name);
             EnsureExactMediaSize(plotSettings, job);
-            if (!string.IsNullOrWhiteSpace(styleSheet))
-            {
-                validator.SetCurrentStyleSheet(plotSettings, styleSheet);
-            }
+            // 写入样式表（勾选“打印对象线宽”时为 __objlw 副本），并显式设置 PlotPlotStyles / PrintLineweights。
+            ObjectLineweightPlotStyle.Apply(validator, plotSettings, styleChoice);
 
             validator.SetPlotWindowArea(plotSettings, plotWindow);
             validator.SetPlotType(plotSettings, ZwSoft.ZwCAD.DatabaseServices.PlotType.Window);
@@ -95,8 +95,8 @@ public static partial class PlotterService
             }
 
             plotSettings.PlotTransparency = settings.PlotTransparency;
-            // CopyFrom(layout) 会带入布局原线宽开关；按常规设置强制覆盖。
-            plotSettings.PrintLineweights = settings.PlotObjectLineweights;
+            // CopyFrom(layout) 会带入布局原开关；按常规设置强制覆盖 PlotPlotStyles / PrintLineweights。
+            ObjectLineweightPlotStyle.ApplyFlags(plotSettings, styleChoice);
 
             var plotInfo = new PlotInfo
             {
@@ -108,6 +108,7 @@ public static partial class PlotterService
                 MediaMatchingPolicy = MatchingPolicy.MatchEnabled
             };
             plotInfoValidator.Validate(plotInfo);
+            ObjectLineweightPlotStyle.LogEffective(plotSettings, styleChoice, job, "");
 
             PrepareOutputFile(job.OutputPath);
             RunPlot(plotInfo, documentName, job.OutputPath, job.DrawingNumber);
@@ -240,6 +241,7 @@ public static partial class PlotterService
         {
             using var tr = db.TransactionManager.StartTransaction();
             var singleSettings = AppSettingsStore.Load();
+            var styleChoice = ObjectLineweightPlotStyle.Resolve(styleSheet, singleSettings.PlotObjectLineweights);
             var layout = FindLayoutForJob(tr, db, job);
             using var plotSettings = new PlotSettings(layout.ModelType);
             plotSettings.CopyFrom(layout);
@@ -272,10 +274,8 @@ public static partial class PlotterService
 
             validator.SetCanonicalMediaName(plotSettings, media.Name);
             EnsureExactMediaSize(plotSettings, job);
-            if (!string.IsNullOrWhiteSpace(styleSheet))
-            {
-                validator.SetCurrentStyleSheet(plotSettings, styleSheet);
-            }
+            // 预览与正式打印同一规则：勾选“打印对象线宽”时用 __objlw 副本。
+            ObjectLineweightPlotStyle.Apply(validator, plotSettings, styleChoice);
 
             validator.SetPlotWindowArea(plotSettings, plotWindow);
             validator.SetPlotType(plotSettings, ZwSoft.ZwCAD.DatabaseServices.PlotType.Window);
@@ -288,8 +288,8 @@ public static partial class PlotterService
             }
 
             plotSettings.PlotTransparency = singleSettings.PlotTransparency;
-            // CopyFrom(layout) 会带入布局原线宽开关；按常规设置强制覆盖。
-            plotSettings.PrintLineweights = singleSettings.PlotObjectLineweights;
+            // CopyFrom(layout) 会带入布局原开关；按常规设置强制覆盖 PlotPlotStyles / PrintLineweights。
+            ObjectLineweightPlotStyle.ApplyFlags(plotSettings, styleChoice);
 
             var plotInfo = new PlotInfo
             {
@@ -300,6 +300,7 @@ public static partial class PlotterService
             {
                 MediaMatchingPolicy = MatchingPolicy.MatchEnabled
             }.Validate(plotInfo);
+            ObjectLineweightPlotStyle.LogEffective(plotSettings, styleChoice, job, "预览");
 
             RunPreview(plotInfo, documentName);
             tr.Commit();

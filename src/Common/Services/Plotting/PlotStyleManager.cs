@@ -33,6 +33,8 @@ internal static class PlotStyleManager
             .Cast<object>()
             .Select(value => value?.ToString() ?? "")
             .Where(value => value.EndsWith(".ctb", StringComparison.OrdinalIgnoreCase))
+            // “打印对象线宽”生成的临时副本（*__objlw.ctb）只供出图内部使用，不出现在下拉框中。
+            .Where(value => !PlotStyleLineweightConverter.IsObjectLineweightCopy(value))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
@@ -231,7 +233,7 @@ internal static class PlotStyleManager
      * ResolveStylePath：向 CAD 要这份样式表的完整路径。
      * 优先用 PlotConfigManager 的 FullPath（与下拉列表同源）；读不到时再按选项里的样式表搜索路径找文件。
      */
-    private static string? ResolveStylePath(string styleSheet)
+    internal static string? ResolveStylePath(string styleSheet)
     {
         var raw = (styleSheet ?? "").Trim();
         if (string.IsNullOrEmpty(raw))
