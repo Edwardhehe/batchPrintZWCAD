@@ -43,19 +43,23 @@ public sealed partial class BatchPrintProgressWindow : Window
     internal void ReplaceCancelHandler(Action onCancel)
         => _onCancel = onCancel ?? throw new ArgumentNullException(nameof(onCancel));
 
-    /// <summary>更新已开始张数与当前任务说明（completed 从 1 计到 total）。</summary>
-    public void Report(int completed, int total, string detail)
+    /// <summary>
+    /// 更新进度与当前任务说明。<paramref name="started"/> 为正在开始的第几张（1..total，0 表示尚未开始）；
+    /// 进度条与计数只统计已完成张数（started-1），避免只打一张时出图前就满格并显示“即将完成”。
+    /// </summary>
+    public void Report(int started, int total, string detail)
     {
         if (total <= 0)
         {
             total = 1;
         }
 
+        var finished = Math.Max(0, Math.Min(started - 1, total));
         _progressBar.IsIndeterminate = false;
         _progressBar.Maximum = total;
-        _progressBar.Value = Math.Max(0, Math.Min(completed, total));
-        _countText.Text = $"{Math.Max(0, completed)} / {total}";
-        _titleText.Text = completed >= total ? "即将完成…" : "正在批量打印…";
+        _progressBar.Value = finished;
+        _countText.Text = $"{finished} / {total}";
+        _titleText.Text = total > 1 && started >= total ? "正在打印最后一张…" : "正在批量打印…";
         _detailText.Text = string.IsNullOrWhiteSpace(detail) ? "准备中…" : detail;
     }
 
