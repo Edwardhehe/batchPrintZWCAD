@@ -7,17 +7,23 @@ _tmp*/
 ._tmp*/
 tmp/
 .bin-fix*/
+.bin-dev/
+_build_check/
 release/
 dist/
 local-artifacts/
+output/
 .vs/
 *.user
 *.suo
 *.zip
 *.log
+*.mp4
 TitleBlockLibrary.json
 Settings.json
 Logs/
 FileTools/
 lib/PianNoCN/
 .workbuddy/
+# 本地调试素材保留在磁盘，不进版本库（Word 使用说明仍跟踪）
+docs/bug-repro/
