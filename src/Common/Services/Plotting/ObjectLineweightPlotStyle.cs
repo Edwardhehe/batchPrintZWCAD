@@ -16,14 +16,15 @@ using ZwSoft.ZwCAD.PlottingServices;
  *
  * 主要功能：
  * - Resolve：勾选时为所选 CTB/STB 生成（或复用）临时副本 <原名>__objlw.ctb，副本中所有样式线宽 = 使用对象线宽
- * - Apply / ApplyFlags：写入 styleSheet，并显式设置 PlotPlotStyles / PrintLineweights
+ * - Apply / ApplyFlags：写入 styleSheet，并显式设置 PlotPlotStyles / PrintLineweights / ScaleLineweights
  * - LogEffective：把实际生效的 styleSheet 与两个开关写入打印日志
  *
  * 核心规则：
  * - 副本写在 CAD 解析到原样式表的同一目录（该目录不在打印样式搜索路径中时改写到第一个搜索目录）
  * - 原样式表只读不写；源文件大小/修改时间变化或副本缺失时才重新生成，内容相同则不重写
  * - 生成失败或 CAD 不接受副本时记录原因并回退原样式表（仍设置开关），不影响出图
- * - 未勾选时完全按原样式表出图：PrintLineweights = false，选了样式时 PlotPlotStyles = true
+ * - 未勾选时按原样式表（CTB）的线宽出图：选了样式时 PlotPlotStyles = PrintLineweights = true
+ *   （PrintLineweights = false 会让 CAD 连样式表线宽也不输出）；未选样式时 PrintLineweights 跟随勾选框；ScaleLineweights 恒为 false
  */
 
 namespace ZwcadBatchPlot;
@@ -136,7 +137,7 @@ internal static class ObjectLineweightPlotStyle
         ApplyFlags(settings, choice);
     }
 
-    /** ApplyFlags：显式写入 PlotPlotStyles（有样式时）与 PrintLineweights；CopyFrom(layout) 带入的旧值一律覆盖。 */
+    /** ApplyFlags：显式写入 PlotPlotStyles（有样式时）、PrintLineweights 与 ScaleLineweights；CopyFrom(layout) 带入的旧值一律覆盖。 */
     public static void ApplyFlags(PlotSettings settings, PlotStyleChoice choice)
     {
         if (choice.HasStyle)
@@ -144,7 +145,11 @@ internal static class ObjectLineweightPlotStyle
             settings.PlotPlotStyles = true;
         }
 
-        settings.PrintLineweights = choice.PlotObjectLineweights;
+        // 选了样式表时必须打开 PrintLineweights，否则 CAD 连样式表里的线宽也不输出（只剩颜色生效）；
+        // “打印对象线宽”由 __objlw 副本实现。未选样式时沿用勾选框：勾选 = 按对象线宽，不勾 = 不打印线宽。
+        settings.PrintLineweights = PlotStyleLineweightConverter.ShouldPrintLineweights(choice.HasStyle, choice.PlotObjectLineweights);
+        // 线宽按样式表/对象的绝对值输出，不随打印比例缩放（CopyFrom(layout) 可能带入“缩放线宽”）。
+        settings.ScaleLineweights = false;
     }
 
     /** LogEffective：记录实际生效的 styleSheet、PlotPlotStyles、PrintLineweights（受“生成打印日志”开关控制）。 */

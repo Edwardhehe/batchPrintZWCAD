@@ -36,6 +36,14 @@ internal static class PlotStyleLineweightConverter
     /** CTB/STB 中“使用对象线宽”的 lineweight 取值。 */
     public const int UseObjectLineweightValue = 0;
 
+    /**
+     * ShouldPrintLineweights：出图时 PlotSettings.PrintLineweights 应取的值。
+     * 选了样式表时恒为 true（关闭会让 CAD 连样式表线宽也不输出；“打印对象线宽”由 __objlw 副本实现）；
+     * 未选样式表时跟随“打印对象线宽”勾选框。
+     */
+    public static bool ShouldPrintLineweights(bool hasStyle, bool plotObjectLineweights)
+        => hasStyle || plotObjectLineweights;
+
     private const int HeaderLength = 48;
     private const int ChecksumLength = 12;
     private const int PayloadOffset = HeaderLength + ChecksumLength;
