@@ -48,7 +48,7 @@ public static partial class PlotterService
     {
         var catalog = GetMediaCatalog(
             validator,
-            layout,
+            layout.ModelType,
             deviceName,
             // 批打已在开始前一次性写入全部纸张；仅首张新增纸触发设备重载，后续精确纸张复用缓存。
             forceDeviceReload: job.CustomPaperWasAdded,
@@ -177,10 +177,10 @@ public static partial class PlotterService
             .FirstOrDefault();
     }
 
-    /** GetMediaCatalog：读取或缓存设备介质目录（含物理尺寸）。 */
+    /** GetMediaCatalog：读取或缓存设备介质目录（含物理尺寸）。modelType：true=模型空间。 */
     private static IReadOnlyList<MediaCatalogItem> GetMediaCatalog(
         PlotSettingsValidator validator,
-        Layout layout,
+        bool modelType,
         string deviceName,
         bool forceDeviceReload,
         out bool usedCache)
@@ -200,7 +200,7 @@ public static partial class PlotterService
             }
         }
 
-        var cacheKey = BuildMediaCatalogCacheKey(deviceName, layout.ModelType);
+        var cacheKey = BuildMediaCatalogCacheKey(deviceName, modelType);
         lock (MediaCatalogCacheLock)
         {
             if (MediaCatalogCache.TryGetValue(cacheKey, out var cached))
@@ -211,8 +211,8 @@ public static partial class PlotterService
         }
 
         usedCache = false;
-        using var settings = new PlotSettings(layout.ModelType);
-        settings.CopyFrom(layout);
+        // 介质目录只取决于设备本身（PC3/PMP），无需以布局为底；逐张路径的 CopyFrom 在 CreateValidatedPlotCore。
+        using var settings = new PlotSettings(modelType);
         if (forceDeviceReload)
         {
             try

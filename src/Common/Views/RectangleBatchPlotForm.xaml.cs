@@ -269,6 +269,7 @@ public sealed partial class RectangleBatchPlotForm : Window
         }
 
         UpdateOutputFormatUi();
+        SchedulePlotWarmUp();
     }
 
     private void Style_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -277,6 +278,7 @@ public sealed partial class RectangleBatchPlotForm : Window
         if (_styleSelectionReady)
         {
             SaveCurrentPlotOptions();
+            SchedulePlotWarmUp();
         }
     }
 
@@ -2319,6 +2321,38 @@ public sealed partial class RectangleBatchPlotForm : Window
         UpdateOutputFormatUi();
         _suppressComboEvents = false;
         _styleSelectionReady = true;
+        // 窗体显示后空闲时预热打印管线，把首张开销挪出批打进度窗（PlotMany 内同键调用为空操作）。
+        SchedulePlotWarmUp();
+    }
+
+    /** SchedulePlotWarmUp：窗体空闲后分步预热打印管线（引擎/设备介质/CTB/驱动），每步让出 UI。 */
+    private void SchedulePlotWarmUp()
+    {
+        try
+        {
+            // 拆 DWG 不走打印引擎，无需预热。
+            if (IsDwgOutput)
+            {
+                return;
+            }
+
+            var device = SelectedDevice();
+            if (string.IsNullOrWhiteSpace(device))
+            {
+                return;
+            }
+
+            PlotterService.BeginWarmUpPlotPipeline(
+                device,
+                SelectedStyle(),
+                action => Dispatcher.BeginInvoke(
+                    action,
+                    System.Windows.Threading.DispatcherPriority.ApplicationIdle));
+        }
+        catch
+        {
+            // 预热失败不影响打印；PlotMany 内还会同步补做。
+        }
     }
 
     private static string FindPlotDevice(
