@@ -994,6 +994,9 @@ LA批量打印/
 │
 ├── scripts/
 │   ├── build-dll.ps1                ← 编译脚本
+│   ├── remotes.ps1                  ← GitHub+Gitee 双远程配置（被推送/发版脚本引用）
+│   ├── push-all.ps1                 ← 默认双平台推送代码（可选 --Tags）
+│   ├── publish-release.ps1          ← 默认双平台发 Release（打包/打 tag/上传 ZIP）
 │   ├── package-release.ps1          ← 本地发布目录与 ZIP 打包
 │   └── generate-zwcad-plotter.ps1   ← ZWCAD 绘图仪配置生成
 │

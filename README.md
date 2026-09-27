@@ -253,6 +253,30 @@ dotnet build src\BatchPlotter\BatchPlotter.csproj -c Release
 
 输出位于 `release\v1.15.7.7\`，包含 ZWCAD、AutoCAD 2015–2024、AutoCAD 2025–2027 三组完整安装目录和对应压缩包。
 
+### 双平台同步（默认）
+
+代码与 Release **默认同时发布到 GitHub 与 Gitee**：
+
+| 平台 | 仓库 |
+| --- | --- |
+| GitHub | https://github.com/Edwardhehe/batchPrintZWCAD |
+| Gitee | https://gitee.com/Edwardhehe/batchPrintLA |
+
+推送代码（含双远程配置）：
+
+```powershell
+.\scripts\push-all.ps1
+.\scripts\push-all.ps1 -Tags   # 连同 tag
+```
+
+一键发版（打包 → 打 tag → 双推 → 两侧创建 Release 并上传 ZIP）：
+
+```powershell
+.\scripts\publish-release.ps1 -Version 1.15.7.8
+```
+
+Gitee 需本机已保存凭据（私人令牌），或设置环境变量 `GITEE_TOKEN`。`git push origin` 已配置双 `pushurl`，日常推送也会同时到两边。
+
 ## 说明
 
 本项目支持 ZWCAD Enterprise，以及 AutoCAD 2015 ~ 2024 和 AutoCAD 2025 ~ 2027 两个兼容组。其他版本可能可以运行，但不在当前发布范围内。
