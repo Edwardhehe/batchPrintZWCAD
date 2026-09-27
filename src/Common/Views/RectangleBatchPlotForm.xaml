@@ -153,7 +153,9 @@
                   Sorting="Grid_Sorting"
                   ContextMenuOpening="Grid_ContextMenuOpening"
                   PreviewMouseLeftButtonDown="Grid_PreviewMouseLeftButtonDown"
-                  PreviewMouseRightButtonDown="Grid_PreviewMouseRightButtonDown">
+                  PreviewMouseRightButtonDown="Grid_PreviewMouseRightButtonDown"
+                  SelectionChanged="Grid_SelectionChanged"
+                  CurrentCellChanged="Grid_CurrentCellChanged">
             <DataGrid.RowStyle>
                 <Style TargetType="DataGridRow">
                     <Style.Triggers>

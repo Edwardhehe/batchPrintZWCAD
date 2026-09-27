@@ -1147,6 +1147,12 @@ public sealed partial class BatchPlotForm : Window
             return;
         }
 
+        // 打印期间不改 CAD 实体，避免与出图引擎争用文档；打印结束会整批清除红框。
+        if (_printCts != null)
+        {
+            return;
+        }
+
         if (!job.Selected || !IsCurrentDocumentJob(job))
         {
             // 当前行不在临时标注集合里时，只记录选择，避免传入不存在的实体导致无效刷新。

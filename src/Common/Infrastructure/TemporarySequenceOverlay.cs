@@ -23,7 +23,8 @@ namespace ZwcadBatchPlot;
 public sealed class TemporarySequenceOverlay : IDisposable
 {
     private const string LayerName = "ZBP_TEMP_SEQUENCE_OVERLAY";
-    private const string TextStyleName = "ZBP_TEMP_SEQUENCE_TEXT";
+    /// <summary>覆盖层序号使用的宋体样式；图框录入临时标识在图中已有该样式时也复用它显示中文字段名。</summary>
+    internal const string TextStyleName = "ZBP_TEMP_SEQUENCE_TEXT";
     private readonly Document _document;
     private readonly List<ObjectId> _entityIds = new();
     private readonly Dictionary<PlotJob, OverlayEntityGroup> _entityGroups = new();
@@ -36,6 +37,9 @@ public sealed class TemporarySequenceOverlay : IDisposable
         public double NormalFrameWidth { get; set; }
         public double HighlightFrameWidth { get; set; }
     }
+
+    // 高亮黄框只比普通红框略粗（普通宽度 × 1.3），线宽沿用普通红框分档，避免粗框挡住框内内容。
+    private const double HighlightFrameWidthScale = 1.3d;
 
     public TemporarySequenceOverlay(Document document)
     {
@@ -99,13 +103,16 @@ public sealed class TemporarySequenceOverlay : IDisposable
             var height = maxY - minY;
             var minSide = Math.Min(width, height);
             var padding = Math.Max(minSide * 0.035, 10d);
-            var textHeight = GetTextHeight(width, height);
-            // 高亮行：黄色 (ACI 2)、加粗边框；普通行：红色 (ACI 1)
+            // 默认临时标注显示打印顺序；图号重排预览时可临时显示预计写入的新图号。
+            // 先确定文字再算字高，长图号需要按框宽收小。
+            var labelText = labelProvider?.Invoke(job, i) ?? (i + 1).ToString();
+            var textHeight = GetTextHeight(width, height, labelText);
+            // 高亮行：黄色 (ACI 2)、略粗边框（普通宽度 × 1.3）；普通行：红色 (ACI 1)
             var isHighlight = ReferenceEquals(job, highlightJob);
             var color = GetOverlayColor(isHighlight);
             // 保存普通/高亮两套宽度，后续 DataGrid 换行只改实体属性，不再整批删除重画。
             var normalFrameWidth = GetFrameWidth(minSide);
-            var highlightFrameWidth = Math.Max(normalFrameWidth * 3d, minSide / 20d);
+            var highlightFrameWidth = normalFrameWidth * HighlightFrameWidthScale;
             var frameWidth = isHighlight ? highlightFrameWidth : normalFrameWidth;
             var lineWeight = GetLineWeight(minSide);
 
@@ -130,7 +137,8 @@ public sealed class TemporarySequenceOverlay : IDisposable
                 jobAngle = Math.Atan2(job.UcsXAxisY, job.UcsXAxisX);
             }
 
-            // 红框按任务自己的坐标轴旋转后绘制到 WCS，保证范围与实际打印窗口一致。
+            // 红框按任务自己的坐标轴旋转后绘制到 WCS，方向与实际打印窗口一致；
+            // 四周另外外扩 padding，避免粗框压住图框线，因此红框比打印窗口略大一圈。
             var cosA = Math.Cos(jobAngle);
             var sinA = Math.Sin(jobAngle);
             var hw = (maxX - minX) / 2d + padding;
@@ -160,9 +168,7 @@ public sealed class TemporarySequenceOverlay : IDisposable
             group.FrameId = AddEntity(tr, owner, frame);
 
             var center = new Point3d(cx, cy, 0);
-            // 默认临时标注显示打印顺序；图号重排预览时可临时显示预计写入的新图号。
-            var labelText = labelProvider?.Invoke(job, i) ?? (i + 1).ToString();
-            AddBoldLabel(tr, owner, layerId, textStyleId, color, center, labelText, textHeight, jobAngle, group.LabelIds);
+            AddLabel(tr, owner, layerId, textStyleId, color, center, labelText, textHeight, jobAngle, group.LabelIds);
             _entityGroups[job] = group;
         }
 
@@ -184,7 +190,9 @@ public sealed class TemporarySequenceOverlay : IDisposable
             return;
         }
 
-        // 列表已空仍扫图层：避免上次 Clear 失败把 ID 丢掉后，残留红框永远删不掉。
+        // 按已跟踪 ID 删除；删除失败时保留 ID 供下次重试。
+        // 注意：ID 与分组都为空时上面已直接返回，图层兜底扫描只在“有分组但 ID 丢失”的异常状态下执行，
+        // 并不能清理上次会话遗留在图中的红框。
         var cleared = TryEraseOverlayEntities();
         if (cleared)
         {
@@ -437,7 +445,7 @@ public sealed class TemporarySequenceOverlay : IDisposable
         }
     }
 
-    private void AddBoldLabel(Transaction tr, BlockTableRecord owner, ObjectId layerId, ObjectId textStyleId, Color color, Point3d center, string text, double height, double rotation, List<ObjectId> labelIds)
+    private void AddLabel(Transaction tr, BlockTableRecord owner, ObjectId layerId, ObjectId textStyleId, Color color, Point3d center, string text, double height, double rotation, List<ObjectId> labelIds)
     {
         // 单个宋体数字即可；不再叠多层描边，避免实体过多、清理残留时看起来像一堆重合数字。
         var label = new DBText();
@@ -463,18 +471,6 @@ public sealed class TemporarySequenceOverlay : IDisposable
         }
     }
 
-
-    private void Regen()
-    {
-        try
-        {
-            _document.Editor.UpdateScreen();
-            _document.Editor.Regen();
-        }
-        catch (CadRuntimeException)
-        {
-        }
-    }
 
     private void UpdateScreenOnly()
     {
@@ -526,13 +522,40 @@ public sealed class TemporarySequenceOverlay : IDisposable
         return maxX - minX > 1e-6 && maxY - minY > 1e-6;
     }
 
-    private static double GetTextHeight(double width, double height)
+    private static double GetTextHeight(double width, double height, string? text)
     {
         var minSide = Math.Min(width, height);
         var maxSide = Math.Max(width, height);
         var heightBySmallSide = minSide * 0.55;
         var heightByLongSide = maxSide * 0.16;
-        return Math.Max(Math.Min(heightBySmallSide, heightByLongSide), minSide * 0.35);
+        var textHeight = Math.Max(Math.Min(heightBySmallSide, heightByLongSide), minSide * 0.35);
+
+        // 图号重排预览会显示较长图号：按文字方向（任务局部 X，即框宽）限制总字宽，避免溢出红框。
+        // 1~3 位打印序号时该上限不小于原字高，显示基本不变。
+        var widthUnits = EstimateTextWidthUnits(text);
+        if (widthUnits > 0)
+        {
+            textHeight = Math.Min(textHeight, width * 0.9 / widthUnits);
+        }
+
+        return textHeight;
+    }
+
+    /// <summary>估算文字总宽相当于多少个字高：宋体半角约 0.6 倍字高，全角（中文）约 1 倍。</summary>
+    private static double EstimateTextWidthUnits(string? text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return 0d;
+        }
+
+        var units = 0d;
+        foreach (var ch in text!)
+        {
+            units += ch <= '\u007F' ? 0.6d : 1d;
+        }
+
+        return units;
     }
 
     private static double GetFrameWidth(double minSide)

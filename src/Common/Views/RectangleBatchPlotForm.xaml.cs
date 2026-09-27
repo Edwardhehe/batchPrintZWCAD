@@ -125,7 +125,8 @@ public sealed partial class RectangleBatchPlotForm : Window
     private readonly Document _document;
     private readonly AppSettings _settings;
     private readonly TemporarySequenceOverlay _overlay;
-    private int _highlightedJobIndex = -1;
+    /// <summary>CAD 红框高亮的任务；按引用保存，表头排序或删行后不会错位。</summary>
+    private PlotJob? _highlightedJob;
     private int _overlayScheduleGeneration;
     private readonly BindingList<Row> _rows = new();
     private readonly BindingList<Row> _displayRows = new();
@@ -218,6 +219,7 @@ public sealed partial class RectangleBatchPlotForm : Window
         _scanSelectionIds = null;
         _lastScanScope = null;
         _hasAttributeIdentity = false;
+        _highlightedJob = null;
         UpdateAttributeIdentityColumns();
         _viewSortedByHeader = false;
         _sortMemberPath = "";
@@ -412,10 +414,48 @@ public sealed partial class RectangleBatchPlotForm : Window
             var highlightedRows = HighlightedRows();
             _pendingPrintToggleRows = highlightedRows.Contains(row) ? highlightedRows : null;
         }
+    }
 
-        // 原 CellClick：点击行时在 CAD 中高亮对应矩形框。
-        _highlightedJobIndex = _rows.IndexOf(row);
-        _overlay.SetHighlight(row.Job);
+    /// <summary>
+    /// 原 CellClick：选中行（鼠标或键盘）时在 CAD 中高亮对应矩形框。
+    /// 纸张下拉框的 SelectionChanged 会冒泡到表格，只处理表格自身的行选择。
+    /// </summary>
+    private void Grid_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!ReferenceEquals(e.OriginalSource, _grid) || e.AddedItems.Count == 0)
+        {
+            return;
+        }
+
+        // Shift 连选时新增多行，以焦点行为准；右键新选中时焦点行尚未切换，取新增行。
+        var row = _grid.CurrentItem is Row current && e.AddedItems.Contains(current)
+            ? current
+            : e.AddedItems.OfType<Row>().LastOrDefault();
+        if (row != null)
+        {
+            HighlightOverlayJob(row.Job);
+        }
+    }
+
+    /// <summary>在已多选的行内单击或键盘移动焦点时，选择集合可能不新增行，按焦点行补高亮。</summary>
+    private void Grid_CurrentCellChanged(object? sender, EventArgs e)
+    {
+        if (_grid.CurrentItem is Row row)
+        {
+            HighlightOverlayJob(row.Job);
+        }
+    }
+
+    private void HighlightOverlayJob(PlotJob job)
+    {
+        _highlightedJob = job;
+        // 打印期间不改 CAD 实体，避免与出图引擎争用文档；打印结束后在 finally 中补一次。
+        if (_printCts != null)
+        {
+            return;
+        }
+
+        _overlay.SetHighlight(job);
     }
 
     private void Grid_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
@@ -2128,6 +2168,8 @@ public sealed partial class RectangleBatchPlotForm : Window
             {
                 try { Directory.Delete(temporaryDirectory, true); } catch { }
             }
+            // 打印期间跳过了 CAD 高亮切换，结束后按当前行同步一次（相同任务时为空操作）。
+            _overlay.SetHighlight(_highlightedJob);
             UpdateVisuals();
         }
     }
@@ -2319,12 +2361,14 @@ public sealed partial class RectangleBatchPlotForm : Window
     }
 
     /// <summary>
-    /// 当前会画到 CAD 上的清单快照：顺序代表打印序号。
+    /// 红框序号依据的清单快照：按真实打印顺序 _rows（与“编号”列、打印/合并顺序一致），
+    /// 表头临时排序只改 _displayRows 显示，不应触发红框重建或改号。
+    /// 含其他 DWG 的已勾选行：它们不画，但会影响当前图红框的打印序号。
     /// </summary>
     private List<(PlotJob Job, string DrawingNumber)> CaptureOverlayRebuildKey()
     {
         var keys = new List<(PlotJob Job, string DrawingNumber)>();
-        foreach (var row in _displayRows)
+        foreach (var row in _rows)
         {
             if (!row.Selected)
             {
@@ -2412,11 +2456,21 @@ public sealed partial class RectangleBatchPlotForm : Window
     {
         try
         {
-            var selectedJobs = _displayRows.Where(row => row.Selected).Select(row => row.Job).ToList();
-            var highlightJob = (_highlightedJobIndex >= 0 && _highlightedJobIndex < _rows.Count)
-                ? _rows[_highlightedJobIndex].Job
-                : null;
-            _overlay.Show(selectedJobs, highlightJob);
+            // 序号按真实打印顺序（_rows 中已勾选行的先后）编号，与表格“编号”列、打印/合并顺序一致；
+            // 只画当前文档的框，其他 DWG 的坐标不能画进本图。
+            var printOrder = _rows.Where(row => row.Selected).Select(row => row.Job).ToList();
+            var printNumbers = new Dictionary<PlotJob, int>();
+            for (var i = 0; i < printOrder.Count; i++)
+            {
+                printNumbers[printOrder[i]] = i + 1;
+            }
+
+            var currentJobs = printOrder.Where(job => IsCurrentDocumentSource(job.SourceFile)).ToList();
+            var highlightJob = _highlightedJob != null && currentJobs.Contains(_highlightedJob) ? _highlightedJob : null;
+            _overlay.Show(
+                currentJobs,
+                highlightJob,
+                (job, index) => (printNumbers.TryGetValue(job, out var number) ? number : index + 1).ToString());
             _lastOverlayRebuildKey = CaptureOverlayRebuildKey();
             _overlayPainted = true;
         }

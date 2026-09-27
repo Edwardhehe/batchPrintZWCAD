@@ -33,6 +33,9 @@ public sealed class TransientFrameMarkers : IDisposable
     private static readonly Color MarkerColor = Color.FromColorIndex(ColorMethod.ByAci, 1);
 
     private readonly Editor _editor;
+    private readonly Database? _database;
+    // 字段名是中文：显式指定能显示中文的已有样式，不依赖宿主对非数据库 DBText 的默认样式（可能是无大字体的 txt.shx）。
+    private readonly ObjectId _labelTextStyleId;
     private readonly Dictionary<string, int> _subSystemIds = new(StringComparer.Ordinal);
     private readonly Dictionary<string, List<Entity>> _markers = new(StringComparer.Ordinal);
     private int _nextSubSystemId = FirstSubSystemId;
@@ -40,6 +43,16 @@ public sealed class TransientFrameMarkers : IDisposable
     public TransientFrameMarkers(Editor editor)
     {
         _editor = editor;
+        try
+        {
+            _database = editor.Document?.Database;
+        }
+        catch
+        {
+            _database = null;
+        }
+
+        _labelTextStyleId = ResolveLabelTextStyle(_database);
     }
 
     /// <summary>
@@ -51,7 +64,7 @@ public sealed class TransientFrameMarkers : IDisposable
     {
         Remove(key, refresh: false);
 
-        var entities = BuildBoxEntities(corner1, corner2, label);
+        var entities = BuildBoxEntities(corner1, corner2, label, _database, _labelTextStyleId);
         var subSystemId = GetSubSystemId(key);
         var transientManager = TransientManager.CurrentTransientManager;
         foreach (var entity in entities)
@@ -139,7 +152,7 @@ public sealed class TransientFrameMarkers : IDisposable
         return id;
     }
 
-    private static List<Entity> BuildBoxEntities(Point3d corner1, Point3d corner2, string? label)
+    private static List<Entity> BuildBoxEntities(Point3d corner1, Point3d corner2, string? label, Database? database, ObjectId textStyleId)
     {
         var minX = Math.Min(corner1.X, corner2.X);
         var minY = Math.Min(corner1.Y, corner2.Y);
@@ -164,8 +177,9 @@ public sealed class TransientFrameMarkers : IDisposable
         {
             var width = maxX - minX;
             var height = maxY - minY;
-            // 文字高度随框选大小自适应，取框高的 35% 且不超过框宽/字数，最大 120 单位。
-            var textHeight = Math.Min(Math.Min(height * 0.35, width / Math.Max(label!.Length, 1)), 120d);
+            // 文字高度随框选大小自适应：取框高的 35% 且不超过框宽/字数。
+            // 不再设绝对上限，避免模型空间大比例图框里字段名小到看不见。
+            var textHeight = Math.Min(height * 0.35, width / Math.Max(label!.Length, 1));
             if (textHeight > 1e-6)
             {
                 var center = new Point3d((minX + maxX) / 2, (minY + maxY) / 2, z);
@@ -177,14 +191,156 @@ public sealed class TransientFrameMarkers : IDisposable
                     VerticalMode = TextVerticalMode.TextVerticalMid,
                     Color = MarkerColor
                 };
+                if (!textStyleId.IsNull)
+                {
+                    text.TextStyleId = textStyleId;
+                }
+
                 // AlignmentPoint 必须在 HorizontalMode/VerticalMode 之后设置，
                 // 否则部分 CAD 引擎会回退到 Position（左下角）对齐。
                 text.AlignmentPoint = center;
                 text.Position = center;
+                if (database != null)
+                {
+                    try
+                    {
+                        // 临时文字不在数据库中，按指定数据库的样式计算居中后的 Position。
+                        text.AdjustAlignment(database);
+                    }
+                    catch
+                    {
+                        // 个别宿主不支持对非数据库文字调整对齐时，保留 Position=AlignmentPoint 的旧行为。
+                    }
+                }
+
                 entities.Add(text);
             }
         }
 
         return entities;
+    }
+
+    /// <summary>
+    /// 只读挑选一个能显示中文的已有文字样式，不在用户图纸中新建或修改样式（不产生 DBMOD/UNDO/残留样式）。
+    /// 顺序：当前样式（TrueType 或带大字体）→ 批打覆盖层已建的宋体样式 → 常见中文 TrueType → 带大字体的 SHX → 任意 TrueType → 当前样式。
+    /// </summary>
+    private static ObjectId ResolveLabelTextStyle(Database? database)
+    {
+        if (database == null)
+        {
+            return ObjectId.Null;
+        }
+
+        try
+        {
+            using var tr = database.TransactionManager.StartTransaction();
+            var table = (TextStyleTable)tr.GetObject(database.TextStyleTableId, OpenMode.ForRead);
+            var currentId = database.Textstyle;
+            var result = ObjectId.Null;
+
+            if (!currentId.IsNull
+                && tr.GetObject(currentId, OpenMode.ForRead) is TextStyleTableRecord current
+                && (IsTrueTypeStyle(current) || HasBigFont(current)))
+            {
+                result = currentId;
+            }
+            else if (table.Has(TemporarySequenceOverlay.TextStyleName))
+            {
+                result = table[TemporarySequenceOverlay.TextStyleName];
+            }
+            else
+            {
+                var bigFontId = ObjectId.Null;
+                var trueTypeId = ObjectId.Null;
+                foreach (ObjectId id in table)
+                {
+                    if (tr.GetObject(id, OpenMode.ForRead) is not TextStyleTableRecord record
+                        || record.IsErased
+                        || record.IsShapeFile
+                        || string.IsNullOrEmpty(record.Name))
+                    {
+                        continue;
+                    }
+
+                    if (IsChineseTrueTypeStyle(record))
+                    {
+                        result = id;
+                        break;
+                    }
+
+                    if (bigFontId.IsNull && HasBigFont(record))
+                    {
+                        bigFontId = id;
+                    }
+
+                    if (trueTypeId.IsNull && IsTrueTypeStyle(record))
+                    {
+                        trueTypeId = id;
+                    }
+                }
+
+                if (result.IsNull)
+                {
+                    result = !bigFontId.IsNull ? bigFontId : !trueTypeId.IsNull ? trueTypeId : currentId;
+                }
+            }
+
+            tr.Commit();
+            return result;
+        }
+        catch
+        {
+            // 取样式失败时退回旧行为（不指定样式）。
+            return ObjectId.Null;
+        }
+    }
+
+    private static readonly string[] ChineseFontKeywords =
+    {
+        "simsun", "nsimsun", "simhei", "simfang", "simkai", "msyh", "fangsong", "kaiti",
+        "stsong", "stfangso", "stkaiti", "stheiti", "宋", "黑", "仿宋", "楷", "雅黑"
+    };
+
+    private static bool IsTrueTypeStyle(TextStyleTableRecord record)
+    {
+        var fileName = record.FileName ?? "";
+        return fileName.EndsWith(".ttf", StringComparison.OrdinalIgnoreCase)
+            || fileName.EndsWith(".ttc", StringComparison.OrdinalIgnoreCase)
+            || fileName.EndsWith(".otf", StringComparison.OrdinalIgnoreCase)
+            || !string.IsNullOrWhiteSpace(GetTypeFace(record));
+    }
+
+    private static bool IsChineseTrueTypeStyle(TextStyleTableRecord record)
+    {
+        if (!IsTrueTypeStyle(record))
+        {
+            return false;
+        }
+
+        var names = (record.FileName ?? "") + "|" + GetTypeFace(record);
+        foreach (var keyword in ChineseFontKeywords)
+        {
+            if (names.IndexOf(keyword, StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool HasBigFont(TextStyleTableRecord record)
+        => !string.IsNullOrWhiteSpace(record.BigFontFileName);
+
+    private static string GetTypeFace(TextStyleTableRecord record)
+    {
+        try
+        {
+            return record.Font.TypeFace ?? "";
+        }
+        catch
+        {
+            return "";
+        }
     }
 }
