@@ -66,10 +66,6 @@
                         ToolTip="选择文件夹，自动收集其中（含子文件夹）全部 DWG，后续与多文件批打相同。" />
                 <Rectangle Width="1" Height="14" Fill="#CDD2D8"
                            Margin="4,0,12,0" VerticalAlignment="Center" />
-                <Button x:Name="_refreshBtn" Content="重新识别" MinWidth="88"
-                        Style="{StaticResource PluginButtonStyle}" Margin="0,0,3,0"
-                        Click="ReloadFrames_Click"
-                        ToolTip="按上次扫描方式重新扫描，并刷新矩形框列表。" />
                 <Button x:Name="_clearBtn" Content="清空清单" MinWidth="92"
                         Style="{StaticResource PluginButtonStyle}" Margin="0,0,3,0"
                         Click="ClearRows_Click"

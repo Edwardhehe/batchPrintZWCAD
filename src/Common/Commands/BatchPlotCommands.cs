@@ -304,7 +304,20 @@ public sealed partial class BatchPlotCommands : IExtensionApplication
 
         settings.CommandAliases = CommandAliasManager.NormalizeAliases(
             form.Aliases.ToDictionary(p => p.Key, p => p.Value, StringComparer.OrdinalIgnoreCase));
-        AppSettingsStore.Save(settings);
+        try
+        {
+            AppSettingsStore.Save(settings);
+        }
+        catch (System.Exception ex)
+        {
+            // 快捷键未能保存时不应用到当前会话，避免重启后与界面显示不一致。
+            MessageBox.Show(
+                AppSettingsStore.FormatSaveError(ex),
+                "快捷键设置",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+            return;
+        }
 
         var applied = CommandAliasManager.Apply(settings.CommandAliases, out var message);
         MessageBox.Show(

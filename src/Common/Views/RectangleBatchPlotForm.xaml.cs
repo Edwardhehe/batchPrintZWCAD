@@ -196,8 +196,6 @@ public sealed partial class RectangleBatchPlotForm : Window
     private void AddDwgFiles_Click(object sender, RoutedEventArgs e) => AddDwgFiles();
     private void AddDwgFolder_Click(object sender, RoutedEventArgs e) => AddDwgFolder();
 
-    private void ReloadFrames_Click(object sender, RoutedEventArgs e) => ReloadFrames();
-
     private void ClearRows_Click(object sender, RoutedEventArgs e) => ClearRows();
 
     private void ClearRows()
@@ -612,18 +610,7 @@ public sealed partial class RectangleBatchPlotForm : Window
 
     private void LoadRows(IReadOnlyList<RectangleFrameScanner.Result> results, bool append = false)
     {
-        var rows = new List<Row>(results.Count);
-        foreach (var result in results)
-        {
-            var option = result.PaperOptions[0];
-            rows.Add(new Row
-            {
-                Job = result.Job,
-                Options = result.PaperOptions,
-                PaperChoice = PaperSizeDetector.FormatOption(option)
-            });
-        }
-
+        var rows = CreateRows(results);
         if (append)
         {
             var existingKeys = new HashSet<string>(_rows.Select(row => PlotJobIdentityKey(row.Job)), StringComparer.OrdinalIgnoreCase);
@@ -639,6 +626,45 @@ public sealed partial class RectangleBatchPlotForm : Window
             rows = merged;
         }
 
+        ApplyLoadedRows(rows);
+    }
+
+    /// <summary>
+    /// 多文件批打：只替换本次成功重扫的「文件 + 空间」对应的行，其余已有行（其它文件、
+    /// 未勾选空间、扫描失败的文件、当前图扫描结果）保持原样，从而多次添加可累加。
+    /// </summary>
+    private void MergeRescannedSpaceRows(
+        IReadOnlyList<RectangleFrameScanner.Result> results,
+        IEnumerable<string> rescannedSpaceKeys)
+    {
+        var merged = MultiFileJobMerge.ReplaceRescannedSpaces(
+            _rows,
+            CreateRows(results),
+            rescannedSpaceKeys,
+            row => row.Job);
+        ApplyLoadedRows(merged);
+    }
+
+    private static List<Row> CreateRows(IReadOnlyList<RectangleFrameScanner.Result> results)
+    {
+        var rows = new List<Row>(results.Count);
+        foreach (var result in results)
+        {
+            var option = result.PaperOptions[0];
+            rows.Add(new Row
+            {
+                Job = result.Job,
+                Options = result.PaperOptions,
+                PaperChoice = PaperSizeDetector.FormatOption(option)
+            });
+        }
+
+        return rows;
+    }
+
+    /// <summary>把最终行集合绑定到清单：重算属性命名模式、列可见性，并按位置排序和命名。</summary>
+    private void ApplyLoadedRows(List<Row> rows)
+    {
         _hasAttributeIdentity = rows.Any(row =>
             !string.IsNullOrWhiteSpace(row.Job.CadDrawingNumber)
             || !string.IsNullOrWhiteSpace(row.Job.CadTitle));
@@ -659,15 +685,7 @@ public sealed partial class RectangleBatchPlotForm : Window
         SortRows();
     }
 
-    private static string PlotJobIdentityKey(PlotJob job)
-    {
-        if (!string.IsNullOrWhiteSpace(job.BlockHandle))
-        {
-            return $"H|{job.SourceFile}|{job.SpaceName}|{job.BlockHandle}";
-        }
-
-        return $"G|{job.SourceFile}|{job.SpaceName}|{job.MinX:0.###}|{job.MinY:0.###}|{job.MaxX:0.###}|{job.MaxY:0.###}";
-    }
+    private static string PlotJobIdentityKey(PlotJob job) => MultiFileJobMerge.IdentityKey(job);
 
     /// <summary>有识别结果时显示图号/图名列，否则保持原有列布局。</summary>
     private void UpdateAttributeIdentityColumns()
@@ -721,8 +739,10 @@ public sealed partial class RectangleBatchPlotForm : Window
             _settings.FileNameSequenceDigits,
             _settings.FileNameSequenceStartNumber,
             selectedCount);
-        var reservedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var directory = _outputDirectory.Text.Trim();
+        var outputDirectory = string.IsNullOrWhiteSpace(directory) ? "." : directory;
+        var namedRows = new List<Row>();
+        var requests = new List<BatchFileNameRequest>();
         var selectedIndex = 0;
         var printIndex = 0;
         foreach (var row in _rows)
@@ -754,16 +774,21 @@ public sealed partial class RectangleBatchPlotForm : Window
                 baseName = $"{jobStem}{printIndex.ToString($"D{legacyDigits}")}";
             }
 
-            var fullPath = FileNameSanitizer.MakeUnique(
-                string.IsNullOrWhiteSpace(directory) ? "." : directory,
-                baseName,
-                reservedPaths,
-                _settings.AddSequenceWhenPdfExists,
-                SelectedOutputExtension,
-                createDirectory: false);
-            reservedPaths.Add(fullPath);
-            row.FileName = Path.GetFileName(fullPath);
-            row.RefreshFromJob();
+            namedRows.Add(row);
+            requests.Add(new BatchFileNameRequest(outputDirectory, baseName));
+        }
+
+        // 整批一次性命名：本批重名的输出全部从 _1 起编号，唯一名称不加后缀。
+        var fullPaths = FileNameSanitizer.MakeUniqueBatch(
+            requests,
+            reservedPaths: null,
+            _settings.AddSequenceWhenPdfExists,
+            SelectedOutputExtension,
+            createDirectory: false);
+        for (var i = 0; i < namedRows.Count; i++)
+        {
+            namedRows[i].FileName = Path.GetFileName(fullPaths[i]);
+            namedRows[i].RefreshFromJob();
         }
 
         RefreshOutputPaths();
@@ -1020,16 +1045,13 @@ public sealed partial class RectangleBatchPlotForm : Window
             return;
         }
 
-        // 确认后先清空清单，再只扫勾选空间。
-        ReplaceBindingListContents(_rows, Array.Empty<Row>());
-        ReplaceBindingListContents(_displayRows, Array.Empty<Row>());
+        // 不再清空清单：多次多文件批打累加，只替换本次成功重扫的「文件 + 空间」。
         ClearSequenceOverlay();
         _lastScanScope = null;
         _scanSelectionIds = null;
-        _hasAttributeIdentity = false;
-        UpdateAttributeIdentityColumns();
 
         var allResults = new List<RectangleFrameScanner.Result>();
+        var rescannedSpaceKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var errors = new List<string>();
         string currentPath;
         try
@@ -1087,6 +1109,11 @@ public sealed partial class RectangleBatchPlotForm : Window
                 }
 
                 allResults.AddRange(results);
+                // 仅扫描成功的文件参与替换；失败文件保留清单中的旧结果。
+                foreach (var layoutName in allowed)
+                {
+                    rescannedSpaceKeys.Add(MultiFileJobMerge.SpaceKey(file, layoutName));
+                }
             }
             catch (Exception ex)
             {
@@ -1096,7 +1123,8 @@ public sealed partial class RectangleBatchPlotForm : Window
 
         if (allResults.Count == 0)
         {
-            LoadRows(allResults);
+            // 没有新结果：只移除本次成功重扫空间的旧行，其余清单保留。
+            MergeRescannedSpaceRows(allResults, rescannedSpaceKeys);
             _suppressSequenceOverlayFromMultiFile = true;
             ClearSequenceOverlay();
             MessageBox.Show(
@@ -1109,7 +1137,7 @@ public sealed partial class RectangleBatchPlotForm : Window
             return;
         }
 
-        LoadRows(allResults);
+        MergeRescannedSpaceRows(allResults, rescannedSpaceKeys);
         // 多文件批打识别结果一律不画临时红框和数字（即使勾选的是当前图）。
         _suppressSequenceOverlayFromMultiFile = true;
         ClearSequenceOverlay();
@@ -2098,7 +2126,8 @@ public sealed partial class RectangleBatchPlotForm : Window
                     mergeInputs,
                     mergedOutput,
                     _settings.MergePdfByPaperSize,
-                    _settings.AddSequenceWhenPdfExists);
+                    // 合并 PDF 始终避开已有文件（已存在则加 _1、_2…），不再覆盖上一次的合并结果。
+                    avoidExistingFiles: true);
                 foreach (var mergePlan in mergePlans)
                 {
                     PdfDocumentService.Merge(
@@ -2314,8 +2343,9 @@ public sealed partial class RectangleBatchPlotForm : Window
             _style.Items.Add(style);
         }
         PlotStyleManager.RestoreSavedStyle(_style, _settings.LastStyleSheet);
-        // 上次样式在当前 CAD 不可用时已回退；立刻写回设置，避免下次仍记住失效 CTB。
-        SaveCurrentPlotOptions();
+        // 上次样式在当前 CAD 不可用时已回退；仅当记忆值确有变化时写回设置，避免下次仍记住失效 CTB，
+        // 也避免每次打开窗口都写设置文件（被占用时曾导致窗口构造崩溃）。
+        SaveCurrentPlotOptions(onlyIfChanged: true);
         UpdateOutputFormatUi();
         _suppressComboEvents = false;
         _styleSelectionReady = true;
@@ -2628,18 +2658,31 @@ public sealed partial class RectangleBatchPlotForm : Window
         : AcadPlotterInstaller.PreferredPdfPlotter;
     private string SelectedStyle() => _style.SelectedItem?.ToString() ?? "";
 
-    private void SaveCurrentPlotOptions()
+    /// <summary>记住上次的输出选项（非关键保存：失败只记日志，不打断操作）。</summary>
+    private void SaveCurrentPlotOptions(bool onlyIfChanged = false)
     {
-        _settings.LastPlotDevice = AcadPlotterInstaller.PreferredPdfPlotter;
+        var device = AcadPlotterInstaller.PreferredPdfPlotter;
         var style = PlotStyleManager.NormalizeStyleName(SelectedStyle());
-        if (!string.IsNullOrEmpty(style))
+        var styleSheet = string.IsNullOrEmpty(style) ? _settings.LastStyleSheet : style;
+        var mergePdf = _mergePdf.IsChecked == true;
+        var leaveMargin = _leaveMargin.IsChecked == true;
+        var marginMm = ReadMarginValue(_marginInput);
+        var changed = !string.Equals(_settings.LastPlotDevice, device, StringComparison.Ordinal)
+            || !string.Equals(_settings.LastStyleSheet, styleSheet, StringComparison.Ordinal)
+            || _settings.MergePdf != mergePdf
+            || _settings.LeavePaperMargin != leaveMargin
+            || !_settings.PaperMarginMm.Equals(marginMm);
+        _settings.LastPlotDevice = device;
+        _settings.LastStyleSheet = styleSheet;
+        _settings.MergePdf = mergePdf;
+        _settings.LeavePaperMargin = leaveMargin;
+        _settings.PaperMarginMm = marginMm;
+        if (onlyIfChanged && !changed)
         {
-            _settings.LastStyleSheet = style;
+            return;
         }
-        _settings.MergePdf = _mergePdf.IsChecked == true;
-        _settings.LeavePaperMargin = _leaveMargin.IsChecked == true;
-        _settings.PaperMarginMm = ReadMarginValue(_marginInput);
-        AppSettingsStore.Save(_settings);
+
+        AppSettingsStore.TrySave(_settings, out _);
     }
 
     /// <summary>初始化留白下拉列表，正值=扩大纸张，负值=缩比例，整数1~10配对显示。</summary>
@@ -2734,7 +2777,7 @@ public sealed partial class RectangleBatchPlotForm : Window
             sortMode: TitleBlockSortMode.Spatial);
         if (ShowChildModalKeepingListVisible(dialog) != true) return;
         _settings.SortOrderHorizontalFirst = dialog.HorizontalFirst;
-        AppSettingsStore.Save(_settings);
+        AppSettingsStore.TrySave(_settings, out _);
         SortRows();
     }
 

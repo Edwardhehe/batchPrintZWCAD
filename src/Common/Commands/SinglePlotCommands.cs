@@ -300,7 +300,8 @@ public sealed partial class BatchPlotCommands
         {
             settings.LastStyleSheet = style;
         }
-        AppSettingsStore.Save(settings);
+        // 仅是“记住上次选择”，保存失败不影响本次打印。
+        AppSettingsStore.TrySave(settings, out _);
     }
 
     private static string? FindPlotOption(System.Collections.Generic.IEnumerable<string> values, string expected)

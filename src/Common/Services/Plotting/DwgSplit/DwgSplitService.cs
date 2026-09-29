@@ -223,7 +223,6 @@ public static class DwgSplitService
         string? sourceSubfolder = null)
     {
         var outputPaths = new Dictionary<PlotJob, string>();
-        var reservedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var sequenceDigits = FileNameSanitizer.ResolveSequenceDigits(
             settings.AutoFileNameSequenceDigits,
             settings.FileNameSequenceDigits,
@@ -232,32 +231,41 @@ public static class DwgSplitService
         var sequenceNumbers = jobs
             .Select((job, index) => new { Job = job, Number = settings.FileNameSequenceStartNumber + index })
             .ToDictionary(x => x.Job, x => x.Number);
+        var requests = new List<BatchFileNameRequest>(jobs.Count);
         foreach (var job in jobs)
         {
             var sourceFile = ResolveSourceIdentityPath(job, currentDocument);
-            outputPaths[job] = BuildOutputPath(
+            requests.Add(BuildOutputRequest(
                 job,
                 sourceFile,
                 settings,
                 sequenceNumbers[job],
                 sequenceDigits,
-                reservedPaths,
-                createDirectories,
                 customOutputDirectory,
-                sourceSubfolder);
+                sourceSubfolder));
+        }
+
+        // 整批一次性命名：本批重名的输出全部从 _1 起编号，唯一名称不加后缀。
+        var paths = FileNameSanitizer.MakeUniqueBatch(
+            requests,
+            reservedPaths: null,
+            settings.AddSequenceWhenPdfExists,
+            ".dwg",
+            createDirectories);
+        for (var index = 0; index < jobs.Count; index++)
+        {
+            outputPaths[jobs[index]] = paths[index];
         }
 
         return outputPaths;
     }
 
-    private static string BuildOutputPath(
+    private static BatchFileNameRequest BuildOutputRequest(
         PlotJob job,
         string sourceFile,
         AppSettings settings,
         int sequenceNumber,
         int sequenceDigits,
-        ISet<string> reservedPaths,
-        bool createDirectory,
         string? customOutputDirectory,
         string? sourceSubfolder)
     {
@@ -291,13 +299,7 @@ public static class DwgSplitService
             sequenceDigits,
             settings.LongPaperNameFormat,
             settings.LongPaperSnapToleranceMm);
-        return FileNameSanitizer.MakeUnique(
-            directory,
-            baseName,
-            reservedPaths,
-            settings.AddSequenceWhenPdfExists,
-            ".dwg",
-            createDirectory);
+        return new BatchFileNameRequest(directory, baseName);
     }
 
     private static string ResolveSourceIdentityPath(PlotJob job, Document currentDocument)

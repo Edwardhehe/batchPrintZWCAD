@@ -205,6 +205,41 @@ public static class AppSettingsStore
         WriteAtomically(Path, json);
     }
 
+    /// <summary>
+    /// 非关键的“记住上次选择”保存：失败时只记日志、不抛异常，避免设置文件被杀毒软件或
+    /// 另一个 CAD 实例短暂占用时打断窗口初始化或打印流程。
+    /// </summary>
+    public static bool TrySave(AppSettings settings, out Exception? error)
+    {
+        try
+        {
+            Save(settings);
+            error = null;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            error = ex;
+            try
+            {
+                System.Diagnostics.Debug.WriteLine("保存设置失败: " + ex);
+                BatchPlotLogger.AddPending("WARN", $"保存设置失败（已忽略）: {Path}: {ex.Message}");
+            }
+            catch
+            {
+            }
+
+            return false;
+        }
+    }
+
+    /// <summary>显式保存失败时给用户看的提示文本。</summary>
+    public static string FormatSaveError(Exception error)
+        => $"设置保存失败：{error?.Message}\n设置文件可能被杀毒软件或另一个 CAD 占用，请稍后重试。";
+
+    /// <summary>非关键保存的简写，失败时忽略（已记日志）。</summary>
+    public static bool TrySave(AppSettings settings) => TrySave(settings, out _);
+
     public static AppSettings Default()
     {
         return Normalize(new AppSettings());
@@ -512,27 +547,8 @@ public static class AppSettingsStore
 
     private static void WriteAtomically(string path, string contents)
     {
-        var tempPath = path + ".tmp";
-        var backupPath = path + ".bak";
-        File.WriteAllText(tempPath, contents);
-        try
-        {
-            if (File.Exists(path))
-            {
-                File.Replace(tempPath, path, backupPath, true);
-            }
-            else
-            {
-                File.Move(tempPath, path);
-            }
-        }
-        finally
-        {
-            if (File.Exists(tempPath))
-            {
-                File.Delete(tempPath);
-            }
-        }
+        // 唯一临时文件 + 占用重试 + 覆盖复制兜底，见 AtomicFileWriter。
+        AtomicFileWriter.Write(path, contents);
     }
 
     private static AppSettings LoadFrom(string path)

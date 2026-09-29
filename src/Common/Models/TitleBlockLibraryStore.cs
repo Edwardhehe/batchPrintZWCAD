@@ -173,27 +173,7 @@ public static class TitleBlockLibraryStore
 
     private static void WriteAtomically(string path, string contents)
     {
-        var fullPath = Path.GetFullPath(path);
-        var tempPath = fullPath + ".tmp";
-        var backupPath = fullPath + ".bak";
-        File.WriteAllText(tempPath, contents);
-        try
-        {
-            if (File.Exists(fullPath))
-            {
-                File.Replace(tempPath, fullPath, backupPath, true);
-            }
-            else
-            {
-                File.Move(tempPath, fullPath);
-            }
-        }
-        finally
-        {
-            if (File.Exists(tempPath))
-            {
-                File.Delete(tempPath);
-            }
-        }
+        // 唯一临时文件 + 占用重试 + 覆盖复制兜底，见 AtomicFileWriter。
+        AtomicFileWriter.Write(path, contents);
     }
 }

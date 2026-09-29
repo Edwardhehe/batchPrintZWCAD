@@ -254,7 +254,11 @@ public static class DirectoryTableGenerator
         }
 
         column.Width = width;
-        AppSettingsStore.Save(updated);
+        if (!TrySaveSettings(updated, out message))
+        {
+            return false;
+        }
+
         message = $"“{column.Header}”列宽已设置为 {width:0.##}。";
         return true;
     }
@@ -282,7 +286,11 @@ public static class DirectoryTableGenerator
         }
 
         updated.DirectoryRowHeight = height;
-        AppSettingsStore.Save(updated);
+        if (!TrySaveSettings(updated, out message))
+        {
+            return false;
+        }
+
         message = $"目录行高已设置为 {height:0.##}。";
         return true;
     }
@@ -380,6 +388,22 @@ public static class DirectoryTableGenerator
         catch (Exception ex)
         {
             message = "点选目录文字样式失败，请确认当前活动图纸仍然打开：" + ex.Message;
+            return false;
+        }
+    }
+
+    /// <summary>显式保存目录设置；失败时返回提示文本，由调用方弹窗告知用户。</summary>
+    private static bool TrySaveSettings(AppSettings settings, out string message)
+    {
+        try
+        {
+            AppSettingsStore.Save(settings);
+            message = "";
+            return true;
+        }
+        catch (System.Exception ex)
+        {
+            message = AppSettingsStore.FormatSaveError(ex);
             return false;
         }
     }

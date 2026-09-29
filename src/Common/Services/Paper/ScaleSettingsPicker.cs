@@ -76,7 +76,18 @@ public static class ScaleSettingsPicker
         }
 
         updated.CustomScales.Add(scale);
-        AppSettingsStore.Save(updated);
+        try
+        {
+            AppSettingsStore.Save(updated);
+        }
+        catch (System.Exception ex)
+        {
+            // 未写入磁盘时同步撤回内存中的新增比例，调用方会弹出失败提示。
+            updated.CustomScales.RemoveAt(updated.CustomScales.Count - 1);
+            message = AppSettingsStore.FormatSaveError(ex);
+            return false;
+        }
+
         message = $"已添加比例 {scaleText}（框选短边 {shortSide:0.##}，按 {dialog.PaperName} 短边 {dialog.PaperShortSideMm:0.##}mm 计算）。";
         return true;
     }

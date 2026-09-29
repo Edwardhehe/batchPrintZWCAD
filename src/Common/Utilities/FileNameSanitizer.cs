@@ -47,15 +47,134 @@ public static class FileNameSanitizer
         var index = 1;
         while ((avoidExistingFile && File.Exists(path)) || reservedPaths?.Contains(path) == true)
         {
-            var suffix = "_" + index;
-            var maxNameLength = GetMaxFileNameLength(directory, extension);
-            var uniqueName = TrimToLength(clean, Math.Max(1, maxNameLength - suffix.Length)) + suffix;
-            path = Path.Combine(directory, uniqueName + extension);
+            path = BuildSuffixedPath(directory, clean, index, extension);
             index++;
         }
 
         reservedPaths?.Add(path);
         return path;
+    }
+
+    /// <summary>
+    /// 批量命名（同一批次一次性计算）：同一批内目录 + 文件名 + 扩展名（不区分大小写）出现多次的，
+    /// 全部按清单顺序从 _1 起编号：图号_1、图号_2……图号_10；
+    /// 本批只出现一次的名称与 <see cref="MakeUnique(string, string, ISet{string}?, bool, string, bool)"/> 相同：
+    /// 默认不加后缀，avoidExistingFile 为 true 且磁盘已有同名文件时再顺延 _1、_2…。
+    /// 重复组编号会跳过本批已占用的路径（含其他唯一名称，如单独的 A_1 与两个 A 同批时，A 组取 _2、_3），
+    /// avoidExistingFile 为 true 时还会跳过磁盘上已存在的文件。
+    /// 返回值与 items 一一对应；所有结果都会写入 reservedPaths（如提供）。
+    /// </summary>
+    public static IReadOnlyList<string> MakeUniqueBatch(
+        IReadOnlyList<BatchFileNameRequest> items,
+        ISet<string>? reservedPaths,
+        bool avoidExistingFile,
+        string extension = ".pdf",
+        bool createDirectory = true)
+    {
+        if (items == null)
+        {
+            throw new ArgumentNullException(nameof(items));
+        }
+
+        var reserved = reservedPaths ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var prepared = new PreparedBatchName[items.Count];
+        var candidateCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var createdDirectories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // 第一遍：按与 MakeUnique 相同的清洗/截断规则得到候选路径，并统计本批重复次数。
+        for (var i = 0; i < items.Count; i++)
+        {
+            var directory = items[i].Directory ?? "";
+            if (createDirectory && createdDirectories.Add(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            var clean = TrimFileNameForPath(Clean(items[i].FileNameWithoutExtension), directory, extension);
+            var candidate = Path.Combine(directory, clean + extension);
+            prepared[i] = new PreparedBatchName(directory, clean, candidate);
+            candidateCounts.TryGetValue(candidate, out var count);
+            candidateCounts[candidate] = count + 1;
+        }
+
+        // 本批唯一名称的原始路径先占位，避免被重复组的 _N 或已存在文件的顺延后缀抢走。
+        var pendingUniquePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in prepared)
+        {
+            if (candidateCounts[item.CandidatePath] == 1 && !reserved.Contains(item.CandidatePath))
+            {
+                pendingUniquePaths.Add(item.CandidatePath);
+            }
+        }
+
+        // 第二遍：按清单顺序分配最终路径。
+        var nextDuplicateIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var results = new List<string>(prepared.Length);
+        foreach (var item in prepared)
+        {
+            string path;
+            if (candidateCounts[item.CandidatePath] == 1)
+            {
+                pendingUniquePaths.Remove(item.CandidatePath);
+                path = item.CandidatePath;
+                var index = 1;
+                while (IsTaken(path))
+                {
+                    path = BuildSuffixedPath(item.Directory, item.CleanName, index, extension);
+                    index++;
+                }
+            }
+            else
+            {
+                if (!nextDuplicateIndex.TryGetValue(item.CandidatePath, out var index))
+                {
+                    index = 1;
+                }
+
+                do
+                {
+                    path = BuildSuffixedPath(item.Directory, item.CleanName, index, extension);
+                    index++;
+                }
+                while (IsTaken(path));
+
+                nextDuplicateIndex[item.CandidatePath] = index;
+            }
+
+            reserved.Add(path);
+            results.Add(path);
+        }
+
+        return results;
+
+        bool IsTaken(string path) =>
+            (avoidExistingFile && File.Exists(path))
+            || reserved.Contains(path)
+            || pendingUniquePaths.Contains(path);
+    }
+
+    private static string BuildSuffixedPath(string directory, string cleanName, int index, string extension)
+    {
+        var suffix = "_" + index.ToString(CultureInfo.InvariantCulture);
+        var maxNameLength = GetMaxFileNameLength(directory, extension);
+        var uniqueName = TrimToLength(cleanName, Math.Max(1, maxNameLength - suffix.Length)) + suffix;
+        return Path.Combine(directory, uniqueName + extension);
+    }
+
+    private readonly struct PreparedBatchName
+    {
+        public PreparedBatchName(string directory, string cleanName, string candidatePath)
+        {
+            Directory = directory;
+            CleanName = cleanName;
+            CandidatePath = candidatePath;
+        }
+
+        public string Directory { get; }
+
+        public string CleanName { get; }
+
+        public string CandidatePath { get; }
     }
 
     private static string TrimFileNameForPath(string value, string directory, string extension = ".pdf")
@@ -293,4 +412,18 @@ public static class FileNameSanitizer
 
         return parts;
     }
+}
+
+/// <summary>批量命名请求：输出目录 + 未清洗的文件名（不含扩展名）。</summary>
+public readonly struct BatchFileNameRequest
+{
+    public BatchFileNameRequest(string directory, string fileNameWithoutExtension)
+    {
+        Directory = directory ?? "";
+        FileNameWithoutExtension = fileNameWithoutExtension ?? "";
+    }
+
+    public string Directory { get; }
+
+    public string FileNameWithoutExtension { get; }
 }

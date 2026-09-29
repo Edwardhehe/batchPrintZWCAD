@@ -904,7 +904,11 @@ public sealed partial class SettingsForm : Window
         }
 
         // CAD 取点必须在设置窗体关闭后执行；先保存全部未提交编辑，再由调用方回到命令上下文框选。
-        AppSettingsStore.Save(settings);
+        if (!TrySaveSettingsOrReport(settings))
+        {
+            return;
+        }
+
         RequestedDirectoryColumnKey = key;
         DialogResult = true;
         Close();
@@ -924,7 +928,11 @@ public sealed partial class SettingsForm : Window
         }
 
         // 与列宽交互一致，先保存当前页面编辑，再关闭模态窗体回到 CAD 命令上下文量取高度。
-        AppSettingsStore.Save(settings);
+        if (!TrySaveSettingsOrReport(settings))
+        {
+            return;
+        }
+
         RequestPickDirectoryRowHeight = true;
         DialogResult = true;
         Close();
@@ -944,7 +952,11 @@ public sealed partial class SettingsForm : Window
         }
 
         // 和列宽/行高一致：先保存页面编辑并退出模态窗体，再回到 CAD 命令上下文点选实体。
-        AppSettingsStore.Save(settings);
+        if (!TrySaveSettingsOrReport(settings))
+        {
+            return;
+        }
+
         RequestPickDirectoryTextAppearance = true;
         DialogResult = true;
         Close();
@@ -1130,7 +1142,11 @@ public sealed partial class SettingsForm : Window
         }
 
         // 与目录行高/列宽交互一致：先保存当前页面编辑并退出模态窗体，再回到 CAD 命令上下文框选。
-        AppSettingsStore.Save(settings);
+        if (!TrySaveSettingsOrReport(settings))
+        {
+            return;
+        }
+
         RequestPickScaleFromCad = true;
         DialogResult = true;
         Close();
@@ -1191,9 +1207,34 @@ public sealed partial class SettingsForm : Window
             return;
         }
 
-        AppSettingsStore.Save(current);
+        // 保存失败时提示并保持窗口打开，用户可稍后再点确定，已编辑内容不会丢失。
+        if (!TrySaveSettingsOrReport(current))
+        {
+            return;
+        }
+
         DialogResult = true;
         Close();
+    }
+
+    /// <summary>显式保存设置；失败时弹出提示而不是让异常打断 CAD。</summary>
+    private bool TrySaveSettingsOrReport(AppSettings settings)
+    {
+        try
+        {
+            AppSettingsStore.Save(settings);
+            return true;
+        }
+        catch (System.Exception ex)
+        {
+            System.Windows.MessageBox.Show(
+                this,
+                AppSettingsStore.FormatSaveError(ex),
+                Title,
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+            return false;
+        }
     }
 
     private bool TryReadSettingsFromControls(out AppSettings current)

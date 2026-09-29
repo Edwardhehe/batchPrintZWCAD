@@ -155,7 +155,8 @@ public sealed partial class BatchPlotForm : Window
         }
 
         UpdateOutputFormatUi();
-        SaveCurrentSettings();
+        // 仅当记忆值确有变化时写回设置，避免每次打开窗口都写设置文件（被占用时曾导致窗口构造崩溃）。
+        SaveCurrentSettings(onlyIfChanged: true);
         _styleSelectionReady = true;
     }
 
@@ -274,7 +275,7 @@ public sealed partial class BatchPlotForm : Window
                 return;
             }
 
-            _selectedDwgFiles.Clear();
+            // 累加模式保留多文件批打加入的源文件顺序，避免已有多文件分组排序被打乱。
             TransformScannedJobsToDcs(scannedJobs);
             var addedCount = CountNewPlotJobs(_jobs, scannedJobs);
             var mergedJobs = MergePlotJobs(_jobs, scannedJobs);
@@ -481,18 +482,21 @@ public sealed partial class BatchPlotForm : Window
             return;
         }
 
-        // 确认后先清空清单，再只扫勾选空间。
-        _jobs.Clear();
-        _selectedDwgFiles.Clear();
+        // 不再清空清单：多次多文件批打累加，只替换本次成功重扫的「文件 + 空间」。
         ClearSequenceOverlay();
 
+        // 源文件分组顺序按首次加入的先后保留；重复添加同一文件不改变其位置。
         foreach (var file in selected.Select(s => s.FilePath).Distinct(StringComparer.OrdinalIgnoreCase))
         {
-            _selectedDwgFiles.Add(file);
+            if (!_selectedDwgFiles.Any(existing => AreSamePath(existing, file)))
+            {
+                _selectedDwgFiles.Add(file);
+            }
         }
 
         var library = TitleBlockLibraryStore.Load();
         var added = new List<PlotJob>();
+        var rescannedSpaceKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var errors = new List<string>();
 
         foreach (var fileGroup in selected.GroupBy(s => s.FilePath, StringComparer.OrdinalIgnoreCase))
@@ -511,6 +515,12 @@ public sealed partial class BatchPlotForm : Window
                 }
 
                 added.AddRange(scanned);
+                // 仅扫描成功的文件参与替换；失败文件保留清单中的旧结果。
+                foreach (var layoutName in allowed)
+                {
+                    rescannedSpaceKeys.Add(MultiFileJobMerge.SpaceKey(file, layoutName));
+                }
+
                 AppendLog("INFO", $"扫描 {file}（{allowed.Count} 个空间），识别 {scanned.Count} 张。");
             }
             catch (Exception ex)
@@ -521,7 +531,11 @@ public sealed partial class BatchPlotForm : Window
             }
         }
 
-        SortAndRefreshOutputPaths(added);
+        SortAndRefreshOutputPaths(MultiFileJobMerge.ReplaceRescannedSpaces(
+            _jobs,
+            added,
+            rescannedSpaceKeys,
+            job => job));
         // 多文件批打识别结果一律不画临时红框和数字（即使勾选的是当前图）。
         _suppressSequenceOverlayFromMultiFile = true;
         ClearSequenceOverlay();
@@ -587,15 +601,7 @@ public sealed partial class BatchPlotForm : Window
     /// <param name="sourceJobs">新清单；为空则对当前表格数据排序后重绑。</param>
 
     /// <summary>框选/范围扫描累加时按句柄或几何窗口去重，避免同一图框重复入表。</summary>
-    private static string PlotJobIdentityKey(PlotJob job)
-    {
-        if (!string.IsNullOrWhiteSpace(job.BlockHandle))
-        {
-            return $"H|{job.SourceFile}|{job.SpaceName}|{job.BlockHandle}";
-        }
-
-        return $"G|{job.SourceFile}|{job.SpaceName}|{job.MinX:0.###}|{job.MinY:0.###}|{job.MaxX:0.###}|{job.MaxY:0.###}";
-    }
+    private static string PlotJobIdentityKey(PlotJob job) => MultiFileJobMerge.IdentityKey(job);
 
     private static int CountNewPlotJobs(IEnumerable<PlotJob> existing, IEnumerable<PlotJob> incoming)
     {
@@ -643,20 +649,17 @@ public sealed partial class BatchPlotForm : Window
                 customOutputDirectory: CustomOutputDirectory,
                 sourceSubfolder: AutomaticOutputSubfolder)
             : null;
-        var reservedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // 整批一次性命名：本批重名的输出全部从 _1 起编号，唯一名称不加后缀。
+        var outputPaths = dwgOutputPaths == null
+            ? BuildOutputPaths(sorted, sequenceDigits)
+            : null;
         var refreshed = new List<PlotJob>(sorted.Count);
         for (var index = 0; index < sorted.Count; index++)
         {
             var job = sorted[index];
-            if (dwgOutputPaths != null)
-            {
-                job.OutputPath = dwgOutputPaths[job];
-            }
-            else
-            {
-                var sequenceNumber = _settings.FileNameSequenceStartNumber + index;
-                job.OutputPath = BuildOutputPath(job, sequenceNumber, sequenceDigits, reservedPaths);
-            }
+            job.OutputPath = dwgOutputPaths != null
+                ? dwgOutputPaths[job]
+                : outputPaths![index];
             // 表格显示最终命名结果；合并 PDF 的临时路径不得覆盖这个值。
             job.DisplayOutputFileName = job.OutputFileName;
             refreshed.Add(job);
@@ -1310,7 +1313,7 @@ public sealed partial class BatchPlotForm : Window
         _grid.Items.Refresh();
         // 图号重排窗口中的方向同时作为下次默认值，并与其它位置排序入口保持一致。
         _settings.SortOrderHorizontalFirst = dialog.HorizontalFirst;
-        AppSettingsStore.Save(_settings);
+        AppSettingsStore.TrySave(_settings, out _);
         SortAndRefreshOutputPaths();
 
         // 反写 CAD 文件中的图号（批量：共享一次文档锁定/事务/图框库加载，逐张写在图多时会明显变慢）
@@ -1554,23 +1557,27 @@ public sealed partial class BatchPlotForm : Window
         RefreshStatus();
     }
 
-    private string BuildOutputPath(
-        PlotJob job,
-        int sequenceNumber,
-        int sequenceDigits,
-        ISet<string> reservedPaths)
+    /// <summary>按清单顺序为整批任务生成输出路径，返回值与 jobs 一一对应。</summary>
+    private IReadOnlyList<string> BuildOutputPaths(IReadOnlyList<PlotJob> jobs, int sequenceDigits)
     {
-        var baseName = FileNameSanitizer.FormatFileNamePattern(
-            _settings.PdfFileNamePattern,
-            job,
-            sequenceNumber,
-            sequenceDigits,
-            _settings.LongPaperNameFormat,
-            _settings.LongPaperSnapToleranceMm);
-        return FileNameSanitizer.MakeUnique(
-            GetOutputDirectory(job),
-            baseName,
-            reservedPaths,
+        var requests = new List<BatchFileNameRequest>(jobs.Count);
+        for (var index = 0; index < jobs.Count; index++)
+        {
+            var job = jobs[index];
+            var sequenceNumber = _settings.FileNameSequenceStartNumber + index;
+            var baseName = FileNameSanitizer.FormatFileNamePattern(
+                _settings.PdfFileNamePattern,
+                job,
+                sequenceNumber,
+                sequenceDigits,
+                _settings.LongPaperNameFormat,
+                _settings.LongPaperSnapToleranceMm);
+            requests.Add(new BatchFileNameRequest(GetOutputDirectory(job), baseName));
+        }
+
+        return FileNameSanitizer.MakeUniqueBatch(
+            requests,
+            reservedPaths: null,
             _settings.AddSequenceWhenPdfExists,
             SelectedOutputExtension,
             createDirectory: false);
@@ -1815,7 +1822,7 @@ public sealed partial class BatchPlotForm : Window
 
         _settings.TitleBlockBatchSortMode = dialog.SortMode;
         _settings.SortOrderHorizontalFirst = dialog.HorizontalFirst;
-        AppSettingsStore.Save(_settings);
+        AppSettingsStore.TrySave(_settings, out _);
 
         // 最终排序只能经过统一入口，否则位置预排会被随后的图号排序覆盖。
         SortAndRefreshOutputPaths();
@@ -2324,7 +2331,8 @@ public sealed partial class BatchPlotForm : Window
                         mergeInputs,
                         _mergedOutputPath,
                         _settings.MergePdfByPaperSize,
-                        _settings.AddSequenceWhenPdfExists);
+                        // 合并 PDF 始终避开已有文件（已存在则加 _1、_2…），不再覆盖上一次的合并结果。
+                        avoidExistingFiles: true);
                     foreach (var mergePlan in mergePlans)
                     {
                         PdfDocumentService.Merge(
@@ -2694,18 +2702,31 @@ public sealed partial class BatchPlotForm : Window
         _statusLabel.Text = $"共 {_jobs.Count} 张，已勾选 {selected} 张。{outputHint} 图框库: {TitleBlockLibraryStore.DefaultPath}";
     }
 
-    private void SaveCurrentSettings()
+    /// <summary>记住上次的输出选项（非关键保存：失败只记日志，不打断操作或关闭窗口）。</summary>
+    private void SaveCurrentSettings(bool onlyIfChanged = false)
     {
-        _settings.LastPlotDevice = AcadPlotterInstaller.PreferredPdfPlotter;
+        var device = AcadPlotterInstaller.PreferredPdfPlotter;
         var style = PlotStyleManager.NormalizeStyleName(_styleCombo.SelectedItem?.ToString());
-        if (!string.IsNullOrEmpty(style))
+        var styleSheet = string.IsNullOrEmpty(style) ? _settings.LastStyleSheet : style;
+        var mergePdf = _mergePdfCheckBox.IsChecked == true;
+        var leaveMargin = _leaveMarginCheckBox.IsChecked == true;
+        var marginMm = ReadMarginValue(_marginInput);
+        var changed = !string.Equals(_settings.LastPlotDevice, device, StringComparison.Ordinal)
+            || !string.Equals(_settings.LastStyleSheet, styleSheet, StringComparison.Ordinal)
+            || _settings.MergePdf != mergePdf
+            || _settings.LeavePaperMargin != leaveMargin
+            || !_settings.PaperMarginMm.Equals(marginMm);
+        _settings.LastPlotDevice = device;
+        _settings.LastStyleSheet = styleSheet;
+        _settings.MergePdf = mergePdf;
+        _settings.LeavePaperMargin = leaveMargin;
+        _settings.PaperMarginMm = marginMm;
+        if (onlyIfChanged && !changed)
         {
-            _settings.LastStyleSheet = style;
+            return;
         }
-        _settings.MergePdf = _mergePdfCheckBox.IsChecked == true;
-        _settings.LeavePaperMargin = _leaveMarginCheckBox.IsChecked == true;
-        _settings.PaperMarginMm = ReadMarginValue(_marginInput);
-        AppSettingsStore.Save(_settings);
+
+        AppSettingsStore.TrySave(_settings, out _);
     }
 
     // ── UI 事件处理器 ──
