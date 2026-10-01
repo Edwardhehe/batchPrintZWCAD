@@ -108,6 +108,9 @@ public static class RectangleFrameScanner
     [ThreadStatic]
     private static CancellationToken _activeCancel;
 
+    /// <summary>本次扫描是否按图框库最多模式识别图名、图号。只在公共入口的 try/finally 内有效。</summary>
+    private static bool _recognizeByDominantMode;
+
     private static void ReportScan(string detail, int current = 0, int total = 0, string? title = null)
     {
         _activeCancel.ThrowIfCancellationRequested();
@@ -133,7 +136,8 @@ public static class RectangleFrameScanner
         Document document,
         Extents3d scanWindow,
         double? paperMatchToleranceMm = null,
-        bool? recognizeFourLineRectangles = null)
+        bool? recognizeFourLineRectangles = null,
+        bool recognizeTitleByDominantFrameMode = false)
     {
         return ScanWindow(
             document,
@@ -148,7 +152,8 @@ public static class RectangleFrameScanner
                 WorldToUcs = Matrix3d.Identity
             },
             paperMatchToleranceMm,
-            recognizeFourLineRectangles);
+            recognizeFourLineRectangles,
+            recognizeTitleByDominantFrameMode: recognizeTitleByDominantFrameMode);
     }
 
     /// <summary>
@@ -160,12 +165,15 @@ public static class RectangleFrameScanner
         double? paperMatchToleranceMm = null,
         bool? recognizeFourLineRectangles = null,
         IProgress<RectangleScanProgress>? progress = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool recognizeTitleByDominantFrameMode = false)
     {
         var previousProgress = _activeProgress;
         var previousCancel = _activeCancel;
+        var previousDominantMode = _recognizeByDominantMode;
         _activeProgress = progress;
         _activeCancel = cancellationToken;
+        _recognizeByDominantMode = recognizeTitleByDominantFrameMode;
         try
         {
             LayerScannableCache.Clear();
@@ -233,6 +241,7 @@ public static class RectangleFrameScanner
         }
         finally
         {
+            _recognizeByDominantMode = previousDominantMode;
             _activeProgress = previousProgress;
             _activeCancel = previousCancel;
         }
@@ -253,12 +262,15 @@ public static class RectangleFrameScanner
         bool? recognizeFourLineRectangles = null,
         IProgress<RectangleScanProgress>? progress = null,
         CancellationToken cancellationToken = default,
-        ISet<string>? allowedLayoutNames = null)
+        ISet<string>? allowedLayoutNames = null,
+        bool recognizeTitleByDominantFrameMode = false)
     {
         var previousProgress = _activeProgress;
         var previousCancel = _activeCancel;
+        var previousDominantMode = _recognizeByDominantMode;
         _activeProgress = progress;
         _activeCancel = cancellationToken;
+        _recognizeByDominantMode = recognizeTitleByDominantFrameMode;
 
         var profile = EnableProfiling ? new ScanProfile() : null;
         _activeProfile = profile;
@@ -389,6 +401,7 @@ public static class RectangleFrameScanner
         }
         finally
         {
+            _recognizeByDominantMode = previousDominantMode;
             _activeProfile = null;
             _activeProgress = previousProgress;
             _activeCancel = previousCancel;
@@ -405,12 +418,15 @@ public static class RectangleFrameScanner
         double? paperMatchToleranceMm = null,
         bool? recognizeFourLineRectangles = null,
         IProgress<RectangleScanProgress>? progress = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool recognizeTitleByDominantFrameMode = false)
     {
         var previousProgress = _activeProgress;
         var previousCancel = _activeCancel;
+        var previousDominantMode = _recognizeByDominantMode;
         _activeProgress = progress;
         _activeCancel = cancellationToken;
+        _recognizeByDominantMode = recognizeTitleByDominantFrameMode;
         try
         {
             if (selectedIds == null)
@@ -553,6 +569,7 @@ public static class RectangleFrameScanner
         }
         finally
         {
+            _recognizeByDominantMode = previousDominantMode;
             _activeProgress = previousProgress;
             _activeCancel = previousCancel;
         }
@@ -570,12 +587,15 @@ public static class RectangleFrameScanner
         double? paperMatchToleranceMm = null,
         bool? recognizeFourLineRectangles = null,
         IProgress<RectangleScanProgress>? progress = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool recognizeTitleByDominantFrameMode = false)
     {
         var previousProgress = _activeProgress;
         var previousCancel = _activeCancel;
+        var previousDominantMode = _recognizeByDominantMode;
         _activeProgress = progress;
         _activeCancel = cancellationToken;
+        _recognizeByDominantMode = recognizeTitleByDominantFrameMode;
 
         var profile = EnableProfiling ? new ScanProfile() : null;
         _activeProfile = profile;
@@ -711,6 +731,7 @@ public static class RectangleFrameScanner
         }
         finally
         {
+            _recognizeByDominantMode = previousDominantMode;
             _activeProfile = null;
             _activeProgress = previousProgress;
             _activeCancel = previousCancel;
@@ -1032,7 +1053,13 @@ public static class RectangleFrameScanner
             packedRectangles.Add(rectangle);
         }
 
-        // 3f. 同一空间一次事务内提取顶层属性块的图号/图名，不按框反复开库。
+        // 3f. 勾选时先按图框库最多模式，在本空间里取图名/图号；没取到的再退回属性 Tag。
+        if (_recognizeByDominantMode)
+        {
+            ReportScan("正在按图框模式识别图名/图号…");
+            FillDominantModeIdentities(database, ownerId, results, packedRectangles);
+        }
+
         ReportScan("正在识别图号/图名属性…");
         var attrSw = _activeProfile != null ? Stopwatch.StartNew() : null;
         FillAttributeIdentities(database, ownerId, results, packedRectangles);
@@ -1043,6 +1070,518 @@ public static class RectangleFrameScanner
         }
 
         return results;
+    }
+
+    /// <summary>
+    /// 用图框库中数量最多的模式，把图名、图号矩形放到每张图的右下角，并在同一空间取字。
+    /// 纸面毫米按这张图外框短边和纸张短边的实际比例放大。
+    /// </summary>
+    private static void FillDominantModeIdentities(
+        Database database,
+        ObjectId ownerId,
+        IReadOnlyList<Result> results,
+        IReadOnlyList<LocalRectangle> rectangles)
+    {
+        if (results.Count == 0 || results.Count != rectangles.Count || !TryGetDominantMode(out var titleBox, out var numberBox))
+        {
+            return;
+        }
+
+        var blockFrames = ScanTitleBlockFrames(database, TryGetLayoutName(database, ownerId));
+        try
+        {
+            using var tr = database.TransactionManager.StartTransaction();
+            var owner = (BlockTableRecord)tr.GetObject(ownerId, OpenMode.ForRead);
+            var cache = CadTextExtractor.BuildOwnerTextCache(tr, owner);
+            for (var i = 0; i < results.Count; i++)
+            {
+                var job = results[i].Job;
+                if (!TryCreateFrameAxes(
+                        rectangles[i],
+                        job.PaperWidthMm,
+                        job.PaperHeightMm,
+                        FindBlockFrameCorners(rectangles[i], blockFrames),
+                        out var axes))
+                {
+                    continue;
+                }
+
+                var title = CadTextExtractor.ExtractWorldPolygonText(cache, MapCell(axes, titleBox));
+                if (!string.IsNullOrWhiteSpace(title))
+                {
+                    job.CadTitle = title;
+                    job.Title = title;
+                }
+
+                var number = CadTextExtractor.ExtractWorldPolygonText(cache, MapCell(axes, numberBox));
+                if (!string.IsNullOrWhiteSpace(number))
+                {
+                    job.CadDrawingNumber = number;
+                    job.DrawingNumber = number;
+                }
+            }
+
+            tr.Commit();
+        }
+        catch
+        {
+            // 模式取字失败时留给属性 Tag 回退，不中断整次扫描。
+        }
+    }
+
+    /// <summary>
+    /// 用户改纸后，按新纸张短边用图框库最多模式重取图名、图号。
+    /// 角点沿用扫描时的 WCS 或图纸空间四角。新窗口取到字就覆盖；取不到则清空，再按属性 Tag 回退。
+    /// </summary>
+    public static void RefillDominantModeIdentities(Database database, IReadOnlyList<PlotJob> jobs)
+    {
+        if (database == null || jobs == null || jobs.Count == 0 || !TryGetDominantMode(out var titleBox, out var numberBox))
+        {
+            return;
+        }
+
+        var ready = new List<(PlotJob Job, LocalRectangle Rectangle)>();
+        foreach (var job in jobs)
+        {
+            if (job != null && TryCreateIdentityRectangle(job, out var rectangle))
+            {
+                ready.Add((job, rectangle));
+            }
+        }
+
+        if (ready.Count == 0)
+        {
+            return;
+        }
+
+        var attributePass = new List<(ObjectId OwnerId, List<Result> Results, List<LocalRectangle> Rectangles)>();
+        var blockFramesBySpace = new Dictionary<string, List<double[]>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var spaceName in ready.Select(item => item.Job.SpaceName ?? "").Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            blockFramesBySpace[spaceName] = ScanTitleBlockFrames(database, spaceName);
+        }
+
+        try
+        {
+            using var tr = database.TransactionManager.StartTransaction();
+            foreach (var spaceGroup in ready.GroupBy(item => item.Job.SpaceName ?? "", StringComparer.OrdinalIgnoreCase))
+            {
+                if (string.IsNullOrWhiteSpace(spaceGroup.Key)
+                    || !TryGetSpaceOwner(tr, database, spaceGroup.Key, out var ownerId))
+                {
+                    continue;
+                }
+
+                var owner = (BlockTableRecord)tr.GetObject(ownerId, OpenMode.ForRead);
+                var spaceItems = spaceGroup.ToList();
+                var blockFrames = blockFramesBySpace.TryGetValue(spaceGroup.Key, out var frames)
+                    ? frames
+                    : new List<double[]>();
+                var cache = CadTextExtractor.BuildOwnerTextCache(tr, owner);
+                var results = new List<Result>(spaceItems.Count);
+                var rectangles = new List<LocalRectangle>(spaceItems.Count);
+                foreach (var item in spaceItems)
+                {
+                    try
+                    {
+                        var title = "";
+                        var number = "";
+                        if (TryCreateFrameAxes(
+                                item.Rectangle,
+                                item.Job.PaperWidthMm,
+                                item.Job.PaperHeightMm,
+                                FindBlockFrameCorners(item.Rectangle, blockFrames),
+                                out var axes))
+                        {
+                            title = CadTextExtractor.ExtractWorldPolygonText(cache, MapCell(axes, titleBox));
+                            number = CadTextExtractor.ExtractWorldPolygonText(cache, MapCell(axes, numberBox));
+                        }
+
+                        item.Job.CadTitle = title ?? "";
+                        item.Job.Title = title ?? "";
+                        item.Job.CadDrawingNumber = number ?? "";
+                        item.Job.DrawingNumber = number ?? "";
+                    }
+                    catch
+                    {
+                        // 这一张取字失败时保留改纸前的图名图号。
+                    }
+
+                    results.Add(new Result { Job = item.Job, CornerPoints = item.Rectangle.CornerPoints });
+                    rectangles.Add(item.Rectangle);
+                }
+
+                attributePass.Add((ownerId, results, rectangles));
+            }
+
+            tr.Commit();
+        }
+        catch
+        {
+            return;
+        }
+
+        foreach (var pass in attributePass)
+        {
+            FillAttributeIdentities(database, pass.OwnerId, pass.Results, pass.Rectangles);
+        }
+    }
+
+    /// <summary>用作业上保留的扫描角点还原取字矩形。Min/Max 已转成 DCS 时不能拿来套文字。</summary>
+    private static bool TryCreateIdentityRectangle(PlotJob job, out LocalRectangle rectangle)
+    {
+        rectangle = new LocalRectangle();
+        if (job.CornerPoints is not { Length: >= 8 } points)
+        {
+            return false;
+        }
+
+        var minX = points[0];
+        var minY = points[1];
+        var maxX = points[0];
+        var maxY = points[1];
+        for (var i = 0; i < 4; i++)
+        {
+            var x = points[i * 2];
+            var y = points[i * 2 + 1];
+            minX = Math.Min(minX, x);
+            minY = Math.Min(minY, y);
+            maxX = Math.Max(maxX, x);
+            maxY = Math.Max(maxY, y);
+        }
+
+        rectangle.MinX = minX;
+        rectangle.MinY = minY;
+        rectangle.MaxX = maxX;
+        rectangle.MaxY = maxY;
+        rectangle.CornerPoints = points;
+        return true;
+    }
+
+    /// <summary>按布局名打开该空间的块表记录。</summary>
+    private static bool TryGetSpaceOwner(Transaction tr, Database database, string spaceName, out ObjectId ownerId)
+    {
+        ownerId = ObjectId.Null;
+        var layouts = (DBDictionary)tr.GetObject(database.LayoutDictionaryId, OpenMode.ForRead);
+        if (!layouts.Contains(spaceName))
+        {
+            return false;
+        }
+
+        if (tr.GetObject(layouts.GetAt(spaceName), OpenMode.ForRead, false) is not Layout layout
+            || layout.BlockTableRecordId.IsNull)
+        {
+            return false;
+        }
+
+        ownerId = layout.BlockTableRecordId;
+        return true;
+    }
+
+    /// <summary>图框库聚类后成员最多的那一组图名、图号纸面矩形。</summary>
+    private static bool TryGetDominantMode(out PaperCornerBox title, out PaperCornerBox number)
+    {
+        title = default;
+        number = default;
+        var modes = TitleBlockCornerModeGrouper.Group(TitleBlockLibraryStore.Load().Blocks).Modes;
+        if (modes.Count == 0)
+        {
+            return false;
+        }
+
+        title = modes[0].Title;
+        number = modes[0].Number;
+        return true;
+    }
+
+    /// <summary>右下角为原点，底边朝左、右边朝上。长度是这条边的绘图单位。</summary>
+    private readonly struct FrameAxes
+    {
+        public FrameAxes(Point3d origin, Vector3d left, Vector3d up, double cadPerMm)
+        {
+            Origin = origin;
+            Left = left;
+            Up = up;
+            CadPerMm = cadPerMm;
+        }
+
+        public Point3d Origin { get; }
+        public Vector3d Left { get; }
+        public Vector3d Up { get; }
+        public double CadPerMm { get; }
+    }
+
+    /// <summary>
+    /// 图框块扫描给出的角点顺序是块内左下、右下、右上、左上，右下角才是图名图号基点。
+    /// 对得上图框块时用这个右下角；对不上再退回世界坐标最右最下。
+    /// </summary>
+    private static bool TryCreateFrameAxes(
+        LocalRectangle rectangle,
+        double paperWidthMm,
+        double paperHeightMm,
+        double[]? blockCorners,
+        out FrameAxes axes)
+    {
+        if (blockCorners != null
+            && TryCreateAxesFromBlockBottomRight(blockCorners, paperWidthMm, paperHeightMm, out axes))
+        {
+            return true;
+        }
+
+        return TryCreateFrameAxes(rectangle, paperWidthMm, paperHeightMm, out axes);
+    }
+
+    /// <summary>
+    /// 右下角取四个角里最靠右、再最靠下的那个。两条邻边里更朝左的是底边，另一条是右边向上。
+    /// </summary>
+    private static bool TryCreateFrameAxes(LocalRectangle rectangle, double paperWidthMm, double paperHeightMm, out FrameAxes axes)
+    {
+        axes = default;
+        var paperShort = Math.Min(Math.Abs(paperWidthMm), Math.Abs(paperHeightMm));
+        if (paperShort < 1e-6)
+        {
+            return false;
+        }
+
+        var points = GetWorldPoints(rectangle);
+        if (points.Length < 4)
+        {
+            return false;
+        }
+
+        var bottomRight = 0;
+        for (var i = 1; i < 4; i++)
+        {
+            if (points[i].X > points[bottomRight].X + 1e-6
+                || (Math.Abs(points[i].X - points[bottomRight].X) <= 1e-6 && points[i].Y < points[bottomRight].Y))
+            {
+                bottomRight = i;
+            }
+        }
+
+        var origin = points[bottomRight];
+        var previous = points[(bottomRight + 3) % 4] - origin;
+        var next = points[(bottomRight + 1) % 4] - origin;
+        if (previous.Length < 1e-6 || next.Length < 1e-6)
+        {
+            return false;
+        }
+
+        // 更朝左（X 更小，X 相近时 Y 更小）的邻边沿底边离开右下角。
+        var previousIsBottom = previous.X < next.X - 1e-6
+            || (Math.Abs(previous.X - next.X) <= 1e-6 && previous.Y <= next.Y);
+        var alongBottom = previousIsBottom ? previous : next;
+        var alongRight = previousIsBottom ? next : previous;
+        var cadPerMm = Math.Min(alongBottom.Length, alongRight.Length) / paperShort;
+        if (cadPerMm < 1e-9)
+        {
+            return false;
+        }
+
+        axes = new FrameAxes(origin, alongBottom.GetNormal(), alongRight.GetNormal(), cadPerMm);
+        return true;
+    }
+
+    /// <summary>
+    /// 用图框块扫描的世界角点建坐标系。角点顺序与块内一致：左下、右下、右上、左上。
+    /// 原点是块内右下角，底边指向左下，右边指向上。
+    /// </summary>
+    private static bool TryCreateAxesFromBlockBottomRight(
+        double[] corners,
+        double paperWidthMm,
+        double paperHeightMm,
+        out FrameAxes axes)
+    {
+        axes = default;
+        var paperShort = Math.Min(Math.Abs(paperWidthMm), Math.Abs(paperHeightMm));
+        if (paperShort < 1e-6 || corners.Length < 8)
+        {
+            return false;
+        }
+
+        var origin = new Point3d(corners[2], corners[3], 0);
+        var alongBottom = new Point3d(corners[0], corners[1], 0) - origin;
+        var alongRight = new Point3d(corners[4], corners[5], 0) - origin;
+        if (alongBottom.Length < 1e-6 || alongRight.Length < 1e-6)
+        {
+            return false;
+        }
+
+        var cadPerMm = Math.Min(alongBottom.Length, alongRight.Length) / paperShort;
+        if (cadPerMm < 1e-9)
+        {
+            return false;
+        }
+
+        axes = new FrameAxes(origin, alongBottom.GetNormal(), alongRight.GetNormal(), cadPerMm);
+        return true;
+    }
+
+    /// <summary>只扫描指定布局里的图框块，取出已经按块旋转算好的四角。</summary>
+    private static List<double[]> ScanTitleBlockFrames(Database database, string layoutName)
+    {
+        var frames = new List<double[]>();
+        if (database == null || string.IsNullOrWhiteSpace(layoutName))
+        {
+            return frames;
+        }
+
+        try
+        {
+            var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { layoutName };
+            var jobs = TitleBlockScanner.Scan(
+                database,
+                TitleBlockLibraryStore.Load(),
+                database.Filename ?? "",
+                null,
+                TitleBlockScanScope.AllSpaces,
+                null,
+                null,
+                null,
+                allowed);
+            foreach (var job in jobs)
+            {
+                if (job?.CornerPoints is { Length: >= 8 } corners)
+                {
+                    frames.Add(corners);
+                }
+            }
+        }
+        catch
+        {
+            // 图框块扫描失败时退回世界坐标右下角，不中断通用型扫描。
+        }
+
+        return frames;
+    }
+
+    /// <summary>按块表记录反查布局名，供图框块扫描限定空间。</summary>
+    private static string TryGetLayoutName(Database database, ObjectId ownerId)
+    {
+        try
+        {
+            using var tr = database.TransactionManager.StartTransaction();
+            if (tr.GetObject(ownerId, OpenMode.ForRead, false) is not BlockTableRecord owner
+                || !owner.IsLayout
+                || owner.LayoutId.IsNull
+                || tr.GetObject(owner.LayoutId, OpenMode.ForRead, false) is not Layout layout)
+            {
+                return "";
+            }
+
+            var name = layout.LayoutName ?? "";
+            tr.Commit();
+            return name;
+        }
+        catch
+        {
+            return "";
+        }
+    }
+
+    /// <summary>
+    /// 矩形外框与图框块打印边界互相包含中心时，采用该图框块的四角。
+    /// 多张重叠时取中心更近的一张。
+    /// </summary>
+    private static double[]? FindBlockFrameCorners(LocalRectangle rectangle, IReadOnlyList<double[]> frames)
+    {
+        if (frames == null || frames.Count == 0)
+        {
+            return null;
+        }
+
+        var centerX = (rectangle.MinX + rectangle.MaxX) * 0.5;
+        var centerY = (rectangle.MinY + rectangle.MaxY) * 0.5;
+        double[]? best = null;
+        var bestDistance = double.MaxValue;
+        foreach (var corners in frames)
+        {
+            if (!TryGetCornerBounds(corners, out var minX, out var minY, out var maxX, out var maxY))
+            {
+                continue;
+            }
+
+            var blockCenterX = (minX + maxX) * 0.5;
+            var blockCenterY = (minY + maxY) * 0.5;
+            var rectangleContainsBlock = ContainsPoint(rectangle.MinX, rectangle.MinY, rectangle.MaxX, rectangle.MaxY, blockCenterX, blockCenterY);
+            var blockContainsRectangle = ContainsPoint(minX, minY, maxX, maxY, centerX, centerY);
+            if (!rectangleContainsBlock || !blockContainsRectangle)
+            {
+                continue;
+            }
+
+            var dx = blockCenterX - centerX;
+            var dy = blockCenterY - centerY;
+            var distance = dx * dx + dy * dy;
+            if (distance < bestDistance)
+            {
+                bestDistance = distance;
+                best = corners;
+            }
+        }
+
+        return best;
+    }
+
+    /// <summary>四角的轴对齐范围。</summary>
+    private static bool TryGetCornerBounds(
+        double[] corners,
+        out double minX,
+        out double minY,
+        out double maxX,
+        out double maxY)
+    {
+        minX = 0;
+        minY = 0;
+        maxX = 0;
+        maxY = 0;
+        if (corners == null || corners.Length < 8)
+        {
+            return false;
+        }
+
+        minX = maxX = corners[0];
+        minY = maxY = corners[1];
+        for (var i = 1; i < 4; i++)
+        {
+            var x = corners[i * 2];
+            var y = corners[i * 2 + 1];
+            minX = Math.Min(minX, x);
+            minY = Math.Min(minY, y);
+            maxX = Math.Max(maxX, x);
+            maxY = Math.Max(maxY, y);
+        }
+
+        return maxX - minX > 1e-6 && maxY - minY > 1e-6;
+    }
+
+    /// <summary>点是否落在矩形内，边界放宽 1 个绘图单位。</summary>
+    private static bool ContainsPoint(double minX, double minY, double maxX, double maxY, double x, double y)
+    {
+        const double tolerance = 1d;
+        return x >= minX - tolerance
+            && x <= maxX + tolerance
+            && y >= minY - tolerance
+            && y <= maxY + tolerance;
+    }
+
+    /// <summary>把纸面矩形的四个角映到这张图的右下角坐标系。顺序为右下、左下、左上、右上。</summary>
+    private static Point3d[] MapCell(FrameAxes axes, PaperCornerBox box)
+    {
+        Point3d At(double fromRightMm, double fromBottomMm)
+        {
+            return axes.Origin
+                + axes.Left * (fromRightMm * axes.CadPerMm)
+                + axes.Up * (fromBottomMm * axes.CadPerMm);
+        }
+
+        return new[]
+        {
+            At(box.RightMm, box.BottomMm),
+            At(box.LeftMm, box.BottomMm),
+            At(box.LeftMm, box.TopMm),
+            At(box.RightMm, box.TopMm)
+        };
     }
 
     /// <summary>属性 Tag「图号」的严格匹配名。</summary>
@@ -1126,13 +1665,15 @@ public static class RectangleFrameScanner
         {
             var rectangle = rectangles[i];
             var job = results[i].Job;
-            if (TryPickClosestAttribute(numberCandidates, rectangle, out var drawingNumber))
+            if (string.IsNullOrWhiteSpace(job.CadDrawingNumber)
+                && TryPickClosestAttribute(numberCandidates, rectangle, out var drawingNumber))
             {
                 job.CadDrawingNumber = drawingNumber;
                 job.DrawingNumber = drawingNumber;
             }
 
-            if (TryPickClosestAttribute(titleCandidates, rectangle, out var title))
+            if (string.IsNullOrWhiteSpace(job.CadTitle)
+                && TryPickClosestAttribute(titleCandidates, rectangle, out var title))
             {
                 job.CadTitle = title;
                 job.Title = title;

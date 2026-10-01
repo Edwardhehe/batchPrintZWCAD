@@ -516,6 +516,103 @@ public static class CadTextExtractor
         return SelectBestRegionText(values);
     }
 
+    /// <summary>
+    /// 在同一所有者空间的文字缓存里，取出落在世界坐标多边形内的文字。
+    /// 优先级与图框块区域提取相同：属性优先，其次是该空间中的文字。
+    /// </summary>
+    public static string ExtractWorldPolygonText(OwnerTextCache? cache, IReadOnlyList<Point3d> polygon)
+    {
+        if (cache == null || polygon == null || polygon.Count < 3)
+        {
+            return "";
+        }
+
+        var values = new List<TextCandidate>();
+        foreach (var candidate in cache.Candidates)
+        {
+            if (IsWorldCandidateInPolygon(candidate, polygon))
+            {
+                values.Add(candidate);
+            }
+        }
+
+        return SelectBestRegionText(values);
+    }
+
+    private static bool IsWorldCandidateInPolygon(TextCandidate candidate, IReadOnlyList<Point3d> polygon)
+    {
+        if (IsPointInsidePolygon(candidate.Point, polygon))
+        {
+            return true;
+        }
+
+        if (candidate.AlignmentPoint.HasValue && IsPointInsidePolygon(candidate.AlignmentPoint.Value, polygon))
+        {
+            return true;
+        }
+
+        if (candidate.WorldBounds == null)
+        {
+            return false;
+        }
+
+        var bounds = candidate.WorldBounds;
+        var corners = new[]
+        {
+            new Point3d(bounds.MinX, bounds.MinY, 0),
+            new Point3d(bounds.MaxX, bounds.MinY, 0),
+            new Point3d(bounds.MaxX, bounds.MaxY, 0),
+            new Point3d(bounds.MinX, bounds.MaxY, 0)
+        };
+        foreach (var corner in corners)
+        {
+            if (IsPointInsidePolygon(corner, polygon))
+            {
+                return true;
+            }
+        }
+
+        foreach (var point in polygon)
+        {
+            if (bounds.Contains(point.X, point.Y))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>射线法判断点是否在多边形内，边上的点算在内。</summary>
+    private static bool IsPointInsidePolygon(Point3d point, IReadOnlyList<Point3d> polygon)
+    {
+        var inside = false;
+        for (int current = 0, previous = polygon.Count - 1; current < polygon.Count; previous = current++)
+        {
+            var start = polygon[previous];
+            var end = polygon[current];
+            var onSegment =
+                Math.Abs((end.Y - start.Y) * (point.X - start.X) - (end.X - start.X) * (point.Y - start.Y)) <= 1e-6
+                && point.X >= Math.Min(start.X, end.X) - 1e-6
+                && point.X <= Math.Max(start.X, end.X) + 1e-6
+                && point.Y >= Math.Min(start.Y, end.Y) - 1e-6
+                && point.Y <= Math.Max(start.Y, end.Y) + 1e-6;
+            if (onSegment)
+            {
+                return true;
+            }
+
+            var crossesScanLine = (start.Y > point.Y) != (end.Y > point.Y);
+            if (crossesScanLine
+                && point.X < (end.X - start.X) * (point.Y - start.Y) / (end.Y - start.Y + 1e-30) + start.X)
+            {
+                inside = !inside;
+            }
+        }
+
+        return inside;
+    }
+
     private static void AppendCachedCandidates(
         ICollection<TextCandidate> values,
         IReadOnlyList<TextCandidate> cached,

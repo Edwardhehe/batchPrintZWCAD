@@ -63,6 +63,11 @@ public sealed class AppSettings
     /// </summary>
     public bool RecognizeFourLineRectangleFrames { get; set; } = true;
     /// <summary>
+    /// 通用型批打是否按图框库中出现最多的右下角模式识别图名、图号。
+    /// 默认关闭；勾选后从下一次扫描生效，不改已经扫进清单的结果。
+    /// </summary>
+    public bool RecognizeTitleByDominantFrameMode { get; set; }
+    /// <summary>
     /// 正式打印时是否把打印内容四边各裁 1mm 纸面，使图框外边框不再输出。
     /// 首次使用默认关闭；裁切不改纸张、比例和留白，也不修改 DWG。
     /// </summary>

@@ -59,6 +59,7 @@ public sealed partial class TitleBlockLibraryManagerForm : Window
         _grid.Columns.Add(MakeTextColumn(nameof(TitleBlockRow.BlockName), "块名", 190));
         _grid.Columns.Add(MakeTextColumn(nameof(TitleBlockRow.CreatedAt), "加入时间", 170));
         _grid.Columns.Add(MakeTextColumn(nameof(TitleBlockRow.PaperName), "图幅", 80));
+        _grid.Columns.Add(MakeTextColumn(nameof(TitleBlockRow.ModeName), "模式", 72));
         _grid.Columns.Add(MakeTextColumn(nameof(TitleBlockRow.PaperWidthMm), "纸宽mm", 90));
         _grid.Columns.Add(MakeTextColumn(nameof(TitleBlockRow.PaperHeightMm), "纸高mm", 90));
         _grid.Columns.Add(MakeCheckColumn(nameof(TitleBlockRow.HasPrintRegion), "有打印边界", 96));
@@ -694,6 +695,34 @@ public sealed partial class TitleBlockLibraryManagerForm : Window
 
     private void OnReloadClick(object sender, RoutedEventArgs e) => LoadRows();
 
+    private void OnRecognizeModesClick(object sender, RoutedEventArgs e)
+    {
+        ExecuteSafely("识别图框模式", () =>
+        {
+            var result = TitleBlockCornerModeGrouper.Group(_rows.Select(row => row.ToDefinition()));
+            var labels = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var mode in result.Modes)
+            {
+                foreach (var name in mode.BlockNames)
+                {
+                    labels[name] = mode.Label;
+                }
+            }
+
+            foreach (var name in result.UnmeasuredBlockNames)
+            {
+                labels[name] = "无法换算";
+            }
+
+            foreach (var row in _rows)
+            {
+                row.ModeName = labels.TryGetValue(row.BlockName, out var label) ? label : "";
+            }
+
+            new TitleBlockModeDialog(result) { Owner = this }.ShowDialog();
+        });
+    }
+
     private void OnImportClick(object sender, RoutedEventArgs e) => ImportLibrary();
 
     private void OnExportClick(object sender, RoutedEventArgs e) => ExportLibrary();
@@ -717,6 +746,7 @@ public sealed partial class TitleBlockLibraryManagerForm : Window
     {
         private string _blockName = "";
         private string _paperName = "";
+        private string _modeName = "";
         private double _paperWidthMm;
         private double _paperHeightMm;
         private bool _hasPrintRegion;
@@ -761,6 +791,9 @@ public sealed partial class TitleBlockLibraryManagerForm : Window
 
         public string BlockName { get => _blockName; set => Set(ref _blockName, value); }
         public string PaperName { get => _paperName; set => Set(ref _paperName, value); }
+
+        /// <summary>识别图框模式后的分组名，只在表格里显示，不写入图框库。</summary>
+        public string ModeName { get => _modeName; set => Set(ref _modeName, value); }
         public double PaperWidthMm { get => _paperWidthMm; set => Set(ref _paperWidthMm, value); }
         public double PaperHeightMm { get => _paperHeightMm; set => Set(ref _paperHeightMm, value); }
         public bool HasPrintRegion { get => _hasPrintRegion; set => Set(ref _hasPrintRegion, value); }

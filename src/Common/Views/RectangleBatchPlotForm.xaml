@@ -28,21 +28,34 @@
                        Margin="8,0,0,0" Foreground="#374151" TextTrimming="CharacterEllipsis" />
         </Border>
 
-        <!-- 底部快捷设置栏 -->
-        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="8,3,0,3">
-            <Button x:Name="_scaleSettingsBtn" Content="比例设置" MinWidth="76"
-                    Style="{StaticResource PluginButtonStyle}" Margin="0,0,4,0"
-                    Click="ScaleSettings_Click"
-                    ToolTip="打开设置中的比例设置页，配置通用型批量打印可识别的比例。" />
-            <Button x:Name="_sortSettingsBtn" Content="排序设置" MinWidth="76"
-                    Style="{StaticResource PluginButtonStyle}" Margin="0,0,4,0"
-                    Click="SortSettings_Click"
-                    ToolTip="选择空间排列顺序，并按选定方向重排当前列表。" />
-            <Button x:Name="_generalSettingsBtn" Content="常规设置" MinWidth="76"
-                    Style="{StaticResource PluginButtonStyle}"
-                    Click="GeneralSettings_Click"
-                    ToolTip="配置纸张匹配容差、四条线矩形框识别等常规选项。" />
-        </StackPanel>
+        <!-- 底部快捷设置栏：按钮靠左，模式识别勾选靠这一行最右 -->
+        <Grid DockPanel.Dock="Bottom" Margin="8,3,8,3">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0" Orientation="Horizontal">
+                <Button x:Name="_scaleSettingsBtn" Content="比例设置" MinWidth="76"
+                        Style="{StaticResource PluginButtonStyle}" Margin="0,0,4,0"
+                        Click="ScaleSettings_Click"
+                        ToolTip="打开设置中的比例设置页，配置通用型批量打印可识别的比例。" />
+                <Button x:Name="_sortSettingsBtn" Content="排序设置" MinWidth="76"
+                        Style="{StaticResource PluginButtonStyle}" Margin="0,0,4,0"
+                        Click="SortSettings_Click"
+                        ToolTip="选择空间排列顺序，并按选定方向重排当前列表。" />
+                <Button x:Name="_generalSettingsBtn" Content="常规设置" MinWidth="76"
+                        Style="{StaticResource PluginButtonStyle}"
+                        Click="GeneralSettings_Click"
+                        ToolTip="配置纸张匹配容差、四条线矩形框识别等常规选项。" />
+            </StackPanel>
+            <CheckBox x:Name="_recognizeByModeCheck" Grid.Column="2"
+                      Content="按已录入图框最多的模式智能识别图名图号"
+                      VerticalAlignment="Center"
+                      Checked="RecognizeByMode_Changed"
+                      Unchecked="RecognizeByMode_Changed"
+                      ToolTip="用图框库里数量最多的那种模式，按本张图的实际比例，把图名、图号矩形放到图纸右下角去取字。字必须和这张图在同一模型空间或同一布局。勾选后从下次扫描生效；勾选期间改纸张会按新图幅短边再取一次图名图号。" />
+        </Grid>
 
         <!-- 顶部操作区：动作行 / 输出行 / 选项行 -->
         <StackPanel DockPanel.Dock="Top" Margin="10,4,10,2">

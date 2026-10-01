@@ -35,6 +35,9 @@
                         Style="{StaticResource PluginButtonStyle}" Click="OnDeleteClick" />
                 <Button Content="重新读取" MinWidth="96" Margin="0,0,4,0"
                         Style="{StaticResource PluginButtonStyle}" Click="OnReloadClick" />
+                <Button Content="识别图框模式" MinWidth="112" Margin="0,0,4,0"
+                        Style="{StaticResource PluginButtonStyle}" Click="OnRecognizeModesClick"
+                        ToolTip="按纸张 1:1 后，图名、图号角点相对图纸右下角的位置归类。同一套图框的 A2、A3 若右下角关系一致，会归为同一模式。" />
                 <Button Content="导入图框库" MinWidth="104" Margin="0,0,4,0"
                         Style="{StaticResource PluginButtonStyle}" Click="OnImportClick" />
                 <Button Content="导出图框库" MinWidth="104" Margin="0,0,4,0"

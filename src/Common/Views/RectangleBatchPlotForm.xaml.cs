@@ -163,6 +163,7 @@ public sealed partial class RectangleBatchPlotForm : Window
         _marginInput.IsEnabled = _leaveMargin.IsChecked == true;
         _leaveMargin.IsChecked = _settings.LeavePaperMargin;
         _mergePdf.IsChecked = _settings.MergePdf;
+        _recognizeByModeCheck.IsChecked = _settings.RecognizeTitleByDominantFrameMode;
         LoadPlotOptions();
         Closing += (_, _) =>
         {
@@ -291,6 +292,17 @@ public sealed partial class RectangleBatchPlotForm : Window
     private void ScaleSettings_Click(object sender, RoutedEventArgs e) => ShowSettingsAtTab(3);
 
     private void GeneralSettings_Click(object sender, RoutedEventArgs e) => ShowSettingsAtTab(0);
+
+    private void RecognizeByMode_Changed(object sender, RoutedEventArgs e)
+    {
+        if (!IsLoaded)
+        {
+            return;
+        }
+
+        _settings.RecognizeTitleByDominantFrameMode = _recognizeByModeCheck.IsChecked == true;
+        AppSettingsStore.TrySave(_settings, out _);
+    }
 
         private void Grid_Sorting(object sender, DataGridSortingEventArgs e)
     {
@@ -534,6 +546,7 @@ public sealed partial class RectangleBatchPlotForm : Window
         {
             ApplyPaper(row.Job, option);
             row.RefreshFromJob();
+            RerecognizeIdentitiesAfterPaperChange(new[] { row });
             RefreshFileNames();
             RefreshOutputPaths();
             UpdateVisuals();
@@ -1085,7 +1098,8 @@ public sealed partial class RectangleBatchPlotForm : Window
                         _settings.RecognizeFourLineRectangleFrames,
                         progress: null,
                         cancellationToken: default,
-                        allowedLayoutNames: allowed);
+                        allowedLayoutNames: allowed,
+                        recognizeTitleByDominantFrameMode: _settings.RecognizeTitleByDominantFrameMode);
                     TransformResultsToDcs(results);
                 }
                 else
@@ -1099,7 +1113,8 @@ public sealed partial class RectangleBatchPlotForm : Window
                         TitleBlockScanScope.AllSpaces,
                         allowed,
                         _settings.PaperMatchToleranceMm,
-                        _settings.RecognizeFourLineRectangleFrames);
+                        _settings.RecognizeFourLineRectangleFrames,
+                        recognizeTitleByDominantFrameMode: _settings.RecognizeTitleByDominantFrameMode);
                 }
 
                 var fileStyle = fileGroup.FirstOrDefault()?.StyleSheet ?? "";
@@ -1311,7 +1326,8 @@ public sealed partial class RectangleBatchPlotForm : Window
             _settings.PaperMatchToleranceMm,
             _settings.RecognizeFourLineRectangleFrames,
             session.Progress,
-            session.Token);
+            session.Token,
+            recognizeTitleByDominantFrameMode: _settings.RecognizeTitleByDominantFrameMode);
     }
 
     /// <summary>带进度窗执行对象选择扫描。</summary>
@@ -1324,7 +1340,8 @@ public sealed partial class RectangleBatchPlotForm : Window
             _settings.PaperMatchToleranceMm,
             _settings.RecognizeFourLineRectangleFrames,
             session.Progress,
-            session.Token);
+            session.Token,
+            _settings.RecognizeTitleByDominantFrameMode);
     }
 
     private void TransformResultsToDcs(List<RectangleFrameScanner.Result> results)
@@ -1697,6 +1714,7 @@ public sealed partial class RectangleBatchPlotForm : Window
             _suppressPaperEvents = false;
         }
 
+        RerecognizeIdentitiesAfterPaperChange(rows);
         RefreshFileNames();
         RefreshOutputPaths();
         UpdateVisuals();
@@ -1746,9 +1764,65 @@ public sealed partial class RectangleBatchPlotForm : Window
             _suppressPaperEvents = false;
         }
 
+        RerecognizeIdentitiesAfterPaperChange(rows);
         RefreshFileNames();
         RefreshOutputPaths();
         UpdateVisuals();
+    }
+
+    /// <summary>
+    /// 图框模式勾选时，改纸后按新纸张短边重取图名、图号。未勾选时不读图。
+    /// </summary>
+    private void RerecognizeIdentitiesAfterPaperChange(IEnumerable<Row> rows)
+    {
+        if (!_settings.RecognizeTitleByDominantFrameMode)
+        {
+            return;
+        }
+
+        var list = rows.Where(row => row?.Job != null).ToList();
+        if (list.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var group in list.GroupBy(row => row.Job.SourceFile ?? "", StringComparer.OrdinalIgnoreCase))
+        {
+            var jobs = group.Select(row => row.Job).ToList();
+            try
+            {
+                if (string.IsNullOrWhiteSpace(group.Key) || IsCurrentDocumentSource(group.Key))
+                {
+                    using (_document.LockDocument())
+                    {
+                        RectangleFrameScanner.RefillDominantModeIdentities(_document.Database, jobs);
+                    }
+                }
+                else if (File.Exists(group.Key))
+                {
+                    using var db = new Database(false, true);
+                    db.ReadDwgFile(group.Key, FileOpenMode.OpenForReadAndAllShare, true, "");
+                    db.CloseInput(true);
+                    RectangleFrameScanner.RefillDominantModeIdentities(db, jobs);
+                }
+            }
+            catch
+            {
+                // 纸张已经改完。取字失败时保留本次改纸，不把异常抛回界面。
+            }
+        }
+
+        var hadIdentity = _hasAttributeIdentity;
+        _hasAttributeIdentity = _rows.Any(RowHasAttributeIdentity);
+        if (hadIdentity != _hasAttributeIdentity)
+        {
+            UpdateAttributeIdentityColumns();
+        }
+
+        foreach (var row in list)
+        {
+            row.RefreshFromJob();
+        }
     }
 
     private static bool CanBatchChangePaper(IReadOnlyList<Row> rows)
@@ -2666,16 +2740,19 @@ public sealed partial class RectangleBatchPlotForm : Window
         var styleSheet = string.IsNullOrEmpty(style) ? _settings.LastStyleSheet : style;
         var mergePdf = _mergePdf.IsChecked == true;
         var leaveMargin = _leaveMargin.IsChecked == true;
+        var recognizeByMode = _recognizeByModeCheck.IsChecked == true;
         var marginMm = ReadMarginValue(_marginInput);
         var changed = !string.Equals(_settings.LastPlotDevice, device, StringComparison.Ordinal)
             || !string.Equals(_settings.LastStyleSheet, styleSheet, StringComparison.Ordinal)
             || _settings.MergePdf != mergePdf
             || _settings.LeavePaperMargin != leaveMargin
+            || _settings.RecognizeTitleByDominantFrameMode != recognizeByMode
             || !_settings.PaperMarginMm.Equals(marginMm);
         _settings.LastPlotDevice = device;
         _settings.LastStyleSheet = styleSheet;
         _settings.MergePdf = mergePdf;
         _settings.LeavePaperMargin = leaveMargin;
+        _settings.RecognizeTitleByDominantFrameMode = recognizeByMode;
         _settings.PaperMarginMm = marginMm;
         if (onlyIfChanged && !changed)
         {
