@@ -357,6 +357,25 @@ public static class CadTextExtractor
     /// </summary>
     public static OwnerTextCache BuildOwnerTextCache(Transaction tr, BlockTableRecord owner, HashSet<string>? libraryBlockNames)
     {
+        return BuildOwnerTextCache(tr, owner, libraryBlockNames, includeBlockNames: true);
+    }
+
+    /// <summary>
+    /// 通用型“按图框右下角识别图名图号”专用的布局文字缓存：与 <see cref="BuildOwnerTextCache(Transaction, BlockTableRecord)"/>
+    /// 相同，但不把块名当作文字加在块插入点上，避免插入点落在格子里的签字栏、LOGO 等块把块名拼进图名图号。
+    /// 图框块字段区域的原有路径仍使用带块名的缓存，行为不变。
+    /// </summary>
+    public static OwnerTextCache BuildOwnerTextCacheWithoutBlockNames(Transaction tr, BlockTableRecord owner)
+    {
+        return BuildOwnerTextCache(tr, owner, null, includeBlockNames: false);
+    }
+
+    private static OwnerTextCache BuildOwnerTextCache(
+        Transaction tr,
+        BlockTableRecord owner,
+        HashSet<string>? libraryBlockNames,
+        bool includeBlockNames)
+    {
         var values = new List<TextCandidate>();
         var overlapBlocks = new List<OverlapBlockRef>();
         foreach (ObjectId id in owner)
@@ -386,7 +405,7 @@ public static class CadTextExtractor
                     // 若提供了库名列表，只递归遍历匹配的块，大幅减少无意义遍历
                     if (libraryBlockNames == null || libraryBlockNames.Contains(GetBlockName(ownerBlock, tr)))
                     {
-                        CollectOwnerBlockTextForCache(tr, ownerBlock, values);
+                        CollectOwnerBlockTextForCache(tr, ownerBlock, values, includeBlockNames);
                     }
                 }
                 continue;
@@ -517,12 +536,25 @@ public static class CadTextExtractor
     }
 
     /// <summary>
-    /// 在同一所有者空间的文字缓存里，取出落在世界坐标多边形内的文字。
-    /// 优先级与图框块区域提取相同：属性优先，其次是该空间中的文字。
+    /// 通用型“按图框右下角识别图名图号”专用：在所有者空间文字缓存里取落在图框格子内的文字。
+    /// 格子用局部坐标表达：局部点 (u, v) 对应世界点 origin + u·xAxis + v·yAxis，<paramref name="cell"/> 是该坐标系下的
+    /// 轴对齐矩形，因此图框旋转、镜像时仍按格子自身方向判定。命中规则与图框块字段区域相同（见 RegionTextHitTest）：
+    /// 有包围盒时文字中心在格内或重叠≥55%，无包围盒时插入点/对齐点在格内。属性优先只在真正命中的文字之间生效。
     /// </summary>
-    public static string ExtractWorldPolygonText(OwnerTextCache? cache, IReadOnlyList<Point3d> polygon)
+    public static string ExtractFrameCellText(
+        OwnerTextCache? cache,
+        Point3d origin,
+        Vector3d xAxis,
+        Vector3d yAxis,
+        LocalRectangle cell)
     {
-        if (cache == null || polygon == null || polygon.Count < 3)
+        if (cache == null || cell == null || !cell.HasArea())
+        {
+            return "";
+        }
+
+        var axes = new RegionTextHitTest.RegionAxes(origin.X, origin.Y, xAxis.X, xAxis.Y, yAxis.X, yAxis.Y);
+        if (!axes.IsValid)
         {
             return "";
         }
@@ -530,87 +562,22 @@ public static class CadTextExtractor
         var values = new List<TextCandidate>();
         foreach (var candidate in cache.Candidates)
         {
-            if (IsWorldCandidateInPolygon(candidate, polygon))
+            var alignment = candidate.AlignmentPoint;
+            if (RegionTextHitTest.IsTextHit(
+                    axes,
+                    cell,
+                    candidate.WorldBounds,
+                    candidate.Point.X,
+                    candidate.Point.Y,
+                    alignment.HasValue,
+                    alignment?.X ?? 0,
+                    alignment?.Y ?? 0))
             {
                 values.Add(candidate);
             }
         }
 
         return SelectBestRegionText(values);
-    }
-
-    private static bool IsWorldCandidateInPolygon(TextCandidate candidate, IReadOnlyList<Point3d> polygon)
-    {
-        if (IsPointInsidePolygon(candidate.Point, polygon))
-        {
-            return true;
-        }
-
-        if (candidate.AlignmentPoint.HasValue && IsPointInsidePolygon(candidate.AlignmentPoint.Value, polygon))
-        {
-            return true;
-        }
-
-        if (candidate.WorldBounds == null)
-        {
-            return false;
-        }
-
-        var bounds = candidate.WorldBounds;
-        var corners = new[]
-        {
-            new Point3d(bounds.MinX, bounds.MinY, 0),
-            new Point3d(bounds.MaxX, bounds.MinY, 0),
-            new Point3d(bounds.MaxX, bounds.MaxY, 0),
-            new Point3d(bounds.MinX, bounds.MaxY, 0)
-        };
-        foreach (var corner in corners)
-        {
-            if (IsPointInsidePolygon(corner, polygon))
-            {
-                return true;
-            }
-        }
-
-        foreach (var point in polygon)
-        {
-            if (bounds.Contains(point.X, point.Y))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /// <summary>射线法判断点是否在多边形内，边上的点算在内。</summary>
-    private static bool IsPointInsidePolygon(Point3d point, IReadOnlyList<Point3d> polygon)
-    {
-        var inside = false;
-        for (int current = 0, previous = polygon.Count - 1; current < polygon.Count; previous = current++)
-        {
-            var start = polygon[previous];
-            var end = polygon[current];
-            var onSegment =
-                Math.Abs((end.Y - start.Y) * (point.X - start.X) - (end.X - start.X) * (point.Y - start.Y)) <= 1e-6
-                && point.X >= Math.Min(start.X, end.X) - 1e-6
-                && point.X <= Math.Max(start.X, end.X) + 1e-6
-                && point.Y >= Math.Min(start.Y, end.Y) - 1e-6
-                && point.Y <= Math.Max(start.Y, end.Y) + 1e-6;
-            if (onSegment)
-            {
-                return true;
-            }
-
-            var crossesScanLine = (start.Y > point.Y) != (end.Y > point.Y);
-            if (crossesScanLine
-                && point.X < (end.X - start.X) * (point.Y - start.Y) / (end.Y - start.Y + 1e-30) + start.X)
-            {
-                inside = !inside;
-            }
-        }
-
-        return inside;
     }
 
     private static void AppendCachedCandidates(
@@ -677,7 +644,8 @@ public static class CadTextExtractor
     private static void CollectOwnerBlockTextForCache(
         Transaction tr,
         BlockReference ownerBlock,
-        ICollection<TextCandidate> values)
+        ICollection<TextCandidate> values,
+        bool includeBlockName)
     {
         foreach (ObjectId attributeId in ownerBlock.AttributeCollection)
         {
@@ -711,7 +679,8 @@ public static class CadTextExtractor
         {
         }
 
-        if (TryGetOwnerBlockName(ownerBlock, tr, out var blockName))
+        // 块名不是图面文字，只有图框块原有路径需要它；通用型右下角取字不收块名。
+        if (includeBlockName && TryGetOwnerBlockName(ownerBlock, tr, out var blockName))
         {
             AddText(values, blockName, ownerBlock.Position, TextSourcePriority.OwnerSpace);
         }
@@ -1222,38 +1191,10 @@ public static class CadTextExtractor
         }
     }
 
+    /// <summary>文字中心在区域内或重叠≥55%。实现移到纯几何的 RegionTextHitTest，与通用型右下角取字共用，结果不变。</summary>
     private static bool HasMeaningfulOverlap(LocalRectangle region, LocalRectangle textBounds)
     {
-        var overlapWidth = Math.Max(0, Math.Min(region.MaxX, textBounds.MaxX) - Math.Max(region.MinX, textBounds.MinX));
-        var overlapHeight = Math.Max(0, Math.Min(region.MaxY, textBounds.MaxY) - Math.Max(region.MinY, textBounds.MinY));
-        var overlapArea = overlapWidth * overlapHeight;
-        if (overlapArea <= 0)
-        {
-            return false;
-        }
-
-        var textArea = RectangleArea(textBounds);
-        var regionArea = RectangleArea(region);
-        if (textArea <= 0 || regionArea <= 0)
-        {
-            return false;
-        }
-
-        var textCenterX = (textBounds.MinX + textBounds.MaxX) / 2d;
-        var textCenterY = (textBounds.MinY + textBounds.MaxY) / 2d;
-        if (region.Contains(textCenterX, textCenterY))
-        {
-            return true;
-        }
-
-        var overlapTextRatio = overlapArea / textArea;
-        return overlapTextRatio >= 0.55;
-    }
-
-    private static double RectangleArea(LocalRectangle rectangle)
-    {
-        return Math.Max(0, rectangle.MaxX - rectangle.MinX)
-            * Math.Max(0, rectangle.MaxY - rectangle.MinY);
+        return RegionTextHitTest.HasMeaningfulOverlap(region, textBounds);
     }
 
     private static string GetMTextPlainText(MText mText)

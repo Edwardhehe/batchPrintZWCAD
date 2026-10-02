@@ -1092,7 +1092,7 @@ public static class RectangleFrameScanner
         {
             using var tr = database.TransactionManager.StartTransaction();
             var owner = (BlockTableRecord)tr.GetObject(ownerId, OpenMode.ForRead);
-            var cache = CadTextExtractor.BuildOwnerTextCache(tr, owner);
+            var cache = CadTextExtractor.BuildOwnerTextCacheWithoutBlockNames(tr, owner);
             for (var i = 0; i < results.Count; i++)
             {
                 var job = results[i].Job;
@@ -1106,14 +1106,14 @@ public static class RectangleFrameScanner
                     continue;
                 }
 
-                var title = CadTextExtractor.ExtractWorldPolygonText(cache, MapCell(axes, titleBox));
+                var title = ExtractCellText(cache, axes, titleBox);
                 if (!string.IsNullOrWhiteSpace(title))
                 {
                     job.CadTitle = title;
                     job.Title = title;
                 }
 
-                var number = CadTextExtractor.ExtractWorldPolygonText(cache, MapCell(axes, numberBox));
+                var number = ExtractCellText(cache, axes, numberBox);
                 if (!string.IsNullOrWhiteSpace(number))
                 {
                     job.CadDrawingNumber = number;
@@ -1177,7 +1177,7 @@ public static class RectangleFrameScanner
                 var blockFrames = blockFramesBySpace.TryGetValue(spaceGroup.Key, out var frames)
                     ? frames
                     : new List<double[]>();
-                var cache = CadTextExtractor.BuildOwnerTextCache(tr, owner);
+                var cache = CadTextExtractor.BuildOwnerTextCacheWithoutBlockNames(tr, owner);
                 var results = new List<Result>(spaceItems.Count);
                 var rectangles = new List<LocalRectangle>(spaceItems.Count);
                 foreach (var item in spaceItems)
@@ -1193,8 +1193,8 @@ public static class RectangleFrameScanner
                                 FindBlockFrameCorners(item.Rectangle, blockFrames),
                                 out var axes))
                         {
-                            title = CadTextExtractor.ExtractWorldPolygonText(cache, MapCell(axes, titleBox));
-                            number = CadTextExtractor.ExtractWorldPolygonText(cache, MapCell(axes, numberBox));
+                            title = ExtractCellText(cache, axes, titleBox);
+                            number = ExtractCellText(cache, axes, numberBox);
                         }
 
                         item.Job.CadTitle = title ?? "";
@@ -1565,23 +1565,18 @@ public static class RectangleFrameScanner
             && y <= maxY + tolerance;
     }
 
-    /// <summary>把纸面矩形的四个角映到这张图的右下角坐标系。顺序为右下、左下、左上、右上。</summary>
-    private static Point3d[] MapCell(FrameAxes axes, PaperCornerBox box)
+    /// <summary>
+    /// 在这张图的右下角坐标系里取纸面矩形内的文字。局部 X 为距右边的纸面毫米（沿底边朝左），
+    /// 局部 Y 为距下边的纸面毫米（沿右边朝上），图框旋转时按格子自身方向判定命中。
+    /// </summary>
+    private static string ExtractCellText(CadTextExtractor.OwnerTextCache cache, FrameAxes axes, PaperCornerBox box)
     {
-        Point3d At(double fromRightMm, double fromBottomMm)
-        {
-            return axes.Origin
-                + axes.Left * (fromRightMm * axes.CadPerMm)
-                + axes.Up * (fromBottomMm * axes.CadPerMm);
-        }
-
-        return new[]
-        {
-            At(box.RightMm, box.BottomMm),
-            At(box.LeftMm, box.BottomMm),
-            At(box.LeftMm, box.TopMm),
-            At(box.RightMm, box.TopMm)
-        };
+        return CadTextExtractor.ExtractFrameCellText(
+            cache,
+            axes.Origin,
+            axes.Left * axes.CadPerMm,
+            axes.Up * axes.CadPerMm,
+            LocalRectangle.FromPoints(box.RightMm, box.BottomMm, box.LeftMm, box.TopMm));
     }
 
     /// <summary>属性 Tag「图号」的严格匹配名。</summary>
