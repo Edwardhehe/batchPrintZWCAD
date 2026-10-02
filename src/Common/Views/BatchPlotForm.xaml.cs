@@ -158,6 +158,38 @@ public sealed partial class BatchPlotForm : Window
         // 仅当记忆值确有变化时写回设置，避免每次打开窗口都写设置文件（被占用时曾导致窗口构造崩溃）。
         SaveCurrentSettings(onlyIfChanged: true);
         _styleSelectionReady = true;
+        // 窗体显示后空闲时预热打印管线，把首张开销挪出批打进度窗（PlotMany 内同键调用为空操作）。
+        SchedulePlotWarmUp();
+    }
+
+    /** SchedulePlotWarmUp：窗体空闲后分步预热打印管线（引擎/设备介质/CTB/驱动），每步让出 UI。 */
+    private void SchedulePlotWarmUp()
+    {
+        try
+        {
+            // 拆 DWG 不走打印引擎，无需预热。
+            if (IsDwgOutput)
+            {
+                return;
+            }
+
+            var device = SelectedPlotDevice;
+            if (string.IsNullOrWhiteSpace(device))
+            {
+                return;
+            }
+
+            PlotterService.BeginWarmUpPlotPipeline(
+                device,
+                _styleCombo.SelectedItem?.ToString() ?? "",
+                action => Dispatcher.BeginInvoke(
+                    action,
+                    System.Windows.Threading.DispatcherPriority.ApplicationIdle));
+        }
+        catch
+        {
+            // 预热失败不影响打印；PlotMany 内还会同步补做。
+        }
     }
 
     private static string FindDwfPlotDevice(IReadOnlyList<string> devices, string installedPlotter)
@@ -2777,6 +2809,7 @@ public sealed partial class BatchPlotForm : Window
         }
 
         UpdateOutputFormatUi();
+        SchedulePlotWarmUp();
     }
 
     private void SavePathMode_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -2795,6 +2828,7 @@ public sealed partial class BatchPlotForm : Window
         if (_styleSelectionReady)
         {
             SaveCurrentSettings();
+            SchedulePlotWarmUp();
         }
     }
 

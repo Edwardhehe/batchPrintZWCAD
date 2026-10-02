@@ -69,6 +69,8 @@ public static partial class PlotterService
 
         EnsureTextGeometryMode(deviceName, settings.ConvertTextToGeometryWhenPlotting);
         using var transparency = PlotTransparencyOverride.Apply(settings.PlotTransparency);
+        // 预热打印管线（引擎/设备介质列表/CTB），首张不再承担惰性加载开销。
+        WarmUpPlotPipeline(deviceName, styleSheet);
         try
         {
             foreach (var group in jobs.GroupBy(job => GetPlotGroupKey(job, currentDocument)))
