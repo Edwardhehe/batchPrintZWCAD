@@ -289,6 +289,8 @@ public sealed partial class RectangleBatchPlotForm : Window
 
     private void SortSettings_Click(object sender, RoutedEventArgs e) => ShowSortSettings();
 
+    private void FileNameSettings_Click(object sender, RoutedEventArgs e) => ShowSettingsAtTab(1);
+
     private void ScaleSettings_Click(object sender, RoutedEventArgs e) => ShowSettingsAtTab(3);
 
     private void GeneralSettings_Click(object sender, RoutedEventArgs e) => ShowSettingsAtTab(0);

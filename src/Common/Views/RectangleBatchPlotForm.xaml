@@ -44,6 +44,10 @@
                         Style="{StaticResource PluginButtonStyle}" Margin="0,0,4,0"
                         Click="SortSettings_Click"
                         ToolTip="选择空间排列顺序，并按选定方向重排当前列表。" />
+                <Button x:Name="_fileNameSettingsBtn" Content="文件名设置" MinWidth="90"
+                        Style="{StaticResource PluginButtonStyle}" Margin="0,0,4,0"
+                        Click="FileNameSettings_Click"
+                        ToolTip="配置输出文件名格式、序号位数等（与图框型共用）；通用型仅对识别到图号/图名的图纸套用规则，其余仍为 DWG名+序号。" />
                 <Button x:Name="_generalSettingsBtn" Content="常规设置" MinWidth="76"
                         Style="{StaticResource PluginButtonStyle}"
                         Click="GeneralSettings_Click"
