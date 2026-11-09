@@ -7,7 +7,7 @@
         MinWidth="720" MinHeight="460"
         WindowStartupLocation="CenterScreen"
         ResizeMode="CanResize"
-        Background="#F5F7FA"
+        Background="{x:Static SystemColors.ControlBrush}"
         FontFamily="Microsoft YaHei UI"
         FontSize="11"
         TextOptions.TextFormattingMode="Display"
@@ -22,10 +22,10 @@
 
     <DockPanel LastChildFill="True">
         <!-- 底部状态栏（原 Dock=Bottom 的 _status） -->
-        <Border DockPanel.Dock="Bottom" Height="30"
-                Background="#EBEFF4" BorderBrush="#C8CDD4" BorderThickness="0,1,0,0">
+        <Border DockPanel.Dock="Bottom" Height="28"
+                Background="{x:Static SystemColors.ControlBrush}">
             <TextBlock x:Name="_status" VerticalAlignment="Center"
-                       Margin="8,0,0,0" Foreground="#374151" TextTrimming="CharacterEllipsis" />
+                       Margin="8,0,0,0" TextTrimming="CharacterEllipsis" />
         </Border>
 
         <!-- 底部快捷设置栏：按钮靠左，模式识别勾选靠这一行最右 -->
@@ -202,6 +202,7 @@
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>
                             <Button Content="预览" Padding="6,0" MinHeight="20"
+                                    Style="{StaticResource PluginButtonStyle}"
                                     Click="PreviewButton_Click" />
                         </DataTemplate>
                     </DataGridTemplateColumn.CellTemplate>

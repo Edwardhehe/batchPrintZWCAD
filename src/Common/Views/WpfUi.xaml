@@ -70,4 +70,7 @@
         <Setter Property="VerticalAlignment" Value="Center" />
         <Setter Property="Padding" Value="0" />
     </Style>
+
+    <!-- 未单独指定样式的按钮与设置窗按钮同一套。已写 PluginButtonStyle 的按钮不受影响。 -->
+    <Style TargetType="Button" BasedOn="{StaticResource PluginButtonStyle}" />
 </ResourceDictionary>

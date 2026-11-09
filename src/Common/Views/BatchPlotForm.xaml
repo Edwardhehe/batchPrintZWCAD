@@ -175,6 +175,7 @@
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>
                             <Button Content="预览" Padding="6,0" MinHeight="20"
+                                    Style="{StaticResource PluginButtonStyle}"
                                     Click="PreviewButton_Click" />
                         </DataTemplate>
                     </DataGridTemplateColumn.CellTemplate>
