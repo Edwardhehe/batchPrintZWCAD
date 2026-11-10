@@ -243,7 +243,7 @@ public sealed partial class TitleBlockLibraryManagerForm : Window
     {
         CommitEdit();
 
-        // 与右键编辑一致：未保存修改先落盘，再藏窗跑 CAD 交互入库流程。
+        // 与右键编辑一致：未保存修改先落盘，再进入 CAD 交互入库流程。
         if (_dirty)
         {
             var saveFirst = System.Windows.MessageBox.Show(
@@ -263,46 +263,57 @@ public sealed partial class TitleBlockLibraryManagerForm : Window
             }
         }
 
-        CadWindowFocus.HideForCadInput(this);
+#if AUTOCAD
+        // AutoCAD: 对齐 FieldBoxSelectDialog.BeginCadPick —— 窗体仍可见/激活时再 SUI，勿先 Hide。
+        // 避免 Hide 后把已失活 hwnd 交给 StartUserInteraction（#28）。
+        var doc = CadApp.DocumentManager.MdiActiveDocument;
+        EditorUserInteraction? ui = null;
         try
         {
-#if AUTOCAD
-            // AutoCAD: StartUserInteraction 与模态字段窗配合，避免图框录入重入。
-            var doc = CadApp.DocumentManager.MdiActiveDocument;
-            EditorUserInteraction? ui = null;
-            try
+            if (doc != null)
             {
-                if (doc != null)
+                var hwnd = new WindowInteropHelper(this).Handle;
+                if (hwnd != IntPtr.Zero)
                 {
-                    var hwnd = new WindowInteropHelper(this).Handle;
-                    if (hwnd != IntPtr.Zero)
-                    {
-                        ui = doc.Editor.StartUserInteraction(hwnd);
-                    }
+                    ui = doc.Editor.StartUserInteraction(hwnd);
                 }
+            }
 
-                if (BatchPlotCommands.AddTitleBlockFromLibrary())
-                {
-                    LibraryChanged = true;
-                    LoadRows();
-                }
-            }
-            finally
-            {
-                ui?.End();
-            }
-#else
             if (BatchPlotCommands.AddTitleBlockFromLibrary())
             {
                 LibraryChanged = true;
                 LoadRows();
             }
-#endif
+        }
+        finally
+        {
+            ui?.End();
+            // SUI 结束后轻量确保库窗仍可见并激活（本路径未 Hide）。
+            if (Visibility != System.Windows.Visibility.Visible)
+            {
+                CadWindowFocus.RestoreDialog(this);
+            }
+            else
+            {
+                Activate();
+            }
+        }
+#else
+        // ZWCAD: 无对等 SUI，保持 Hide → pick → Restore。
+        CadWindowFocus.HideForCadInput(this);
+        try
+        {
+            if (BatchPlotCommands.AddTitleBlockFromLibrary())
+            {
+                LibraryChanged = true;
+                LoadRows();
+            }
         }
         finally
         {
             CadWindowFocus.RestoreDialog(this);
         }
+#endif
     }
 
     private static T? FindAncestor<T>(DependencyObject source)
