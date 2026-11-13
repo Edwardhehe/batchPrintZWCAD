@@ -197,7 +197,7 @@ AutoCAD 2025 ~ 2027 如果菜单栏未显示，可以执行 `ZBP_SHOW_PANEL` 打
 | --- | --- |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 架构与主流程（命令、扫描、打印、拆图内核） |
 | [docs/用户使用说明.md](docs/用户使用说明.md) | 安装、菜单与常见问题 |
-| [docs/RELEASE_NOTES_v1.15.10.1.md](docs/RELEASE_NOTES_v1.15.10.1.md) | 当前版本发布说明 |
+| [docs/RELEASE_NOTES_v1.15.11.md](docs/RELEASE_NOTES_v1.15.11.md) | 当前版本发布说明 |
 | [docs/tutorial.html](docs/tutorial.html) | 图文教程 |
 
 ## 开发
