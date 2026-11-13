@@ -115,6 +115,7 @@ public static partial class PlotterService
             tr.Commit();
             WaitForPlotIdle();
             ValidatePlotOutput(job.OutputPath);
+            SignatureStampService.Apply(job, settings);
         }
         finally
         {

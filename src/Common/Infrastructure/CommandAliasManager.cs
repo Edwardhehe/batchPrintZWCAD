@@ -27,6 +27,10 @@ internal static class CommandAliasManager
     {
         new AliasableCommand("新增图框", "ZBP_ADD_TITLE_BLOCK"),
         new AliasableCommand("图框库管理", "ZBP_MANAGE_LIBRARY"),
+        new AliasableCommand("三点图签信息库管理", "ZBP_THREE_POINT_LIBRARY"),
+        new AliasableCommand("签章槽位", "ZBP_SIGN_SLOT"),
+        new AliasableCommand("签名库管理", "ZBP_SIGNATURE_LIBRARY"),
+        new AliasableCommand("印章库管理", "ZBP_STAMP_LIBRARY"),
         new AliasableCommand("批量打印(选图框块)", "ZBP_SHOW_PANEL"),
         new AliasableCommand("通用型批量打印", "ZBP_RECTANGLE_BATCH_PLOT"),
         new AliasableCommand("单张打印", "ZBP_SINGLE_PLOT"),

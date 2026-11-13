@@ -164,6 +164,61 @@ internal static class RectangleGeometry
         return result;
     }
 
+    /// <summary>
+    /// 由「UCS 里的第一角点 + WCS 里的对角点」算出矩形的 4 个真实世界坐标角点。
+    /// <para>
+    /// AutoCAD .NET 里 <c>Editor.GetPoint</c> 返回 UCS，而 <c>JigPrompts.AcquirePoint</c>
+    /// 返回 WCS（ARX 文档明确说明，托管 API 文档没写）。早先框选把 jig 采到的 WCS 点
+    /// 当成 UCS 又乘了一次 UCS→WCS，旋转或带原点的 UCS 下框会跑到反方向、尺寸也翻倍。
+    /// </para>
+    /// <para>
+    /// 这里统一在 WCS 里把位移分解到 UCS 的 X/Y 基轴上：保留用户实际拖动的方向
+    /// （从右上往左下拖也不会被 <c>LocalRectangle.FromPoints</c> 翻转成左下→右上），
+    /// 预览红框与最终入库区域都走这个方法，保证同形同位。
+    /// </para>
+    /// </summary>
+    internal static Point3d[] GetUcsDragCorners(
+        Point3d firstUcs, Point3d secondWcs, Matrix3d ucsToWcs)
+    {
+        var firstWcs = firstUcs.TransformBy(ucsToWcs);
+        var axes = ucsToWcs.CoordinateSystem3d;
+        var xAxis = axes.Xaxis.GetNormal();
+        var yAxis = axes.Yaxis.GetNormal();
+
+        var delta = secondWcs - firstWcs;
+        var dx = delta.DotProduct(xAxis);
+        var dy = delta.DotProduct(yAxis);
+
+        return new[]
+        {
+            firstWcs,
+            firstWcs + xAxis * dx,
+            firstWcs + xAxis * dx + yAxis * dy,
+            firstWcs + yAxis * dy
+        };
+    }
+
+    /// <summary><see cref="GetUcsDragCorners"/> 的矩形版本：包围盒 + 真实边长 + 真实四角。</summary>
+    internal static LocalRectangle FromUcsDragCorners(
+        Point3d firstUcs, Point3d secondWcs, Matrix3d ucsToWcs)
+    {
+        var corners = GetUcsDragCorners(firstUcs, secondWcs, ucsToWcs);
+        var result = LocalRectangle.FromPoints(
+            corners.Min(point => point.X), corners.Min(point => point.Y),
+            corners.Max(point => point.X), corners.Max(point => point.Y));
+
+        result.ActualWidth = corners[0].DistanceTo(corners[1]);
+        result.ActualHeight = corners[1].DistanceTo(corners[2]);
+        result.CornerPoints = new[]
+        {
+            corners[0].X, corners[0].Y,
+            corners[1].X, corners[1].Y,
+            corners[2].X, corners[2].Y,
+            corners[3].X, corners[3].Y
+        };
+        return result;
+    }
+
     /// <summary>取矩形实际面积，优先使用真实边长，退化数据才使用轴对齐包围盒。</summary>
     internal static double GetActualArea(LocalRectangle rectangle)
     {

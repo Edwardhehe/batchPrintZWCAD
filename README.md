@@ -1,6 +1,6 @@
 # LA批量打印
 
-一个面向 ZWCAD 和 AutoCAD 的 .NET 批量打印插件。插件可以学习图框块，识别图名、图号、图幅和比例，支持跨文件批量扫描，并输出 PDF、PNG、JPG、DWF 或按图框拆分 DWG。当前版本：v1.15.10.1。
+一个面向 ZWCAD 和 AutoCAD 的 .NET 批量打印插件。插件可以学习图框块，识别图名、图号、图幅和比例，支持跨文件批量扫描，并输出 PDF、PNG、JPG、DWF 或按图框拆分 DWG。当前版本：v1.15.11。
 
 ## 使用教程
 
@@ -248,10 +248,10 @@ dotnet build src\BatchPlotter\BatchPlotter.csproj -c Release
 生成本地发布目录与三组 ZIP：
 
 ```powershell
-.\scripts\package-release.ps1 -Version 1.15.10.1
+.\scripts\package-release.ps1 -Version 1.15.11
 ```
 
-输出位于 `release\v1.15.10.1\`，包含 ZWCAD、AutoCAD 2015–2024、AutoCAD 2025–2027 三组完整安装目录和对应压缩包。
+输出位于 `release\v1.15.11\`，包含 ZWCAD、AutoCAD 2015–2024、AutoCAD 2025–2027 三组完整安装目录和对应压缩包。
 
 ### 双平台同步（默认）
 
@@ -272,7 +272,7 @@ dotnet build src\BatchPlotter\BatchPlotter.csproj -c Release
 一键发版（打包 → 打 tag → 双推 → 两侧创建 Release 并上传 ZIP）：
 
 ```powershell
-.\scripts\publish-release.ps1 -Version 1.15.10.1
+.\scripts\publish-release.ps1 -Version 1.15.11
 ```
 
 Gitee 需本机已保存凭据（私人令牌），或设置环境变量 `GITEE_TOKEN`。`git push origin` 已配置双 `pushurl`，日常推送也会同时到两边。

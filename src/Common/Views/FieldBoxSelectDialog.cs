@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
@@ -26,6 +26,8 @@ public sealed class FieldBoxSelectInitialState
     public string PaperName { get; set; } = "";
     public double PaperWidthMm { get; set; }
     public double PaperHeightMm { get; set; }
+    public List<SignatureSlot> SignatureSlots { get; set; } = new();
+    public List<TitleBlockQrCode> QrCodes { get; set; } = new();
 }
 
 /// <summary>
@@ -69,6 +71,12 @@ public sealed class FieldBoxSelectDialog : Form
     public LocalRectangle Info1Region { get; private set; } = new();
     public LocalRectangle Info2Region { get; private set; } = new();
 
+    /// <summary>签章槽位，由「签章设置」维护；按副本编辑，取消时不会改脏图框库。</summary>
+    public List<SignatureSlot> SignatureSlots { get; private set; } = new();
+
+    /// <summary>二维码位置，由「二维码」按钮维护；同样按副本编辑。</summary>
+    public List<TitleBlockQrCode> QrCodes { get; private set; } = new();
+
     // 纸张设置与矩形框批打共用同一候选识别策略；下拉项直接对应完整纸张结果，
     // 避免名称、物理尺寸和比例被分别修改后彼此不一致。
     private readonly ComboBox _paperName = new();
@@ -103,6 +111,18 @@ public sealed class FieldBoxSelectDialog : Form
         _paperDetectionOptions = paperDetectionOptions;
         ReferenceFrame = referenceFrame;
 
+        // 槽位/二维码按副本编辑：取消对话框时不能把库里的对象改脏。
+        var initialSlots = initialState?.SignatureSlots;
+        var initialCodes = initialState?.QrCodes;
+        SignatureSlots = (initialSlots ?? new List<SignatureSlot>())
+            .Where(slot => slot != null && !string.IsNullOrWhiteSpace(slot.SlotName))
+            .Select(SignatureSlotSetupDialog.CloneSlot)
+            .ToList();
+        QrCodes = (initialCodes ?? new List<TitleBlockQrCode>())
+            .Where(code => code != null)
+            .Select(QrCodeSetupDialog.CloneCode)
+            .ToList();
+
         // 用 4 个局部角点完整变换后取得世界包盒；不能只变换一对对角点，
         // 否则旋转块在窗口重新显示时会把初始红框替换成错误范围。
         var worldFrame = RectangleGeometry.TransformRectangle(referenceFrame, blockTransform);
@@ -111,9 +131,9 @@ public sealed class FieldBoxSelectDialog : Form
             new Point3d(worldFrame.MaxX, worldFrame.MaxY, 0));
 
         Text = "设置图框字段与纸张";
-        UiLayout.ConfigureForm(this, 460, 508, 430, 482);
+        UiLayout.ConfigureForm(this, 540, 508, 500, 482);
         // 套用已有图框（略高以容纳状态提示）+ 打印范围（两行：尺寸+提示）+ 纸张各一行。
-        ClientSize = new Size(UiLayout.Scale(460), UiLayout.Scale(486));
+        ClientSize = new Size(UiLayout.Scale(540), UiLayout.Scale(486));
         FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
         ShowInTaskbar = false;
         // 非模态核对红框时保持可见，不挡 CAD 缩放/平移。
@@ -197,6 +217,7 @@ public sealed class FieldBoxSelectDialog : Form
             initialState?.PaperWidthMm ?? 0d,
             initialState?.PaperHeightMm ?? 0d);
         RefreshLibraryTemplateList();
+        RecalculateSignatureSlots();
 
         // 提示
         var hint = new Label
@@ -252,6 +273,14 @@ public sealed class FieldBoxSelectDialog : Form
         buttons.Controls.Add(ok);
         buttons.Controls.Add(skip);
         buttons.Controls.Add(cancel);
+        var signatureButton = UiLayout.CreateButton("签章设置", 88);
+        signatureButton.Margin = new Padding(UiLayout.Scale(8), 0, 0, 0);
+        signatureButton.Click += (_, _) => OpenSignatureSlotSetup();
+        buttons.Controls.Add(signatureButton);
+        var qrButton = UiLayout.CreateButton("二维码", 88);
+        qrButton.Margin = new Padding(UiLayout.Scale(8), 0, 0, 0);
+        qrButton.Click += (_, _) => OpenQrCodeSetup();
+        buttons.Controls.Add(qrButton);
         table.SetColumnSpan(buttons, 2);
         table.Controls.Add(buttons, 0, 11);
 
@@ -427,7 +456,7 @@ public sealed class FieldBoxSelectDialog : Form
     }
 
     /// <summary>
-    /// 将库条目的字段区域与纸张套用到当前新定义：相对坐标按源 CoordinateMode
+    /// 将库条目的字段区域、纸张、签章槽位与二维码套用到当前新定义：相对坐标按源 CoordinateMode
     /// 还原到<strong>当前</strong> ReferenceFrame 的块局部绝对矩形，并刷新红框。
     /// </summary>
     private void ApplyLibraryTemplate(TitleBlockDefinition template)
@@ -445,6 +474,15 @@ public sealed class FieldBoxSelectDialog : Form
             ApplyConvertedField("设计阶段", template.PhaseRegion, mode, frame, r => PhaseRegion = r, _phaseStatus);
             ApplyConvertedField("信息1", template.Info1Region, mode, frame, r => Info1Region = r, _info1Status);
             ApplyConvertedField("信息2", template.Info2Region, mode, frame, r => Info2Region = r, _info2Status);
+
+            SignatureSlots = (template.SignatureSlots ?? new List<SignatureSlot>())
+                .Where(slot => slot != null && !string.IsNullOrWhiteSpace(slot.SlotName))
+                .Select(SignatureSlotSetupDialog.CloneSlot)
+                .ToList();
+            QrCodes = (template.QrCodes ?? new List<TitleBlockQrCode>())
+                .Where(code => code != null)
+                .Select(QrCodeSetupDialog.CloneCode)
+                .ToList();
 
             EnsureAndSelectPaperFromTemplate(template);
             RefreshAllMarkers();
@@ -604,7 +642,8 @@ public sealed class FieldBoxSelectDialog : Form
             _markers.SetBox(kv.Key, kv.Value.Corner1, kv.Value.Corner2, kv.Key, refresh: false);
         }
 
-        _markers.RefreshDisplay();
+        // 签章/二维码红框一并刷新，避免套用模板或首次显示时只画了字段，旧的二维码框还留在图上。
+        RecalculateSignatureSlots();
     }
 
     /// <summary>
@@ -663,6 +702,7 @@ public sealed class FieldBoxSelectDialog : Form
             // 立即绘制新的外框临时标识
             _markers.SetBox("外框", first.Value, second.Value, null);
             UpdatePrintAreaStatus();
+            RecalculateSignatureSlots();
 
             detectedWidth = Math.Abs(second.Value.X - first.Value.X);
             detectedHeight = Math.Abs(second.Value.Y - first.Value.Y);
@@ -745,6 +785,92 @@ public sealed class FieldBoxSelectDialog : Form
 
     private void SelectInfo2() { if (TryBoxSelect("信息2", out var r)) { Info2Region = r; UpdateStatus(_info2Status, Info2Region); } }
     private void ClearInfo2() { ClearOptionalField("信息2", r => Info2Region = r, _info2Status); }
+
+    /// <summary>
+    /// 打开「设置签章区域」窗口。打印范围与纸张必须先确定，否则算不出图面单位到毫米的比例。
+    /// </summary>
+    private void OpenSignatureSlotSetup()
+    {
+        if (!ReferenceFrame.HasArea() || PaperWidthMm <= 0d || PaperHeightMm <= 0d)
+        {
+            MessageBox.Show(this,
+                "请先确定打印范围与纸张，再设置签章区域。",
+                Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        using var dialog = new SignatureSlotSetupDialog(
+            _editor,
+            _inverseBlockTransform,
+            _blockTransform,
+            _markers,
+            ReferenceFrame,
+            PaperWidthMm,
+            PaperHeightMm,
+            SignatureSlots);
+
+        if (SignatureSlotSetupDialog.ShowOverCad(dialog) == DialogResult.OK)
+        {
+            SignatureSlots = dialog.Slots;
+        }
+
+        BringToFront();
+        Activate();
+        RecalculateSignatureSlots();
+    }
+
+    /// <summary>
+    /// 打开「设置二维码」窗口。与签章设置同样要求先确定打印范围与纸张。
+    /// </summary>
+    private void OpenQrCodeSetup()
+    {
+        if (!ReferenceFrame.HasArea() || PaperWidthMm <= 0d || PaperHeightMm <= 0d)
+        {
+            MessageBox.Show(this,
+                "请先确定打印范围与纸张，再设置二维码。",
+                Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        using var dialog = new QrCodeSetupDialog(
+            _editor,
+            _inverseBlockTransform,
+            _blockTransform,
+            _markers,
+            ReferenceFrame,
+            PaperWidthMm,
+            PaperHeightMm,
+            QrCodes);
+
+        if (QrCodeSetupDialog.ShowOverCad(dialog) == DialogResult.OK)
+        {
+            QrCodes = dialog.Codes;
+        }
+
+        BringToFront();
+        Activate();
+        RecalculateSignatureSlots();
+    }
+
+    /// <summary>
+    /// 打印范围或纸张变动后重算槽位与二维码的毫米偏移，并重画红框。
+    /// </summary>
+    private void RecalculateSignatureSlots()
+    {
+        foreach (var slot in SignatureSlots)
+        {
+            SignatureSlotSetupDialog.ApplyFrameScale(slot, ReferenceFrame, PaperWidthMm, PaperHeightMm);
+        }
+
+        SignatureSlotSetupDialog.DrawSlotMarkers(_markers, SignatureSlots, ReferenceFrame, _blockTransform);
+
+        foreach (var code in QrCodes)
+        {
+            QrCodeSetupDialog.ApplyFrameScale(code, ReferenceFrame, PaperWidthMm, PaperHeightMm);
+        }
+
+        QrCodeSetupDialog.DrawMarkers(_markers, QrCodes, ReferenceFrame, _blockTransform);
+    }
 
     private void ClearOptionalField(string fieldName, Action<LocalRectangle> setRegion, Label statusLabel)
     {
@@ -927,6 +1053,8 @@ public sealed class FieldBoxSelectDialog : Form
             {
                 RefreshLibraryTemplateList();
             }
+
+            RecalculateSignatureSlots();
         };
 
         var panel = new TableLayoutPanel

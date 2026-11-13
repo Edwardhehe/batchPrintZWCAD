@@ -113,6 +113,8 @@ public static class CadMenuInstaller
             // 打印功能菜单项
             AddMenuItem(menu, "新增图框", "ZBP_ADD_TITLE_BLOCK");
             AddMenuItem(menu, "图框库管理", "ZBP_MANAGE_LIBRARY");
+            AddMenuItem(menu, "三点图签信息库管理", "ZBP_THREE_POINT_LIBRARY");
+            AddSignatureStampSubMenu(menu);
             AddMenuItem(menu, "批量打印(选图框块)", "ZBP_SHOW_PANEL");
             AddMenuItem(menu, "通用型批量打印", "ZBP_RECTANGLE_BATCH_PLOT");
             AddMenuItem(menu, "单张打印", "ZBP_SINGLE_PLOT");
@@ -246,6 +248,30 @@ public static class CadMenuInstaller
         catch
         {
         }
+    }
+
+    /// <summary>
+    /// 在「图框库管理」后追加「二维码及签章」子菜单，并把签章/二维码相关命令收进下一级。
+    /// 子菜单创建失败时回退为平铺，避免命令入口丢失。
+    /// </summary>
+    private static void AddSignatureStampSubMenu(object menu)
+    {
+        var subMenu = AddSubMenu(menu, "二维码及签章");
+        var target = subMenu ?? menu;
+        AddMenuItem(target, "签章槽位", "ZBP_SIGN_SLOT");
+        AddMenuItem(target, "签名库管理", "ZBP_SIGNATURE_LIBRARY");
+        AddMenuItem(target, "印章库管理", "ZBP_STAMP_LIBRARY");
+        AddMenuItem(target, "导入签名", "ZBP_SIGN_IMPORT");
+        AddMenuItem(target, "签章列表", "ZBP_SIGN_LIST");
+    }
+
+    /// <summary>
+    /// 向菜单末尾追加一个子菜单，返回新的弹出菜单；宿主不支持或调用失败时返回 null。
+    /// </summary>
+    private static object? AddSubMenu(object menu, string label)
+    {
+        var count = Convert.ToInt32(GetProperty(menu, "Count") ?? 0);
+        return TryInvoke(menu, "AddSubMenu", count, label);
     }
 
     /// <summary>

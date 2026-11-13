@@ -6,10 +6,10 @@
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <PlatformTarget>x64</PlatformTarget>
-    <Version>1.15.10.1</Version>
-    <AssemblyVersion>1.15.10.1</AssemblyVersion>
-    <FileVersion>1.15.10.1</FileVersion>
-    <InformationalVersion>1.15.10.1</InformationalVersion>
+    <Version>1.15.11</Version>
+    <AssemblyVersion>1.15.11</AssemblyVersion>
+    <FileVersion>1.15.11</FileVersion>
+    <InformationalVersion>1.15.11</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <DefineConstants>$(DefineConstants);ZWCAD</DefineConstants>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
@@ -52,6 +52,7 @@
 
   <ItemGroup>
     <PackageReference Include="PDFsharp" Version="1.50.5147" />
+    <PackageReference Include="QRCoder" Version="1.4.3" />
     <PackageReference Include="SharpZipLib" Version="1.3.3" />
     <PackageReference Include="System.Resources.Extensions" Version="7.0.0" />
     <!-- CAD NETLOAD 在宿主 exe 目录搜原生库；运行时会按插件目录 LoadLibrary pdfium.dll。 -->

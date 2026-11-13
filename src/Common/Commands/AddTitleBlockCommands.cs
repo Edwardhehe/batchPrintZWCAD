@@ -252,6 +252,8 @@ public sealed partial class BatchPlotCommands
             string paperName;
             double paperWidthMm;
             double paperHeightMm;
+            List<SignatureSlot> signatureSlots;
+            List<TitleBlockQrCode> qrCodes;
             using (var fieldDialog = new FieldBoxSelectDialog(
                        editor,
                        inverse,
@@ -282,6 +284,8 @@ public sealed partial class BatchPlotCommands
                 paperName = fieldDialog.PaperName;
                 paperWidthMm = fieldDialog.PaperWidthMm;
                 paperHeightMm = fieldDialog.PaperHeightMm;
+                signatureSlots = fieldDialog.SignatureSlots;
+                qrCodes = fieldDialog.QrCodes;
             }
 
             var usesVariableLengthTemplate = isStretchableBlock;
@@ -317,6 +321,8 @@ public sealed partial class BatchPlotCommands
                 // 信息1/信息2是用户自定义可选字段，未框选时保持空区域，后续命名会自动跳过空值。
                 Info1Region = info1Region.HasArea() ? (usesVariableLengthTemplate ? ToFrameRightBottomRelative(info1Region, referenceFrame) : ToFrameRelative(info1Region, referenceFrame)) : new LocalRectangle(),
                 Info2Region = info2Region.HasArea() ? (usesVariableLengthTemplate ? ToFrameRightBottomRelative(info2Region, referenceFrame) : ToFrameRelative(info2Region, referenceFrame)) : new LocalRectangle(),
+                SignatureSlots = signatureSlots,
+                QrCodes = qrCodes,
                 CreatedAt = now,
                 UpdatedAt = now
             };

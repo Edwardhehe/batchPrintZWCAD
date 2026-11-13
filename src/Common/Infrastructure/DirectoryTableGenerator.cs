@@ -69,7 +69,8 @@ public static class DirectoryTableGenerator
             }
         }
 
-        Generate(document, selected, settings, pointResult.Value, breakHeight);
+        // GetPoint 返回 UCS，Table.Position 是 WCS；这里换算后再生成，避免非世界坐标系下点位错开。
+        Generate(document, selected, settings, ToWcs(document.Editor, pointResult.Value), breakHeight);
         if (breakHeight > 1e-6)
         {
             message = $"已生成图纸目录，共 {selected.Count} 行（已按高度 {breakHeight:0.##} 向右分栏，右栏重复表头）。";
@@ -109,9 +110,12 @@ public static class DirectoryTableGenerator
             var textStyleId = EnsureTextStyleId(tr, document.Database, settings.DirectoryTextStyleName, widthFactor);
             var layerName = EnsureLayer(tr, document.Database, settings.DirectoryLayerName);
 
-            // 参考 TAD：创建原生 Table 实体并初始化
-            var tb = new Table { Position = origin };
+            // 参考 TAD：创建原生 Table 实体并初始化。
+            // 先按当前 UCS 对齐轴向，再设插入点，避免改 Normal 时把位置带偏。
+            var tb = new Table();
             tb.SetDatabaseDefaults();
+            AlignTableToUcs(tb, document.Editor);
+            tb.Position = origin;
             tb.Layer = layerName;
 
             if (settings.DirectoryColorIndex > 0 && settings.DirectoryColorIndex <= 256)
@@ -279,6 +283,36 @@ public static class DirectoryTableGenerator
             tr.AddNewlyCreatedDBObject(tb, true);
 
             tr.Commit();
+        }
+    }
+
+    private static Point3d ToWcs(Editor editor, Point3d pointUcs)
+    {
+        return pointUcs.TransformBy(GetUcsToWcs(editor));
+    }
+
+    private static void AlignTableToUcs(Table table, Editor editor)
+    {
+        var ucsToWcs = GetUcsToWcs(editor);
+        if (ucsToWcs.IsEqualTo(Matrix3d.Identity))
+        {
+            return;
+        }
+
+        var axes = ucsToWcs.CoordinateSystem3d;
+        table.Normal = axes.Zaxis;
+        table.Direction = axes.Xaxis;
+    }
+
+    private static Matrix3d GetUcsToWcs(Editor editor)
+    {
+        try
+        {
+            return editor.CurrentUserCoordinateSystem;
+        }
+        catch
+        {
+            return Matrix3d.Identity;
         }
     }
 
@@ -511,18 +545,45 @@ public static class DirectoryTableGenerator
         return key switch
         {
             "Sequence" => (rowIndex + 1).ToString(),
-            "DrawingNumber" => job.DrawingNumber,
-            "Title" => job.Title,
-            "PaperName" => FileNameSanitizer.NormalizeLongPaperFraction(
-                OutputPaperNameResolver.Resolve(job, settings.LongPaperSnapToleranceMm),
-                settings.LongPaperNameFormat),
-            "Date" => job.Date,
-            "Revision" => job.Revision,
-            "Phase" => job.Phase,
-            "Info1" => job.Info1,
-            "Info2" => job.Info2,
+            // 优先用识别结果（图框属性或三点图签的 Cad* 字段），避免清单里仍是序号占位。
+            "DrawingNumber" => FirstNonEmpty(job.CadDrawingNumber, job.DrawingNumber),
+            "Title" => FirstNonEmpty(job.CadTitle, job.Title),
+            "PaperName" => ResolveDirectoryPaperName(job, settings),
+            "Date" => FirstNonEmpty(job.CadDate, job.Date),
+            "Revision" => FirstNonEmpty(job.CadRevision, job.Revision),
+            "Phase" => FirstNonEmpty(job.CadPhase, job.Phase),
+            "Info1" => FirstNonEmpty(job.CadInfo1, job.Info1),
+            "Info2" => FirstNonEmpty(job.CadInfo2, job.Info2),
+            "ProjectName" => job.ProjectName ?? "",
+            "DrawingScale" => job.DrawingScale ?? "",
             _ => ""
         } ?? "";
+    }
+
+    private static string ResolveDirectoryPaperName(PlotJob job, AppSettings settings)
+    {
+        // 三点图签取到的图幅文字优先；否则与图框型一样按识别到的纸张尺寸命名。
+        if (!string.IsNullOrWhiteSpace(job.SheetSize))
+        {
+            return job.SheetSize.Trim();
+        }
+
+        return FileNameSanitizer.NormalizeLongPaperFraction(
+            OutputPaperNameResolver.Resolve(job, settings.LongPaperSnapToleranceMm),
+            settings.LongPaperNameFormat);
+    }
+
+    private static string FirstNonEmpty(params string?[] values)
+    {
+        foreach (var value in values)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value ?? "";
+            }
+        }
+
+        return "";
     }
 
     private static string ToCadDirectoryText(string value)

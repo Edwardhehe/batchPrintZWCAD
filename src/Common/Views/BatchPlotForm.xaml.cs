@@ -87,6 +87,10 @@ public sealed partial class BatchPlotForm : Window
 
         // 首次使用默认为关闭；之后恢复用户上一次操作，避免每次重复勾选。
         _mergePdfCheckBox.IsChecked = _settings.MergePdf;
+        _plotSignatureCheckBox.IsChecked = _settings.PlotSignatureEnabled;
+        _plotStampCheckBox.IsChecked = _settings.PlotStampEnabled;
+        _plotQrCodeCheckBox.IsChecked = _settings.PlotQrCodeEnabled;
+        _plotStampSyncReady = true;
         _leaveMarginCheckBox.IsChecked = _settings.LeavePaperMargin;
         InitMarginCombo(_marginInput, 68, _settings.PaperMarginMm);
         _marginInput.IsEnabled = _leaveMarginCheckBox.IsChecked == true;
@@ -1945,7 +1949,11 @@ public sealed partial class BatchPlotForm : Window
         _settings.TitleBlockBatchSortMode = updated.TitleBlockBatchSortMode;
         _settings.SortOrderHorizontalFirst = updated.SortOrderHorizontalFirst;
         _settings.LastStyleSheet = updated.LastStyleSheet;
+        _settings.PlotSignatureEnabled = updated.PlotSignatureEnabled;
+        _settings.PlotStampEnabled = updated.PlotStampEnabled;
+        _settings.PlotQrCodeEnabled = updated.PlotQrCodeEnabled;
         _mergePdfCheckBox.IsChecked = updated.MergePdf;
+        SyncPlotStampCheckBoxes();
     }
 
     private void ImportLibrary()
@@ -2152,6 +2160,9 @@ public sealed partial class BatchPlotForm : Window
         }
         _styleSettingsButton.IsEnabled = plotOutput && _styleCombo.SelectedIndex >= 0;
         _mergePdfCheckBox.IsEnabled = IsPdfOutput;
+        _plotSignatureCheckBox.IsEnabled = IsPdfOutput;
+        _plotStampCheckBox.IsEnabled = IsPdfOutput;
+        _plotQrCodeCheckBox.IsEnabled = IsPdfOutput;
         // PNG/JPG 先出 PDF 再转图，留白与 PDF 相同；DWG 拆图仍禁用留白。
         _leaveMarginCheckBox.IsEnabled = SupportsLeaveMargin;
         _marginInput.IsEnabled = SupportsLeaveMargin && _leaveMarginCheckBox.IsChecked == true;
@@ -2688,22 +2699,59 @@ public sealed partial class BatchPlotForm : Window
         var mergePdf = _mergePdfCheckBox.IsChecked == true;
         var leaveMargin = _leaveMarginCheckBox.IsChecked == true;
         var marginMm = ReadMarginValue(_marginInput);
+        var plotSignature = _plotSignatureCheckBox.IsChecked == true;
+        var plotStamp = _plotStampCheckBox.IsChecked == true;
+        var plotQr = _plotQrCodeCheckBox.IsChecked == true;
         var changed = !string.Equals(_settings.LastPlotDevice, device, StringComparison.Ordinal)
             || !string.Equals(_settings.LastStyleSheet, styleSheet, StringComparison.Ordinal)
             || _settings.MergePdf != mergePdf
             || _settings.LeavePaperMargin != leaveMargin
-            || !_settings.PaperMarginMm.Equals(marginMm);
+            || !_settings.PaperMarginMm.Equals(marginMm)
+            || _settings.PlotSignatureEnabled != plotSignature
+            || _settings.PlotStampEnabled != plotStamp
+            || _settings.PlotQrCodeEnabled != plotQr;
         _settings.LastPlotDevice = device;
         _settings.LastStyleSheet = styleSheet;
         _settings.MergePdf = mergePdf;
         _settings.LeavePaperMargin = leaveMargin;
         _settings.PaperMarginMm = marginMm;
+        _settings.PlotSignatureEnabled = plotSignature;
+        _settings.PlotStampEnabled = plotStamp;
+        _settings.PlotQrCodeEnabled = plotQr;
         if (onlyIfChanged && !changed)
         {
             return;
         }
 
         AppSettingsStore.TrySave(_settings, out _);
+    }
+
+    private bool _plotStampSyncReady;
+
+    private void SyncPlotStampCheckBoxes()
+    {
+        var ready = _plotStampSyncReady;
+        _plotStampSyncReady = false;
+        try
+        {
+            _plotSignatureCheckBox.IsChecked = _settings.PlotSignatureEnabled;
+            _plotStampCheckBox.IsChecked = _settings.PlotStampEnabled;
+            _plotQrCodeCheckBox.IsChecked = _settings.PlotQrCodeEnabled;
+        }
+        finally
+        {
+            _plotStampSyncReady = ready;
+        }
+    }
+
+    private void PlotStampOption_Changed(object sender, RoutedEventArgs e)
+    {
+        if (!_plotStampSyncReady)
+        {
+            return;
+        }
+
+        SaveCurrentSettings();
     }
 
     // ── UI 事件处理器 ──

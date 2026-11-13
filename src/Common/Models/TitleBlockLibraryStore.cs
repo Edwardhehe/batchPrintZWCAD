@@ -95,6 +95,8 @@ public static class TitleBlockLibraryStore
             existing.PhaseRegion = definition.PhaseRegion;
             existing.Info1Region = definition.Info1Region;
             existing.Info2Region = definition.Info2Region;
+            existing.SignatureSlots = definition.SignatureSlots ?? new List<SignatureSlot>();
+            existing.QrCodes = definition.QrCodes ?? new List<TitleBlockQrCode>();
             existing.UpdatedAt = DateTime.Now;
         }
 
@@ -106,6 +108,9 @@ public static class TitleBlockLibraryStore
     {
         foreach (var definition in library.Blocks)
         {
+            definition.SignatureSlots ??= new List<SignatureSlot>();
+            definition.QrCodes ??= new List<TitleBlockQrCode>();
+
             if (!string.Equals(definition.CoordinateMode, "Local", StringComparison.OrdinalIgnoreCase)
                 || !HasArea(definition.PrintRegion))
             {

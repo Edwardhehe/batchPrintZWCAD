@@ -46,6 +46,26 @@ internal static class CadDialog
         return CadApp.ShowModalWindow(window);
     }
 
+    /// <summary>
+    /// 临时非模态窗（三点图签录入向导用）。不挂顶层 Z 序让路器，
+    /// CAD API 不允许注册非模态窗时退回普通 Show()，保证取点链不中断。
+    /// </summary>
+    public static void ShowModelessTransient(Window window)
+    {
+        AttachTopLevelFocusRestore(window);
+        try
+        {
+            CadApp.ShowModelessWindow(window);
+        }
+        catch (System.Exception)
+        {
+            if (!window.IsVisible)
+            {
+                window.Show();
+            }
+        }
+    }
+
     /// <summary>非模态面板，对应 <c>CadApp.ShowModelessDialog(form)</c>。</summary>
     public static void ShowModeless(Window window)
     {

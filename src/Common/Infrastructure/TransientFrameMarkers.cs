@@ -62,9 +62,37 @@ public sealed class TransientFrameMarkers : IDisposable
     /// <param name="refresh">为 false 时跳过刷屏，便于调用方批量改完后只刷新一次。</param>
     public void SetBox(string key, Point3d corner1, Point3d corner2, string? label, bool refresh = true)
     {
+        var minX = Math.Min(corner1.X, corner2.X);
+        var minY = Math.Min(corner1.Y, corner2.Y);
+        var maxX = Math.Max(corner1.X, corner2.X);
+        var maxY = Math.Max(corner1.Y, corner2.Y);
+        var z = (corner1.Z + corner2.Z) / 2;
+
+        var corners = new[]
+        {
+            new Point3d(minX, minY, z),
+            new Point3d(maxX, minY, z),
+            new Point3d(maxX, maxY, z),
+            new Point3d(minX, maxY, z)
+        };
+        SetBox(key, corners, label, refresh);
+    }
+
+    /// <summary>
+    /// 以任意四边形设置标识（左下 → 右下 → 右上 → 左上）。
+    /// 录入三点图签时 UCS 可能与 WCS 不一致，用户框出的范围在 WCS 里是斜矩形，
+    /// 这时必须按真实四角画，画成轴对齐包围盒会与框选时看到的位置对不上。
+    /// </summary>
+    public void SetBox(string key, IReadOnlyList<Point3d> corners, string? label, bool refresh = true)
+    {
+        if (corners == null || corners.Count < 3)
+        {
+            return;
+        }
+
         Remove(key, refresh: false);
 
-        var entities = BuildBoxEntities(corner1, corner2, label, _database, _labelTextStyleId);
+        var entities = BuildBoxEntities(corners, label, _database, _labelTextStyleId);
         var subSystemId = GetSubSystemId(key);
         var transientManager = TransientManager.CurrentTransientManager;
         foreach (var entity in entities)
@@ -79,6 +107,38 @@ public sealed class TransientFrameMarkers : IDisposable
         {
             RefreshDisplay();
         }
+    }
+
+    /// <summary>
+    /// 同上，但以项目内的 <see cref="LocalRectangle"/>（已转 WCS）给出范围。
+    /// 三点图签录入只保留矩形的 X/Y，标高由调用方按锚点所在平面传入，
+    /// 否则画在 Z=0 上会被抬高/压低的图面挡住。
+    /// 区域带真实角点（旋转 UCS 下框出的斜矩形）时按四角画，否则按 Min/Max 画正框。
+    /// </summary>
+    public void SetBox(string key, LocalRectangle region, string? label, double z, bool refresh = true)
+    {
+        if (region.CornerPoints is { Length: >= 8 } points)
+        {
+            SetBox(
+                key,
+                new[]
+                {
+                    new Point3d(points[0], points[1], z),
+                    new Point3d(points[2], points[3], z),
+                    new Point3d(points[4], points[5], z),
+                    new Point3d(points[6], points[7], z)
+                },
+                label,
+                refresh);
+            return;
+        }
+
+        SetBox(
+            key,
+            new Point3d(region.MinX, region.MinY, z),
+            new Point3d(region.MaxX, region.MaxY, z),
+            label,
+            refresh);
     }
 
     /// <summary>
@@ -106,6 +166,33 @@ public sealed class TransientFrameMarkers : IDisposable
         }
     }
 
+    /// <summary>按前缀删除一组临时标识（签章槽位 / 二维码红框）。</summary>
+    public void RemoveByPrefix(string prefix, bool refresh = true)
+    {
+        if (string.IsNullOrEmpty(prefix))
+        {
+            return;
+        }
+
+        var keys = new List<string>();
+        foreach (var key in _markers.Keys)
+        {
+            if (key.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                keys.Add(key);
+            }
+        }
+
+        foreach (var key in keys)
+        {
+            Remove(key, refresh: false);
+        }
+
+        if (refresh)
+        {
+            RefreshDisplay();
+        }
+    }
     /// <summary>
     /// 刷新 CAD 视图。首次弹出模态窗口时可要求 Regen，确保刚创建的临时红框在窗口接管消息循环后立即显示；
     /// 普通字段更新只做 UpdateScreen，避免每次框选都触发较重的重生成。
@@ -152,26 +239,47 @@ public sealed class TransientFrameMarkers : IDisposable
         return id;
     }
 
-    private static List<Entity> BuildBoxEntities(Point3d corner1, Point3d corner2, string? label, Database? database, ObjectId textStyleId)
+    private static List<Entity> BuildBoxEntities(IReadOnlyList<Point3d> corners, string? label, Database? database, ObjectId textStyleId)
     {
-        var minX = Math.Min(corner1.X, corner2.X);
-        var minY = Math.Min(corner1.Y, corner2.Y);
-        var maxX = Math.Max(corner1.X, corner2.X);
-        var maxY = Math.Max(corner1.Y, corner2.Y);
-        var z = (corner1.Z + corner2.Z) / 2;
+        var minX = double.MaxValue;
+        var minY = double.MaxValue;
+        var maxX = double.MinValue;
+        var maxY = double.MinValue;
+        var z = 0.0;
+        foreach (var corner in corners)
+        {
+            minX = Math.Min(minX, corner.X);
+            minY = Math.Min(minY, corner.Y);
+            maxX = Math.Max(maxX, corner.X);
+            maxY = Math.Max(maxY, corner.Y);
+            z += corner.Z;
+        }
 
-        var rectangle = new Polyline();
-        rectangle.AddVertexAt(0, new Point2d(minX, minY), 0, 0, 0);
-        rectangle.AddVertexAt(1, new Point2d(maxX, minY), 0, 0, 0);
-        rectangle.AddVertexAt(2, new Point2d(maxX, maxY), 0, 0, 0);
-        rectangle.AddVertexAt(3, new Point2d(minX, maxY), 0, 0, 0);
+        z /= Math.Max(1, corners.Count);
+
+        // 2D 多段线的顶点没有 Z，标高由 Elevation 给出：与对角线写在同一个平面上，
+        // 否则 UCS 带 Z 偏移时红框会跑到 Z=0 被图面挡住。
+        var rectangle = new Polyline { Elevation = z };
+        for (var index = 0; index < corners.Count; index++)
+        {
+            rectangle.AddVertexAt(index, new Point2d(corners[index].X, corners[index].Y), 0, 0, 0);
+        }
+
         rectangle.Closed = true;
         rectangle.Color = MarkerColor;
 
-        var diagonal1 = new Line(new Point3d(minX, minY, z), new Point3d(maxX, maxY, z)) { Color = MarkerColor };
-        var diagonal2 = new Line(new Point3d(minX, maxY, z), new Point3d(maxX, minY, z)) { Color = MarkerColor };
+        var entities = new List<Entity> { rectangle };
 
-        var entities = new List<Entity> { rectangle, diagonal1, diagonal2 };
+        // 对角线画在四边形的两组对角之间（斜矩形同样成立，用轴对齐包围盒的对角会在框外）。
+        if (corners.Count >= 4)
+        {
+            entities.Add(new Line(
+                new Point3d(corners[0].X, corners[0].Y, z),
+                new Point3d(corners[2].X, corners[2].Y, z)) { Color = MarkerColor });
+            entities.Add(new Line(
+                new Point3d(corners[1].X, corners[1].Y, z),
+                new Point3d(corners[3].X, corners[3].Y, z)) { Color = MarkerColor });
+        }
 
         if (!string.IsNullOrWhiteSpace(label))
         {
@@ -182,7 +290,9 @@ public sealed class TransientFrameMarkers : IDisposable
             var textHeight = Math.Min(height * 0.35, width / Math.Max(label!.Length, 1));
             if (textHeight > 1e-6)
             {
-                var center = new Point3d((minX + maxX) / 2, (minY + maxY) / 2, z);
+                var centerX = (minX + maxX) / 2;
+                var centerY = (minY + maxY) / 2;
+                var center = new Point3d(centerX, centerY, z);
                 var text = new DBText
                 {
                     TextString = label,

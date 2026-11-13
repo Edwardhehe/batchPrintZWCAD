@@ -107,7 +107,9 @@ public sealed partial class BatchPlotCommands
                 Info2Region = ResolveEditFieldRegion(existing.Info2Region, mode, referenceFrame, inverse),
                 PaperName = existing.PaperName,
                 PaperWidthMm = existing.PaperWidthMm,
-                PaperHeightMm = existing.PaperHeightMm
+                PaperHeightMm = existing.PaperHeightMm,
+                SignatureSlots = existing.SignatureSlots ?? new List<SignatureSlot>(),
+                QrCodes = existing.QrCodes ?? new List<TitleBlockQrCode>()
             };
 
             var placedFrame = RectangleGeometry.TransformRectangle(referenceFrame, match.BlockTransform);
@@ -182,6 +184,8 @@ public sealed partial class BatchPlotCommands
                 PhaseRegion = ToOptionalStoredFrameRelative(dialog.PhaseRegion, referenceFrame, usesVariableLengthTemplate),
                 Info1Region = ToOptionalStoredFrameRelative(dialog.Info1Region, referenceFrame, usesVariableLengthTemplate),
                 Info2Region = ToOptionalStoredFrameRelative(dialog.Info2Region, referenceFrame, usesVariableLengthTemplate),
+                SignatureSlots = dialog.SignatureSlots,
+                QrCodes = dialog.QrCodes,
                 CreatedAt = existing.CreatedAt == default ? now : existing.CreatedAt,
                 UpdatedAt = now
             };

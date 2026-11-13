@@ -202,7 +202,7 @@ public static class AutoloadManager
     {
         var escapedInstallFolderName = SecurityElement.Escape(installFolderName);
         return $@"<?xml version=""1.0"" encoding=""utf-8""?>
-<ApplicationPackage SchemaVersion=""1.0"" AutodeskProduct=""AutoCAD"" Name=""LA批量打印"" AppVersion=""1.15.10"" ProductCode=""{{7f2f2f2d-78d1-4df0-8c5d-acadba7c0011}}"" Description=""AutoCAD批量打印插件"">
+<ApplicationPackage SchemaVersion=""1.0"" AutodeskProduct=""AutoCAD"" Name=""LA批量打印"" AppVersion=""1.15.11"" ProductCode=""{{7f2f2f2d-78d1-4df0-8c5d-acadba7c0011}}"" Description=""AutoCAD批量打印插件"">
   <CompanyDetails Name=""lihao"" />
   <Components>
     <ComponentEntry AppName=""AcadBatchPlot"" AppType="".Net"" ModuleName=""./Contents/{escapedInstallFolderName}/{SecurityElement.Escape(dllName)}"" LoadOnAutoCADStartup=""True"" LoadOnCommandInvocation=""True"">
@@ -213,6 +213,12 @@ public static class AutoloadManager
         <Command Global=""ZBP_SINGLE_PLOT"" Local=""ZBP_SINGLE_PLOT"" />
         <Command Global=""ZBP_ADD_TITLE_BLOCK"" Local=""ZBP_ADD_TITLE_BLOCK"" />
         <Command Global=""ZBP_MANAGE_LIBRARY"" Local=""ZBP_MANAGE_LIBRARY"" />
+        <Command Global=""ZBP_THREE_POINT_LIBRARY"" Local=""ZBP_THREE_POINT_LIBRARY"" />
+        <Command Global=""ZBP_SIGN_SLOT"" Local=""ZBP_SIGN_SLOT"" />
+        <Command Global=""ZBP_SIGNATURE_LIBRARY"" Local=""ZBP_SIGNATURE_LIBRARY"" />
+        <Command Global=""ZBP_STAMP_LIBRARY"" Local=""ZBP_STAMP_LIBRARY"" />
+        <Command Global=""ZBP_SIGN_IMPORT"" Local=""ZBP_SIGN_IMPORT"" />
+        <Command Global=""ZBP_SIGN_LIST"" Local=""ZBP_SIGN_LIST"" />
         <Command Global=""ZBP_SETTINGS"" Local=""ZBP_SETTINGS"" />
         <Command Global=""ZBP_OPEN_CONFIG"" Local=""ZBP_OPEN_CONFIG"" />
         <Command Global=""ZBP_RELOAD_MENU"" Local=""ZBP_RELOAD_MENU"" />
@@ -237,6 +243,14 @@ public static class AutoloadManager
 ID_LA_BATCH_PLOT [LA批量打印]
 ID_ZBP_ADD_TITLE_BLOCK [新增图框]ZBP_ADD_TITLE_BLOCK
 ID_ZBP_MANAGE_LIBRARY [图框库管理]ZBP_MANAGE_LIBRARY
+ID_ZBP_THREE_POINT_LIBRARY [三点图签信息库管理]ZBP_THREE_POINT_LIBRARY
+ID_ZBP_QR_AND_STAMP [->二维码及签章]
+ID_ZBP_SIGN_SLOT [签章槽位]ZBP_SIGN_SLOT
+ID_ZBP_SIGNATURE_LIBRARY [签名库管理]ZBP_SIGNATURE_LIBRARY
+ID_ZBP_STAMP_LIBRARY [印章库管理]ZBP_STAMP_LIBRARY
+ID_ZBP_SIGN_IMPORT [导入签名]ZBP_SIGN_IMPORT
+ID_ZBP_SIGN_LIST [签章列表]ZBP_SIGN_LIST
+[<-]
 ID_ZBP_SHOW_PANEL [批量打印(选图框块)]ZBP_SHOW_PANEL
 ID_ZBP_RECTANGLE_BATCH_PLOT [通用型批量打印]ZBP_RECTANGLE_BATCH_PLOT
 ID_ZBP_SINGLE_PLOT [单张打印]ZBP_SINGLE_PLOT

@@ -178,6 +178,10 @@ public sealed partial class RectangleBatchPlotForm : Window
         _marginInput.IsEnabled = _leaveMargin.IsChecked == true;
         _leaveMargin.IsChecked = _settings.LeavePaperMargin;
         _mergePdf.IsChecked = _settings.MergePdf;
+        _plotSignatureCheckBox.IsChecked = _settings.PlotSignatureEnabled;
+        _plotStampCheckBox.IsChecked = _settings.PlotStampEnabled;
+        _plotQrCodeCheckBox.IsChecked = _settings.PlotQrCodeEnabled;
+        _plotStampSyncReady = true;
         _recognizeByModeCheck.IsChecked = _settings.RecognizeTitleByDominantFrameMode;
         LoadPlotOptions();
         Closing += (_, _) =>
@@ -2861,6 +2865,9 @@ public sealed partial class RectangleBatchPlotForm : Window
         _leaveMargin.IsEnabled = SupportsLeaveMargin;
         _marginInput.IsEnabled = SupportsLeaveMargin && _leaveMargin.IsChecked == true;
         _mergePdf.IsEnabled = IsPdfOutput;
+        _plotSignatureCheckBox.IsEnabled = IsPdfOutput;
+        _plotStampCheckBox.IsEnabled = IsPdfOutput;
+        _plotQrCodeCheckBox.IsEnabled = IsPdfOutput;
         RefreshFileNames();
         SaveCurrentPlotOptions();
         UpdateVisuals();
@@ -2952,18 +2959,27 @@ public sealed partial class RectangleBatchPlotForm : Window
         var leaveMargin = _leaveMargin.IsChecked == true;
         var recognizeByMode = _recognizeByModeCheck.IsChecked == true;
         var marginMm = ReadMarginValue(_marginInput);
+        var plotSignature = _plotSignatureCheckBox.IsChecked == true;
+        var plotStamp = _plotStampCheckBox.IsChecked == true;
+        var plotQr = _plotQrCodeCheckBox.IsChecked == true;
         var changed = !string.Equals(_settings.LastPlotDevice, device, StringComparison.Ordinal)
             || !string.Equals(_settings.LastStyleSheet, styleSheet, StringComparison.Ordinal)
             || _settings.MergePdf != mergePdf
             || _settings.LeavePaperMargin != leaveMargin
             || _settings.RecognizeTitleByDominantFrameMode != recognizeByMode
-            || !_settings.PaperMarginMm.Equals(marginMm);
+            || !_settings.PaperMarginMm.Equals(marginMm)
+            || _settings.PlotSignatureEnabled != plotSignature
+            || _settings.PlotStampEnabled != plotStamp
+            || _settings.PlotQrCodeEnabled != plotQr;
         _settings.LastPlotDevice = device;
         _settings.LastStyleSheet = styleSheet;
         _settings.MergePdf = mergePdf;
         _settings.LeavePaperMargin = leaveMargin;
         _settings.RecognizeTitleByDominantFrameMode = recognizeByMode;
         _settings.PaperMarginMm = marginMm;
+        _settings.PlotSignatureEnabled = plotSignature;
+        _settings.PlotStampEnabled = plotStamp;
+        _settings.PlotQrCodeEnabled = plotQr;
         if (onlyIfChanged && !changed)
         {
             return;
@@ -2972,6 +2988,33 @@ public sealed partial class RectangleBatchPlotForm : Window
         AppSettingsStore.TrySave(_settings, out _);
     }
 
+    private bool _plotStampSyncReady;
+
+    private void SyncPlotStampCheckBoxes()
+    {
+        var ready = _plotStampSyncReady;
+        _plotStampSyncReady = false;
+        try
+        {
+            _plotSignatureCheckBox.IsChecked = _settings.PlotSignatureEnabled;
+            _plotStampCheckBox.IsChecked = _settings.PlotStampEnabled;
+            _plotQrCodeCheckBox.IsChecked = _settings.PlotQrCodeEnabled;
+        }
+        finally
+        {
+            _plotStampSyncReady = ready;
+        }
+    }
+
+    private void PlotStampOption_Changed(object sender, RoutedEventArgs e)
+    {
+        if (!_plotStampSyncReady)
+        {
+            return;
+        }
+
+        SaveCurrentPlotOptions();
+    }
     /// <summary>初始化留白下拉列表，正值=扩大纸张，负值=缩比例，整数1~10配对显示。</summary>
     private static void InitMarginCombo(ComboBox combo, double savedValue)
     {
@@ -3064,6 +3107,8 @@ public sealed partial class RectangleBatchPlotForm : Window
         }
 
         var jobs = _rows.Select(row => row.Job).ToList();
+        // 与图框型一致：生成前套用最新目录设置，避免「目录设置」已保存但窗口里仍是旧列宽/字段。
+        ApplyDirectorySettings(AppSettingsStore.Load());
         var ok = false;
         var message = "";
         CadWindowFocus.HideForCadInput(this);
@@ -3083,6 +3128,28 @@ public sealed partial class RectangleBatchPlotForm : Window
 
     private void DirectorySettings_Click(object sender, RoutedEventArgs e) => ShowSettingsAtTab(2);
 
+    /// <summary>把设置窗已保存的图纸目录参数同步到本窗口，对齐图框型 ReloadSettings。</summary>
+    private void ApplyDirectorySettings(AppSettings updated)
+    {
+        _settings.DirectoryIndexWidth = updated.DirectoryIndexWidth;
+        _settings.DirectoryNumberWidth = updated.DirectoryNumberWidth;
+        _settings.DirectoryTitleWidth = updated.DirectoryTitleWidth;
+        _settings.DirectoryPaperWidth = updated.DirectoryPaperWidth;
+        _settings.DirectoryRemarkWidth = updated.DirectoryRemarkWidth;
+        _settings.DirectoryRowHeight = updated.DirectoryRowHeight;
+        _settings.DirectoryTextHeightRatio = updated.DirectoryTextHeightRatio;
+        _settings.DirectoryTextStyleName = updated.DirectoryTextStyleName;
+        _settings.DirectoryColorIndex = updated.DirectoryColorIndex;
+        _settings.DirectoryTextHeight = updated.DirectoryTextHeight;
+        _settings.DirectoryTextWidthFactor = updated.DirectoryTextWidthFactor;
+        _settings.DirectoryLayerName = updated.DirectoryLayerName;
+        _settings.DirectoryDrawHeader = updated.DirectoryDrawHeader;
+        _settings.DirectoryDrawGridLines = updated.DirectoryDrawGridLines;
+        _settings.DirectoryAskTableBreak = updated.DirectoryAskTableBreak;
+        _settings.DirectoryColumns = updated.DirectoryColumns.Select(x => x.Clone()).ToList();
+        _settings.LongPaperNameFormat = updated.LongPaperNameFormat;
+        _settings.LongPaperSnapToleranceMm = updated.LongPaperSnapToleranceMm;
+    }
     private void ShowSortSettings()
     {
         // 矩形框没有图号/图名业务字段，始终只允许选择图纸位置的排列方向。
@@ -3130,6 +3197,11 @@ public sealed partial class RectangleBatchPlotForm : Window
             _settings.FileNameSequenceDigits = updated.FileNameSequenceDigits;
             _settings.AutoFileNameSequenceDigits = updated.AutoFileNameSequenceDigits;
             _settings.FileNameSequenceStartNumber = updated.FileNameSequenceStartNumber;
+            _settings.PlotSignatureEnabled = updated.PlotSignatureEnabled;
+            _settings.PlotStampEnabled = updated.PlotStampEnabled;
+            _settings.PlotQrCodeEnabled = updated.PlotQrCodeEnabled;
+            SyncPlotStampCheckBoxes();
+            ApplyDirectorySettings(updated);
 
             if (!form.RequestPickDirectoryRowHeight
                 && !form.RequestPickDirectoryTextAppearance

@@ -23,6 +23,17 @@ public sealed class TitleBlockDefinition
     public LocalRectangle PhaseRegion { get; set; } = new();
     public LocalRectangle Info1Region { get; set; } = new();
     public LocalRectangle Info2Region { get; set; } = new();
+
+    /// <summary>
+    /// 签章槽位（PDF 后处理盖章用）：每个槽位记录「纸张右下角 → 槽位」的毫米偏移与默认签名。
+    /// 与字段区域分开存：字段区域用于读文字，槽位用于按纸张物理位置盖图片。
+    /// </summary>
+    public List<SignatureSlot> SignatureSlots { get; set; } = new();
+
+    /// <summary>
+    /// 二维码位置（PDF 后处理贴图用）。与 SignatureSlots 并列：二维码不查签名库、不看有效期。
+    /// </summary>
+    public List<TitleBlockQrCode> QrCodes { get; set; } = new();
     public DateTime CreatedAt { get; set; } = DateTime.Now;
     public DateTime UpdatedAt { get; set; } = DateTime.Now;
 }
@@ -115,6 +126,21 @@ public sealed class PlotJob
     public string SizeText { get; set; } = "";
     public string PaperSizeText { get; set; } = "";
     public string DetectionNote { get; set; } = "";
+    /// <summary>三点图签取到的工程名称（图框库流程不使用）。</summary>
+    public string ProjectName { get; set; } = "";
+    /// <summary>三点图签取到的图签比例文字，例如 1:100。</summary>
+    public string DrawingScale { get; set; } = "";
+    /// <summary>三点图签取到的图幅文字，例如 A1、A3。</summary>
+    public string SheetSize { get; set; } = "";
+    /// <summary>
+    /// 三点图签「直接识别清单里已有的图纸」使用的原始图框 WCS 范围。
+    /// 扫描阶段可能已把 Min/Max 换算成 DCS，这里保留换算前的值。
+    /// </summary>
+    public bool ScanExtentsCaptured { get; set; }
+    public double ScanMinX { get; set; }
+    public double ScanMinY { get; set; }
+    public double ScanMaxX { get; set; }
+    public double ScanMaxY { get; set; }
     public double PaperWidthMm { get; set; }
     public double PaperHeightMm { get; set; }
     public double MinX { get; set; }
@@ -171,6 +197,15 @@ public sealed class PlotJob
     public string StyleSheet { get; set; } = "";
     /// <summary>打印区域 4 个实际 WCS 角点，格式 [x0,y0,x1,y1,x2,y2,x3,y3]。null 时用 Min/Max。</summary>
     public double[]? CornerPoints { get; set; }
+
+    /// <summary>
+    /// 图框内容在 WCS 中的旋转角（0/90/180/270，逆时针为正）。当前扫描器尚未填充，默认为 0。
+    /// 仅供 PdfAutoRotateService 在盖章时判断页面朝向时读取，不会改变现有出图方向。
+    /// </summary>
+    public int ContentRotationDegrees { get; set; }
+
+    /// <summary>图框内容在 WCS 中的原始旋转角（0~360）。当前扫描器尚未填充，默认为 0。</summary>
+    public double ContentRotationDegreesRaw { get; set; }
 }
 
 public enum TitleBlockScanScope

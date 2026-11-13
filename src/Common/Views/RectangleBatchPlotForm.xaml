@@ -2,7 +2,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:ZwcadBatchPlot"
         x:Class="ZwcadBatchPlot.RectangleBatchPlotForm"
-        Title="LA通用型批量打印 V1.15.10"
+        Title="LA通用型批量打印 V1.15.11"
         Width="900" Height="520"
         MinWidth="720" MinHeight="460"
         WindowStartupLocation="CenterScreen"
@@ -91,6 +91,10 @@
                         Style="{StaticResource PluginButtonStyle}" Margin="0,0,3,0"
                         Click="GenerateDrawingDirectory_Click"
                         ToolTip="在当前 CAD 指定基点，生成图纸目录表格。" />
+                <Button x:Name="_threePointRecognizeBtn" Content="三点文字识别图签" MinWidth="128"
+                        Style="{StaticResource PluginButtonStyle}" Margin="0,0,3,0"
+                        Click="ThreePointRecognize_Click"
+                        ToolTip="用三点图签库为清单里已有的图框补图名、图号、比例、图幅等字段；不重新扫描图框。库为空时请先到「三点图签信息库管理」新建。" />
             </StackPanel>
 
             <!-- 输出行：输出目录 / 浏览 / 输出格式 / CTB / 设置 / 开始打印 -->
@@ -158,6 +162,17 @@
                               VerticalContentAlignment="Center" Margin="0,0,2,0" />
                     <TextBlock Text="mm" VerticalAlignment="Center" Margin="2,0,0,0" />
                 </StackPanel>
+                <CheckBox x:Name="_plotSignatureCheckBox" Content="打印签名" VerticalAlignment="Center"
+                          Margin="12,0,8,0"
+                          Checked="PlotStampOption_Changed" Unchecked="PlotStampOption_Changed"
+                          ToolTip="勾选后，出图时在图框「签章设置」里设计人员槽位对应的位置加盖签名图片。只对 PDF 输出生效；图框未配置位置时自动跳过。" />
+                <CheckBox x:Name="_plotStampCheckBox" Content="打印印章" VerticalAlignment="Center"
+                          Margin="0,0,8,0"
+                          Checked="PlotStampOption_Changed" Unchecked="PlotStampOption_Changed"
+                          ToolTip="勾选后，出图时在图框「签章设置」里印章槽位对应的位置加盖印章图片。只对 PDF 输出生效。" />
+                <CheckBox x:Name="_plotQrCodeCheckBox" Content="打印二维码" VerticalAlignment="Center"
+                          Checked="PlotStampOption_Changed" Unchecked="PlotStampOption_Changed"
+                          ToolTip="勾选后，出图时在图框「二维码设置」里框出的位置贴二维码（内容由该位置的模板生成，如 {图号}）。只对 PDF 输出生效；图框未配置位置时自动跳过。" />
             </StackPanel>
         </StackPanel>
 

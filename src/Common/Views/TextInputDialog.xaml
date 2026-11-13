@@ -1,0 +1,38 @@
+<Window x:Class="ZwcadBatchPlot.TextInputDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="输入"
+        Width="420"
+        SizeToContent="Height"
+        ResizeMode="NoResize" ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner"
+        WindowStyle="ToolWindow"
+        FontFamily="Microsoft YaHei UI"
+        FontSize="11"
+        TextOptions.TextFormattingMode="Display"
+        UseLayoutRounding="True"
+        Background="{x:Static SystemColors.ControlBrush}">
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="WpfUi.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Window.Resources>
+
+    <StackPanel Margin="14,12,14,12">
+        <TextBlock x:Name="_prompt" Text="名称：" Margin="0,0,0,6" />
+        <TextBox x:Name="_input" MinHeight="24" Padding="4,2" MaxLength="60"
+                 VerticalContentAlignment="Center"
+                 TextChanged="OnInputTextChanged" />
+        <TextBlock x:Name="_hint" Foreground="DimGray" TextWrapping="Wrap" Margin="0,6,0,0" />
+        <TextBlock x:Name="_errorLabel" Foreground="Firebrick" TextWrapping="Wrap" Margin="0,6,0,0" />
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button Content="确定" Width="78" IsDefault="True"
+                    Style="{StaticResource PluginButtonStyle}" Click="OnOkClick" />
+            <Button Content="取消" Width="78" Margin="8,0,0,0" IsCancel="True"
+                    Style="{StaticResource PluginButtonStyle}" Click="OnCancelClick" />
+        </StackPanel>
+    </StackPanel>
+</Window>

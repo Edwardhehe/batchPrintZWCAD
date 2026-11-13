@@ -1,0 +1,188 @@
+<Window x:Class="ZwcadBatchPlot.StampEditDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:ZwcadBatchPlot"
+        Title="印章"
+        Width="372" SizeToContent="Height"
+        MinWidth="352"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner"
+        FontFamily="Microsoft YaHei UI"
+        FontSize="11"
+        TextOptions.TextFormattingMode="Display"
+        UseLayoutRounding="True"
+        Background="{DynamicResource {x:Static SystemColors.ControlBrushKey}}">
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="WpfUi.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <Style x:Key="FieldLabel" TargetType="TextBlock">
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="Margin" Value="0,0,6,0" />
+            </Style>
+
+            <Style x:Key="HintTextStyle" TargetType="TextBlock">
+                <Setter Property="Foreground" Value="{DynamicResource Plugin.HintBrush}" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="TextWrapping" Value="Wrap" />
+            </Style>
+
+            <Geometry x:Key="GlyphCheckGeometry">M 1.2,6.2 L 4.4,9.4 L 10.2,1.8</Geometry>
+            <Geometry x:Key="GlyphCrossGeometry">M 1.4,1.4 L 9.4,9.4 M 9.4,1.4 L 1.4,9.4</Geometry>
+
+            <!--
+                DatePicker 内部的输入框是 DatePickerTextBox（TextBox 的派生类），
+                取不到 TextBox 的隐式样式，深色主题下会变成黑底深灰字（几乎看不见）。
+                这里单独给它上色。
+            -->
+            <Style TargetType="DatePickerTextBox">
+                <Setter Property="Background" Value="{DynamicResource Plugin.InputBackground}" />
+                <Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}" />
+                <Setter Property="CaretBrush" Value="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}" />
+                <Setter Property="SelectionBrush" Value="{DynamicResource Plugin.HighlightBrush}" />
+                <Setter Property="BorderThickness" Value="0" />
+            </Style>
+        </ResourceDictionary>
+    </Window.Resources>
+
+    <StackPanel Margin="12,10,12,10">
+
+        <!-- 印章图片预览：固定白底，透明 PNG 的红色笔画才看得清。双击可换图。 -->
+        <Border Height="132" Background="White" BorderThickness="1"
+                BorderBrush="{DynamicResource {x:Static SystemColors.ControlDarkBrushKey}}"
+                MouseLeftButtonDown="Preview_MouseLeftButtonDown"
+                ToolTip="双击更换印章图片…">
+            <Grid>
+                <Image x:Name="_preview" Stretch="Uniform" Margin="6" />
+                <TextBlock x:Name="_previewHint" Text="未选择图片" Foreground="#999999"
+                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Grid>
+        </Border>
+
+        <!-- 图片处理入口（去底色 / 修剪空白 / 调整尺寸）：放在预览框外，
+             压在图上会挡住笔画、也给不了按钮足够的对比度。 -->
+        <Button x:Name="_processButton" HorizontalAlignment="Right" Margin="0,4,0,0"
+                Style="{DynamicResource PluginFlatButtonStyle}" Content="图片处理…"
+                ToolTip="去底色、修剪四周空白、调整图片像素尺寸，带实时预览。处理后的图会作为这枚印章的图片保存。" />
+
+        <!-- 印章名 -->
+        <Grid Margin="0,12,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="印章名：" Style="{StaticResource FieldLabel}" />
+            <TextBox Grid.Column="1" x:Name="_nameBox" VerticalContentAlignment="Center"
+                     ToolTip="显示名。图框「签章设置」里选签名时看到的就是这个名字。" />
+        </Grid>
+
+        <!-- 授权码（与原界面一致：输入框内容以圆点遮蔽） -->
+        <Grid Margin="0,8,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="授权码：" Style="{StaticResource FieldLabel}" />
+            <PasswordBox Grid.Column="1" x:Name="_authCodeBox" MaxLength="6"
+                         HorizontalAlignment="Left" MinWidth="96"
+                         Background="{DynamicResource Plugin.InputBackground}"
+                         BorderBrush="{DynamicResource Plugin.InputBorder}"
+                         BorderThickness="1"
+                         Foreground="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"
+                         CaretBrush="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"
+                         Padding="3,2" VerticalContentAlignment="Center"
+                         ToolTip="0～999999 的整数。0 表示无需授权。" />
+        </Grid>
+
+        <TextBlock Grid.ColumnSpan="2" Text="注：授权码范围 0 - 999999" Margin="52,4,0,0" />
+        <TextBlock Text="授权码输入 0 表示无需授权" Margin="52,2,0,0" />
+
+        <!-- 类型 -->
+        <StackPanel Orientation="Horizontal" Margin="52,10,0,0">
+            <RadioButton x:Name="_registerRadio" Content="注册章" GroupName="StampType"
+                         VerticalAlignment="Center" Margin="0,0,26,0" />
+            <RadioButton x:Name="_issueRadio" Content="出图章" GroupName="StampType"
+                         VerticalAlignment="Center" />
+        </StackPanel>
+
+        <Separator Margin="0,10,0,0" />
+
+        <!-- 印章宽度 / 高度：宽度留 0 表示完全按图框格子等比内接；高度留 0 表示由宽度与图片纵横比推出。
+             两个都填时取较小的比例，章体始终不变形。
+             这里的数与「图片处理」里的毫米尺寸是同一个值（都存 ImageProcess.Physical*），
+             在任一处改，另一处和出图都会跟着变。 -->
+        <Grid Margin="0,10,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="印章宽度：" Style="{StaticResource FieldLabel}" />
+            <TextBox Grid.Column="1" x:Name="_widthBox" Width="62" HorizontalAlignment="Left"
+                     VerticalContentAlignment="Center"
+                     ToolTip="实际章体宽度（毫米）。留 0 表示完全按图框「签章设置」里的格子大小等比内接。与「图片处理」里的宽度是同一个值。" />
+            <TextBlock Grid.Column="2" Text="mm" VerticalAlignment="Center" Margin="4,0,0,0" />
+            <TextBlock Grid.Column="3" Text="印章高度：" Style="{StaticResource FieldLabel}"
+                       Margin="12,0,6,0" />
+            <TextBox Grid.Column="4" x:Name="_heightBox" Width="62" HorizontalAlignment="Left"
+                     VerticalContentAlignment="Center"
+                     ToolTip="实际章体高度（毫米）。留 0 表示由宽度与图片纵横比自动推出；与宽度同时填写时取较小的比例，章体不会变形。与「图片处理」里的高度是同一个值。" />
+            <TextBlock Grid.Column="5" Text="mm" VerticalAlignment="Center" Margin="4,0,0,0" />
+        </Grid>
+
+        <!-- 尺寸来源提示：告诉用户这两个数不是独立配置，而是「图片处理」里那份尺寸的另一个入口。 -->
+        <TextBlock x:Name="_sizeHint" Style="{StaticResource HintTextStyle}"
+                   Margin="52,3,0,0" Text="跟随图框槽位等比内接" />
+
+        <!-- 有效期 -->
+        <Grid Margin="0,8,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="有效期：" Style="{StaticResource FieldLabel}" />
+            <DatePicker Grid.Column="1" x:Name="_validToPicker" SelectedDateFormat="Long"
+                        VerticalContentAlignment="Center"
+                        Background="{DynamicResource Plugin.InputBackground}"
+                        BorderBrush="{DynamicResource Plugin.InputBorder}"
+                        Foreground="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"
+                        ToolTip="到期后出图不再盖这枚章。留空（按 Delete 清空）表示长期有效。" />
+        </Grid>
+
+        <!-- 底部按钮：左确定、右取消，与截图相同（扁平无边框 + 绿色图标，各自居中于半宽） -->
+        <Grid Margin="0,14,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <Button Grid.Column="0" x:Name="_okButton" HorizontalAlignment="Center"
+                    Style="{DynamicResource PluginFlatButtonStyle}" IsDefault="True" Padding="4,3">
+                <StackPanel Orientation="Horizontal">
+                    <Path Data="{StaticResource GlyphCheckGeometry}"
+                          Stroke="{DynamicResource PluginGlyphGreenBrush}" StrokeThickness="1.9"
+                          Width="11" Height="11" Stretch="Uniform"
+                          StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" />
+                    <TextBlock Text="确定" Margin="7,0,0,0" VerticalAlignment="Center" />
+                </StackPanel>
+            </Button>
+            <Button Grid.Column="1" x:Name="_cancelButton" HorizontalAlignment="Center"
+                    Style="{DynamicResource PluginFlatButtonStyle}" IsCancel="True" Padding="4,3">
+                <StackPanel Orientation="Horizontal">
+                    <Path Data="{StaticResource GlyphCrossGeometry}"
+                          Stroke="{DynamicResource PluginGlyphGreenBrush}" StrokeThickness="1.9"
+                          Width="11" Height="11" Stretch="Uniform"
+                          StrokeStartLineCap="Round" StrokeEndLineCap="Round" />
+                    <TextBlock Text="取消" Margin="7,0,0,0" VerticalAlignment="Center" />
+                </StackPanel>
+            </Button>
+        </Grid>
+    </StackPanel>
+</Window>

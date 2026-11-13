@@ -87,6 +87,21 @@ public sealed class AppSettings
     public bool KeepIndividualPdfsWhenMerging { get; set; }
 
     /// <summary>
+    /// 打印面板「打印签名」复选框：本次出图是否盖手写签名类槽位。默认勾选。
+    /// </summary>
+    public bool PlotSignatureEnabled { get; set; } = true;
+
+    /// <summary>
+    /// 打印面板「打印印章」复选框：本次出图是否盖印章类槽位。默认勾选。
+    /// </summary>
+    public bool PlotStampEnabled { get; set; } = true;
+
+    /// <summary>
+    /// 打印面板「打印二维码」复选框：本次出图是否按图框配置的二维码位置贴码。默认关闭。
+    /// </summary>
+    public bool PlotQrCodeEnabled { get; set; }
+
+    /// <summary>
     /// 插件是否允许生成日志文件。默认关闭；统一控制打印、拆图、扫描警告和图框录入诊断日志。
     /// </summary>
     public bool GeneratePrintLog { get; set; }
@@ -546,7 +561,9 @@ private static List<double> NormalizeCustomScales(List<double>? scales, List<dou
             new() { Key = "Date", Header = "日期", Enabled = false, Centered = true, Width = 2000 },
             new() { Key = "Phase", Header = "设计阶段", Enabled = false, Centered = true, Width = 2400 },
             new() { Key = "Info1", Header = "信息1", Enabled = false, Centered = true, Width = 2000 },
-            new() { Key = "Info2", Header = "信息2", Enabled = false, Centered = true, Width = 2000 }
+            new() { Key = "Info2", Header = "信息2", Enabled = false, Centered = true, Width = 2000 },
+            new() { Key = "ProjectName", Header = "工程名称", Enabled = false, Centered = true, Width = 4000 },
+            new() { Key = "DrawingScale", Header = "比例", Enabled = false, Centered = true, Width = 2000 }
         };
     }
 

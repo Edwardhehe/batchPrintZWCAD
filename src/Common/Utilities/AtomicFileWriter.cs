@@ -21,6 +21,71 @@ public static class AtomicFileWriter
     /// <summary>仅供单元测试替换 File.Replace，以确定性地模拟“重试窗口内始终被占用”。</summary>
     internal static Action<string, string, string>? ReplaceOverrideForTests { get; set; }
 
+    /// <summary>把已写好的临时文件原子替换到目标路径（用于 PDF 等二进制文件）。</summary>
+    public static void ReplaceFile(string temporaryPath, string destinationPath)
+    {
+        if (string.IsNullOrWhiteSpace(temporaryPath) || string.IsNullOrWhiteSpace(destinationPath))
+        {
+            throw new ArgumentException("文件路径不能为空。");
+        }
+
+        if (!File.Exists(temporaryPath))
+        {
+            throw new FileNotFoundException("临时文件不存在。", temporaryPath);
+        }
+
+        var fullPath = Path.GetFullPath(destinationPath);
+        var directory = Path.GetDirectoryName(fullPath)
+            ?? throw new ArgumentException("文件路径无效: " + destinationPath, nameof(destinationPath));
+        Directory.CreateDirectory(directory);
+        var backupPath = fullPath + ".bak";
+        var tempPath = Path.GetFullPath(temporaryPath);
+        for (var attempt = 0; attempt <= RetryDelaysMs.Length; attempt++)
+        {
+            if (attempt > 0)
+            {
+                Thread.Sleep(RetryDelaysMs[attempt - 1]);
+            }
+
+            try
+            {
+                if (File.Exists(fullPath))
+                {
+                    Replace(tempPath, fullPath, backupPath);
+                }
+                else
+                {
+                    File.Move(tempPath, fullPath);
+                }
+
+                return;
+            }
+            catch (Exception ex) when (IsRetryable(ex, tempPath))
+            {
+            }
+        }
+
+        try
+        {
+            if (File.Exists(fullPath))
+            {
+                File.Copy(fullPath, backupPath, true);
+            }
+        }
+        catch
+        {
+        }
+
+        File.Copy(tempPath, fullPath, true);
+        try
+        {
+            File.Delete(tempPath);
+        }
+        catch
+        {
+        }
+    }
+
     public static void Write(string path, string contents, Encoding? encoding = null)
     {
         if (string.IsNullOrWhiteSpace(path))

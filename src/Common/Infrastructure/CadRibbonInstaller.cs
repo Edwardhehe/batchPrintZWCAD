@@ -135,7 +135,8 @@ public static class CadRibbonInstaller
     {
         ("图框管理", new[]
         {
-            new[] { ("新增图框", "ZBP_ADD_TITLE_BLOCK"), ("图框库管理", "ZBP_MANAGE_LIBRARY") },
+            new[] { ("新增图框", "ZBP_ADD_TITLE_BLOCK"), ("图框库管理", "ZBP_MANAGE_LIBRARY"), ("签章槽位", "ZBP_SIGN_SLOT") },
+            new[] { ("签名库管理", "ZBP_SIGNATURE_LIBRARY"), ("印章库管理", "ZBP_STAMP_LIBRARY"), ("导入签名", "ZBP_SIGN_IMPORT") },
         }),
         ("批量打印", new[]
         {
