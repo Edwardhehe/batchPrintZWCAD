@@ -13,10 +13,13 @@
 | CAD 平台 | 适用版本 | 加载 DLL |
 | --- | --- | --- |
 | 中望 CAD | ZWCAD Enterprise x64 | `BatchPlotter.dll` |
+| 中望 CAD | ZWCAD 2024 x64 | `BatchPlotter2024.dll` |
 | AutoCAD | AutoCAD 2015 ~ 2024 x64 | `AcadBatchPlot.dll` |
 | AutoCAD | AutoCAD 2025 ~ 2027 x64 | `AcadBatchPlot.Core.dll` |
 
 AutoCAD 2015 ~ 2024 全系列共用同一个 `AcadBatchPlot.dll`，使用 .NET Framework 4.8 + AutoCAD.NET 20.0 SDK（2015）编译。AutoCAD 2025 ~ 2027 全系列共用同一个 `AcadBatchPlot.Core.dll`，使用 .NET 8 + AutoCAD.NET.Core 25.0。代码主体复用，仅项目文件和 CAD API 引用不同。
+
+中望 CAD 2024 的 .NET API（24.0）比 2025（25.0）少 `PlotSettings.PlotTransparency` 和 `SpatialFilter.Inverted`，因此 2024 单独用 `BatchPlotter2024.dll`：它与 `BatchPlotter.dll` 共用同一套源码，只是编译期引用 `ZWCad.Net.2024`，缺失的两个成员走反射兼容。
 
 ## 主要功能
 
@@ -204,11 +207,14 @@ AutoCAD 2025 ~ 2027 如果菜单栏未显示，可以执行 `ZBP_SHOW_PANEL` 打
 
 中望 CAD 项目目标框架为 `.NET Framework 4.8`，通过 NuGet 包 `ZWCad.Net.2025` 引用中望 CAD 的 .NET API。该包以 `ExcludeAssets="runtime"` 引入——只在编译期使用，运行时由 ZWCAD 宿主提供，因此 `ZwManaged.dll` / `ZwDatabaseMgd.dll` 不会被复制到输出目录。
 
+ZWCAD 2024 版本项目用同样方式引用 `ZWCad.Net.2024`，与 2025 项目共用 `src\Common` 和 `src\ZWCAD` 源码，额外定义 `ZWCAD2024` 编译符号来兼容 24.0 API 缺少的两个成员。
+
 这样无需在本机安装中望 CAD 即可编译，也不再有硬编码的安装路径。
 
 主要依赖：
 
 - `ZWCad.Net.2025`（NuGet，仅 ZWCAD 项目）
+- `ZWCad.Net.2024`（NuGet，仅 ZWCAD 2024 项目）
 - `AutoCAD.NET` / `AutoCAD.NET.Core`（NuGet，仅 AutoCAD 项目）
 - `Newtonsoft.Json`、`PDFsharp`、`SharpZipLib`（NuGet）
 
@@ -216,7 +222,7 @@ AutoCAD 2025 ~ 2027 如果菜单栏未显示，可以执行 `ZBP_SHOW_PANEL` 打
 
 PDF 合并使用 PDFsharp（`PdfDocumentService`），避免把 x86 PDF 阅读组件加载进中望 CAD x64 进程。
 
-解决方案为 `LA.BatchPlot.sln`，包含四个项目，可直接用 Visual Studio 打开，或在命令行一次编译全部平台：
+解决方案为 `LA.BatchPlot.sln`，包含五个项目，可直接用 Visual Studio 打开，或在命令行一次编译全部平台：
 
 ```powershell
 dotnet build LA.BatchPlot.sln -c Release
@@ -227,6 +233,7 @@ dotnet build LA.BatchPlot.sln -c Release
 | 项目文件 | 平台 | 输出目录 | 目标 DLL |
 | --- | --- | --- | --- |
 | `src/BatchPlotter/BatchPlotter.csproj` | ZWCAD (net48) | `bin\` | `BatchPlotter.dll` |
+| `src/BatchPlotter2024/BatchPlotter2024.csproj` | ZWCAD 2024 (net48) | `bin-zwcad2024\` | `BatchPlotter2024.dll` |
 | `src/AcadBatchPlot/AcadBatchPlot.csproj` | AutoCAD 2015–2024 (net48) | `bin-acad\` | `AcadBatchPlot.dll` |
 | `src/AcadBatchPlot.Core/AcadBatchPlot.Core.csproj` | AutoCAD 2025–2027 (net8.0-windows) | `bin-acad2025-2027\` | `AcadBatchPlot.Core.dll` |
 | `src/PianNoCN/PianNoCN.csproj` | 通用解析库 | （随各平台输出） | `PianNoCN.dll` |

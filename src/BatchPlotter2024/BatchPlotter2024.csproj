@@ -1,0 +1,72 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <UseWpf>true</UseWpf>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <PlatformTarget>x64</PlatformTarget>
+    <Version>1.15.11</Version>
+    <AssemblyVersion>1.15.11</AssemblyVersion>
+    <FileVersion>1.15.11</FileVersion>
+    <InformationalVersion>1.15.11</InformationalVersion>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <DefineConstants>$(DefineConstants);ZWCAD;ZWCAD2024</DefineConstants>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <OutputPath>$(RepoRoot)bin-zwcad2024\</OutputPath>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <GenerateResourceUsePreserializedResources>true</GenerateResourceUsePreserializedResources>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <DocnetRuntime>win-x64</DocnetRuntime>
+    <EnableDefaultPageItems>false</EnableDefaultPageItems>
+  </PropertyGroup>
+
+  <!-- 与 BatchPlotter 共用 Common / ZWCAD 源码，只把编译期 CAD API 换成 24.0（ZWCAD 2024） -->
+  <ItemGroup>
+    <Compile Include="..\Common\**\*.cs" />
+    <Compile Include="..\ZWCAD\**\*.cs" />
+    <Page Include="..\Common\**\*.xaml">
+      <Link>Common\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+    <None Remove="..\Common\**\*" />
+    <None Remove="..\ZWCAD\**\*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\PianNoCN\PianNoCN.csproj" />
+  </ItemGroup>
+
+  <!-- 中望 CAD 2024 .NET API：编译期引用，运行时由 ZWCAD 2024 宿主提供 -->
+  <ItemGroup>
+    <PackageReference Include="ZWCad.Net.2024" Version="1.0.0" ExcludeAssets="runtime" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="PDFsharp" Version="1.50.5147" />
+    <PackageReference Include="QRCoder" Version="1.4.3" />
+    <PackageReference Include="SharpZipLib" Version="1.3.3" />
+    <PackageReference Include="System.Resources.Extensions" Version="7.0.0" />
+    <PackageReference Include="Docnet.Core" Version="2.6.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="$(RepoRoot)resources\zwcad\Plotters\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>Plotters\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    </None>
+  </ItemGroup>
+
+  <Target Name="CopyPdfiumForCadHost" AfterTargets="Build">
+    <PropertyGroup>
+      <_PdfiumSrc>$(NuGetPackageRoot)docnet.core\2.6.0\runtimes\win-x64\native\pdfium.dll</_PdfiumSrc>
+    </PropertyGroup>
+    <Copy SourceFiles="$(_PdfiumSrc)" DestinationFiles="$(OutputPath)pdfium.dll" SkipUnchangedFiles="true" Condition="Exists('$(_PdfiumSrc)')" />
+  </Target>
+</Project>

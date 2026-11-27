@@ -1179,8 +1179,8 @@ internal static class DwgSplitGeometry
                 return XclipReadResult.None;
             }
 
-#if AUTOCAD && !ACAD_CORE
-            // 2015 编译基线未暴露 Inverted；新版宿主运行时可通过反射读取。
+#if (AUTOCAD && !ACAD_CORE) || ZWCAD2024
+            // 2015 编译基线与 ZWCAD 2024 未暴露 Inverted；新版宿主运行时可通过反射读取。
             inverted = filter.GetType().GetProperty("Inverted")?.GetValue(filter) is true;
 #else
             inverted = filter.Inverted;

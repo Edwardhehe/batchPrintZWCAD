@@ -1,5 +1,5 @@
-﻿param(
-    [ValidateSet("Zwcad", "AutoCAD", "AutoCAD2025", "All")]
+param(
+    [ValidateSet("Zwcad", "Zwcad2024", "AutoCAD", "AutoCAD2025", "All")]
     [string]$Target = "Zwcad",
 
     [ValidateSet("Debug", "Release")]
@@ -18,6 +18,11 @@ $projects = [ordered]@{
         Project = "src\BatchPlotter\BatchPlotter.csproj"
         Output = "bin"
         Dll = "BatchPlotter.dll"
+    }
+    Zwcad2024 = @{
+        Project = "src\BatchPlotter2024\BatchPlotter2024.csproj"
+        Output = "bin-zwcad2024"
+        Dll = "BatchPlotter2024.dll"
     }
     AutoCAD = @{
         Project = "src\AcadBatchPlot\AcadBatchPlot.csproj"
