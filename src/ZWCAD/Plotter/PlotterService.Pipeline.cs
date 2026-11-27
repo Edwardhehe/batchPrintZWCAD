@@ -94,7 +94,12 @@ public static partial class PlotterService
                 TryApplyHiddenFrameWindow(validator, plotSettings, plotWindow, job);
             }
 
+#if ZWCAD2024
+            // ZWCAD 2024 的 API 还没有 PlotTransparency；反射写入，缺失时保持默认值。
+            plotSettings.GetType().GetProperty("PlotTransparency")?.SetValue(plotSettings, settings.PlotTransparency);
+#else
             plotSettings.PlotTransparency = settings.PlotTransparency;
+#endif
             // CopyFrom(layout) 会带入布局原开关；按常规设置强制覆盖 PlotPlotStyles / PrintLineweights。
             ObjectLineweightPlotStyle.ApplyFlags(plotSettings, styleChoice);
 
@@ -288,7 +293,12 @@ public static partial class PlotterService
                 TryApplyHiddenFrameWindow(validator, plotSettings, plotWindow, job);
             }
 
+#if ZWCAD2024
+            // 同上：单张打印路径也按能力写入，兼容没有该属性的 ZWCAD 2024。
+            plotSettings.GetType().GetProperty("PlotTransparency")?.SetValue(plotSettings, singleSettings.PlotTransparency);
+#else
             plotSettings.PlotTransparency = singleSettings.PlotTransparency;
+#endif
             // CopyFrom(layout) 会带入布局原开关；按常规设置强制覆盖 PlotPlotStyles / PrintLineweights。
             ObjectLineweightPlotStyle.ApplyFlags(plotSettings, styleChoice);
 
